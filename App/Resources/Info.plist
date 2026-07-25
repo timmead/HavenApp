@@ -19,6 +19,7 @@
     <string>UIInterfaceOrientationPortrait</string>
   </array>
   <key>NSAppTransportSecurity</key><dict>
+    <key>NSAllowsArbitraryLoads</key><true/>
     <key>NSAllowsLocalNetworking</key><true/>
   </dict>
   <key>NSLocalNetworkUsageDescription</key><string>Haven connects to your Home Assistant server on your local network.</string>
