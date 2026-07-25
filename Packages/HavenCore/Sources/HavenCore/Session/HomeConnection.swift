@@ -12,7 +12,7 @@ public struct HAConfig: Sendable {
 }
 
 public actor HomeConnection {
-    private let client: HAWebSocketClient
+    let client: HAWebSocketClient
     public init(client: HAWebSocketClient) { self.client = client }
 
     private func decodeList<T: Decodable>(_ v: JSONValue, as: T.Type) throws -> [T] {
