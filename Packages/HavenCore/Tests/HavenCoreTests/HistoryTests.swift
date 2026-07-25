@@ -23,3 +23,47 @@ import Foundation
     #expect(s.points.count == 2)   // non-numeric "nan" dropped
     #expect(s.points.first?.value == 124)
 }
+
+@Test func statisticsConvertsMillisecondsAndCarriesMinMax() {
+    let json = #"{"sensor.p":[{"start":1751328000000,"mean":100.0,"min":10.0,"max":300.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.first?.time == Date(timeIntervalSince1970: 1751328000))
+    #expect(s.min == 10.0)
+    #expect(s.max == 300.0)
+}
+
+@Test func rawHistoryUsesSecondsEpoch() {
+    let json = #"{"sensor.p":[{"s":"124","lu":1751328000.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromHistory(v, entityId: "sensor.p")
+    #expect(s.points.first?.time == Date(timeIntervalSince1970: 1751328000))
+}
+
+@Test func rawHistoryDropsNonFiniteAndNonNumericStates() {
+    let json = #"{"sensor.p":[{"s":"inf","lu":1.0},{"s":"unavailable","lu":2.0},{"s":"unknown","lu":3.0},{"s":"","lu":4.0},{"s":"7","lu":5.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromHistory(v, entityId: "sensor.p")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.value == 7)
+}
+
+@Test func statisticsWithNoPlottableRowsYieldsEmptySeriesWithNoMinMax() {
+    // sum-only rows: no mean and no state -> nothing plottable, so min/max must stay nil
+    let json = #"{"sensor.p":[{"start":1751328000000,"sum":9.0,"min":1.0,"max":2.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.isEmpty)
+    #expect(s.min == nil)
+    #expect(s.max == nil)
+}
+
+@Test func malformedPayloadsDegradeToEmptySeries() {
+    func series(_ raw: String) -> HistorySeries {
+        let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(raw.utf8))
+        return HistoryParsing.fromHistory(v, entityId: "sensor.p")
+    }
+    #expect(series("{}").points.isEmpty)
+    #expect(series(#"{"sensor.p":null}"#).points.isEmpty)
+    #expect(series(#"{"other.entity":[{"s":"1","lu":1.0}]}"#).points.isEmpty)
+}

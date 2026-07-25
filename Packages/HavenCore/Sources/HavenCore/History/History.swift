@@ -56,11 +56,21 @@ public struct HistorySeries: Sendable, Equatable {
     /// `min`/`max`/`avg` default to being derived from `points`, but callers (e.g. the
     /// statistics parser) may supply series-level values sourced directly from the
     /// payload, which take precedence over the per-point derivation.
+    ///
+    /// Invariant: an empty series always has `min == nil` and `max == nil`, regardless
+    /// of what overrides are passed in — non-nil min/max implies plottable data exists,
+    /// which chart-rendering code relies on for axis ranges.
     public init(points: [HistoryPoint], min: Double? = nil, max: Double? = nil, avg: Double? = nil) {
         self.points = points
+        guard !points.isEmpty else {
+            self.min = nil
+            self.max = nil
+            self.avg = nil
+            return
+        }
         self.min = min ?? points.map(\.value).min()
         self.max = max ?? points.map(\.value).max()
-        self.avg = avg ?? (points.isEmpty ? nil : points.map(\.value).reduce(0, +) / Double(points.count))
+        self.avg = avg ?? points.map(\.value).reduce(0, +) / Double(points.count)
     }
 }
 
