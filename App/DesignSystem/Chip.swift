@@ -10,6 +10,6 @@ struct HavenChip: View {
             Text(text).font(.system(size: 12.5, weight: .bold))
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(Capsule().fill(.white.opacity(0.6)))
+        .background(Capsule().fill(HavenColor.glassFill))
     }
 }

@@ -18,6 +18,6 @@ struct HavenSegmented<T: Hashable>: View {
             }
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.5)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(HavenColor.glassFill))
     }
 }

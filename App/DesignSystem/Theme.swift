@@ -12,6 +12,8 @@ enum HavenColor {
         case .sensor, .binarySensor, .unknown, .switchOutlet: return Color(red: 0.18, green: 0.44, blue: 0.84)
         }
     }
-    static let glassFill = Color.white.opacity(0.55)
-    static let glassStroke = Color.white.opacity(0.85)
+    /// Subtle translucent fill for glass surfaces — adapts to light/dark.
+    static let glassFill = Color.primary.opacity(0.06)
+    /// Hairline edge for glass surfaces — adapts to light/dark.
+    static let glassStroke = Color.primary.opacity(0.12)
 }
