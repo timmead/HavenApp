@@ -54,3 +54,12 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil) -> En
     #expect(allEntities.contains("light.ghost"))
     #expect(home.floors.contains { $0.name == "Home" && $0.areas.contains { $0.id == "a" } })
 }
+
+@Test func areaCarriesClimateEntities() {
+    let areas = [AreaRegistryEntry(areaId: "a", name: "Kitchen", floorId: nil, icon: nil,
+                                   temperatureEntityId: "sensor.kt", humidityEntityId: "sensor.kh")]
+    let home = RegistryResolver.resolve(floors: [], areas: areas, devices: [], entities: [])
+    let area = home.floors.flatMap(\.areas).first { $0.id == "a" }
+    #expect(area?.temperatureEntityId == "sensor.kt")
+    #expect(area?.humidityEntityId == "sensor.kh")
+}

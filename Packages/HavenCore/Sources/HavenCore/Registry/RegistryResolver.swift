@@ -16,7 +16,8 @@ public enum RegistryResolver {
         }
 
         var areaModels = areas.map {
-            ResolvedArea(id: $0.areaId, name: $0.name, entityIds: (entitiesByArea[$0.areaId] ?? []).sorted())
+            ResolvedArea(id: $0.areaId, name: $0.name, entityIds: (entitiesByArea[$0.areaId] ?? []).sorted(),
+                         temperatureEntityId: $0.temperatureEntityId, humidityEntityId: $0.humidityEntityId)
         }
         if let orphans = entitiesByArea[unassignedAreaId], !orphans.isEmpty {
             areaModels.append(ResolvedArea(id: unassignedAreaId, name: "Unassigned", entityIds: orphans.sorted()))

@@ -10,7 +10,10 @@ public struct ResolvedFloor: Sendable, Equatable, Identifiable {
 }
 public struct ResolvedArea: Sendable, Equatable, Identifiable {
     public let id: String; public let name: String; public var entityIds: [String]
-    public init(id: String, name: String, entityIds: [String]) {
+    public let temperatureEntityId: String?; public let humidityEntityId: String?
+    public init(id: String, name: String, entityIds: [String],
+                temperatureEntityId: String? = nil, humidityEntityId: String? = nil) {
         self.id = id; self.name = name; self.entityIds = entityIds
+        self.temperatureEntityId = temperatureEntityId; self.humidityEntityId = humidityEntityId
     }
 }
