@@ -57,7 +57,7 @@ final class AppModel {
         while true {
             do {
                 print("Haven: WS connecting to \(wsURL.absoluteString) (attempt \(attempt + 1))")
-                let conn = URLSessionWebSocketConnection(url: wsURL)
+                let conn = NWWebSocketConnection(url: wsURL)
                 let client = HAWebSocketClient(connection: conn)
                 try await client.authenticate(token: token)
                 print("Haven: WS auth_ok")
