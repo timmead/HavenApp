@@ -8,8 +8,10 @@ struct RoomSectionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(area.name).font(.headline)
             LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(area.entityIds.filter { $0.hasPrefix("light.") }, id: \.self) { id in
-                    LightTileView(entityId: id).gridCellColumns(1)
+                // Temporary bridge: route every entity through the new renderer
+                // dispatch so it's reachable at runtime. Task 22 rewrites this view.
+                ForEach(area.entityIds, id: \.self) { id in
+                    DeviceTileView(entityId: id).gridCellColumns(1)
                 }
             }
         }
