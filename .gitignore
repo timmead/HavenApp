@@ -1,0 +1,18 @@
+# Reverse-engineering artifacts (large binaries + decompiled third-party code — do not commit)
+domika_analysis/
+
+# macOS
+.DS_Store
+
+# Xcode / Swift (for when the app project lands)
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+.build/
+*.xcworkspace/xcuserdata/
+Package.resolved
+
+# Editor
+.idea/
+*.swp
