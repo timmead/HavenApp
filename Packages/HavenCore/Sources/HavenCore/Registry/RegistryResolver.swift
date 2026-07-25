@@ -24,9 +24,11 @@ public enum RegistryResolver {
 
         // area_id -> floor_id, plus synthetic floor for nil
         let areaFloor = Dictionary(uniqueKeysWithValues: areas.map { ($0.areaId, $0.floorId) })
+        let knownFloorIds = Set(floors.map { $0.floorId })
         var areasByFloor: [String: [ResolvedArea]] = [:]
         for a in areaModels {
-            let fid = (a.id == unassignedAreaId ? nil : areaFloor[a.id] ?? nil) ?? noFloorId
+            let rawFloor = a.id == unassignedAreaId ? nil : (areaFloor[a.id] ?? nil)
+            let fid = (rawFloor.flatMap { knownFloorIds.contains($0) ? $0 : nil }) ?? noFloorId
             areasByFloor[fid, default: []].append(a)
         }
 

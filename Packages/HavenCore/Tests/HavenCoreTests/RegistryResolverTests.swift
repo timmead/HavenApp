@@ -42,3 +42,15 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil) -> En
     #expect(home.floors.count == 1)
     #expect(home.floors.first?.name == "Home")
 }
+
+@Test func areaWithUnknownFloorFoldsIntoHome() {
+    let floors = [FloorRegistryEntry(floorId: "real", name: "Real Floor", level: 0, icon: nil)]
+    let areas = [AreaRegistryEntry(areaId: "a", name: "Ghost Room", floorId: "ghost", icon: nil,
+                                   temperatureEntityId: nil, humidityEntityId: nil)]
+    let entities = [EntityRegistryEntry(entityId: "light.ghost", areaId: "a", deviceId: nil, name: nil)]
+    let home = RegistryResolver.resolve(floors: floors, areas: areas, devices: [], entities: entities)
+    // The ghost-floor area must NOT vanish; it should appear under the synthetic "Home" floor.
+    let allEntities = home.floors.flatMap(\.areas).flatMap(\.entityIds)
+    #expect(allEntities.contains("light.ghost"))
+    #expect(home.floors.contains { $0.name == "Home" && $0.areas.contains { $0.id == "a" } })
+}
