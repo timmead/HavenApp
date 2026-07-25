@@ -5,6 +5,7 @@ public actor HAWebSocketClient {
     private var nextId = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var receiveLoop: Task<Void, Never>?
+    private var heartbeat: Task<Void, Never>?
     private var eventContinuation: AsyncStream<ServerFrame>.Continuation?
     public let events: AsyncStream<ServerFrame>
 
@@ -61,7 +62,10 @@ public actor HAWebSocketClient {
             guard let cont = pending.removeValue(forKey: id) else { return }
             if success { cont.resume(returning: result ?? .null) }
             else { cont.resume(throwing: error ?? WSError(code: "unknown", message: "failed")) }
-        case .event, .pong:
+        case .pong(let id):
+            if let cont = pending.removeValue(forKey: id) { cont.resume(returning: .null) }
+            eventContinuation?.yield(frame)
+        case .event:
             eventContinuation?.yield(frame)
         case .authRequired, .authOK, .authInvalid:
             break
@@ -74,8 +78,20 @@ public actor HAWebSocketClient {
         eventContinuation?.finish()
     }
 
+    public func startHeartbeat(interval: Duration = .seconds(10)) {
+        heartbeat?.cancel()
+        heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self else { return }
+                _ = try? await self.request { WSCommand.ping(id: $0) }  // a pong returns as a result-less frame; ignore failures
+            }
+        }
+    }
+
     public func disconnect() {
         receiveLoop?.cancel(); receiveLoop = nil
+        heartbeat?.cancel(); heartbeat = nil
         connection.close()
         failAll(with: WSError(code: "closed", message: "disconnected"))
     }
