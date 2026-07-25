@@ -28,4 +28,3 @@ actor FakeWebSocketConnection: WebSocketConnection {
 extension FakeWebSocketConnection {
     func setOnSend(_ f: @escaping @Sendable (Data) async -> Void) { self.onSend = f }
 }
-extension JSONValue { var asArray: [JSONValue]? { if case .array(let a) = self { return a }; return nil } }
