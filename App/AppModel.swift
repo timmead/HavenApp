@@ -37,16 +37,25 @@ final class AppModel {
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "baseURL")
         phase = .connecting
-        print("Haven: OAuth starting against \(url.absoluteString)")
+        havenLog.info("OAuth starting against \(url.absoluteString, privacy: .public)")
         do {
             let t = try await oauth.login(baseURL: url, web: web, http: http)
-            print("Haven: token exchange OK (access \(t.accessToken.prefix(6))…, hasRefresh=\(t.refreshToken != nil))")
+            havenLog.info("token exchange OK (hasRefresh=\(t.refreshToken != nil, privacy: .public))")
             try tokens.save(t)
             await connect(token: t.accessToken)
         } catch {
-            print("Haven: sign-in FAILED at OAuth/token stage: \(error)")
-            phase = .error("Sign-in failed: \(error)")
+            havenLog.error("sign-in failed at OAuth/token stage: \(error, privacy: .public)")
+            phase = .error("Sign-in failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Clear the saved session and return to the login screen (also used to change server).
+    func signOut() {
+        tokens.clear()
+        UserDefaults.standard.removeObject(forKey: "baseURL")
+        baseURL = nil
+        store.reset()
+        phase = .loggedOut
     }
 
     private func connect(token: String) async {
@@ -56,21 +65,21 @@ final class AppModel {
         var attempt = 0
         while true {
             do {
-                print("Haven: WS connecting to \(wsURL.absoluteString) (attempt \(attempt + 1))")
+                havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (attempt \(attempt + 1, privacy: .public))")
                 let conn = NWWebSocketConnection(url: wsURL)
                 let client = HAWebSocketClient(connection: conn)
                 try await client.authenticate(token: token)
-                print("Haven: WS auth_ok")
+                havenLog.info("WS auth_ok")
                 await client.startHeartbeat()
                 let home = HomeConnection(client: client)
                 store.attach(home)
                 try await store.bootstrap()
-                print("Haven: bootstrap OK — \(store.home.floors.count) floors, \(store.states.count) entities")
+                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
                 phase = .ready
                 return
             } catch {
                 attempt += 1
-                print("Haven: connect attempt \(attempt) FAILED: \(error)")
+                havenLog.error("connect attempt \(attempt, privacy: .public) failed: \(error, privacy: .public)")
                 if attempt >= maxConnectAttempts {
                     phase = .error("Couldn't connect after \(attempt) attempts. Check the server URL and sign in again.")
                     return

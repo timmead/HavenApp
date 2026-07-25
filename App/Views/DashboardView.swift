@@ -3,6 +3,7 @@ import HavenCore
 
 struct DashboardView: View {
     @Environment(HomeStore.self) private var store
+    @Environment(AppModel.self) private var app
     var body: some View {
         TabView {
             ForEach(store.home.floors) { floor in
@@ -12,7 +13,19 @@ struct DashboardView: View {
                             VStack(alignment: .leading, spacing: 20) {
                                 ForEach(floor.areas) { area in RoomSectionView(area: area) }
                             }.padding()
-                        }.navigationTitle(floor.name)
+                        }
+                        .navigationTitle(floor.name)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Menu {
+                                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                        app.signOut()
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                }
+                            }
+                        }
                     }
                 }
             }

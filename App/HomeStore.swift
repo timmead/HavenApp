@@ -6,15 +6,32 @@ final class HomeStore {
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
     private var connection: HomeConnection?
+    private var subscriptionTask: Task<Void, Never>?
 
-    func attach(_ connection: HomeConnection) { self.connection = connection }
+    func attach(_ connection: HomeConnection) {
+        subscriptionTask?.cancel(); subscriptionTask = nil
+        self.connection = connection
+    }
 
     func bootstrap() async throws {
         guard let connection else { return }
         home = try await connection.loadStructure()
-        for s in try await connection.loadStates() { states[s.entityId] = s }
+        var initial: [String: EntityState] = [:]
+        for s in try await connection.loadStates() { initial[s.entityId] = s }
+        states = initial
         let stream = try await connection.subscribeStateChanges()
-        Task { for await s in stream { self.states[s.entityId] = s } }
+        subscriptionTask?.cancel()
+        subscriptionTask = Task { [weak self] in
+            for await s in stream { self?.states[s.entityId] = s }
+        }
+    }
+
+    /// Tear down the live session (used on sign-out).
+    func reset() {
+        subscriptionTask?.cancel(); subscriptionTask = nil
+        connection = nil
+        home = ResolvedHome(floors: [])
+        states = [:]
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
