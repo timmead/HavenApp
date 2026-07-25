@@ -28,3 +28,17 @@ actor FakeWebSocketConnection: WebSocketConnection {
 extension FakeWebSocketConnection {
     func setOnSend(_ f: @escaping @Sendable (Data) async -> Void) { self.onSend = f }
 }
+
+struct FakeWebAuth: WebAuthSession {
+    let returnURL: URL
+    func authenticate(url: URL, callbackScheme: String) async throws -> URL { returnURL }
+}
+
+final class FakeHTTP: HTTPPoster, @unchecked Sendable {
+    let response: String
+    private(set) var lastForm: [String: String]?
+    init(response: String) { self.response = response }
+    func post(_ url: URL, form: [String: String]) async throws -> Data {
+        lastForm = form; return Data(response.utf8)
+    }
+}
