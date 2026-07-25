@@ -2,7 +2,12 @@ import SwiftUI
 
 @main
 struct HavenAppApp: App {
+    @State private var model = AppModel()
     var body: some Scene {
-        WindowGroup { Text("Haven") }
+        WindowGroup {
+            RootView()
+                .environment(model)
+                .task { await model.restoreIfPossible() }
+        }
     }
 }
