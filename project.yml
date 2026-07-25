@@ -1,0 +1,26 @@
+name: HavenApp
+options:
+  bundleIdPrefix: app.haven
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+packages:
+  HavenCore:
+    path: Packages/HavenCore
+targets:
+  HavenApp:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: HavenCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.haven.HavenApp
+        INFOPLIST_FILE: App/Resources/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO

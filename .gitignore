@@ -16,3 +16,7 @@ Package.resolved
 # Editor
 .idea/
 *.swp
+.superpowers/
+
+# XcodeGen output
+HavenApp.xcodeproj/
