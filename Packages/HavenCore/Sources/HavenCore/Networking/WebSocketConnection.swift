@@ -12,9 +12,19 @@ public final class URLSessionWebSocketConnection: WebSocketConnection, @unchecke
     private let url: URL
     private let session: URLSession
     private let task: URLSessionWebSocketTask
-    public init(url: URL, session: URLSession = .shared) {
-        self.url = url; self.session = session
-        self.task = session.webSocketTask(with: url)
+    public init(url: URL, session: URLSession? = nil) {
+        self.url = url
+        // A dedicated session (not URLSession.shared) is the recommended pattern for
+        // WebSocket tasks and avoids some shared-session quirks.
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.waitsForConnectivity = true
+            config.timeoutIntervalForRequest = 15
+            self.session = URLSession(configuration: config)
+        }
+        self.task = self.session.webSocketTask(with: url)
     }
     public func connect() async throws { task.resume() }
     public func send(_ data: Data) async throws { try await task.send(.data(data)) }
