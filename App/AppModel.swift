@@ -5,7 +5,7 @@ import HavenCore
 final class AppModel {
     enum Phase { case loggedOut, connecting, ready, error(String) }
     var phase: Phase = .loggedOut
-    var serverURLText = ""
+    var serverURLText = "http://homeassistant.local:8123"
     let store = HomeStore()
 
     private let maxConnectAttempts = 5
@@ -23,10 +23,17 @@ final class AppModel {
     }
 
     func signIn() async {
-        guard let url = URL(string: serverURLText),
-              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+        let raw = serverURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Tolerate a missing scheme (users often type just "homeassistant.local:8123").
+        let hasScheme = raw.range(of: "^https?://", options: [.regularExpression, .caseInsensitive]) != nil
+        let normalized = hasScheme ? raw : "http://\(raw)"
+        guard !raw.isEmpty,
+              let url = URL(string: normalized),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host(), !host.isEmpty else {
             phase = .error("Enter a valid URL like http://homeassistant.local:8123"); return
         }
+        serverURLText = normalized
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "baseURL")
         phase = .connecting
