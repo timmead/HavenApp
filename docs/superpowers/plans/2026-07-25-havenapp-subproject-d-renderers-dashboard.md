@@ -21,7 +21,7 @@
 - **State by icon + color, never redundant text** ("On"/"Off"/"Locked"/"Scene" are never shown). Secondary text = meaningful values only. Brightness/position show as a vertical level bar.
 - **Control modal:** header (icon · name · state subtitle · **primary on/off toggle** · close) + a stack of facet **cards**. Primary on/off ALWAYS in the header. Discrete choices ALWAYS use the segmented control. History ONLY on sensor facets, with a Day/Week/Month/3M/Year range selector; curves smoothed.
 - **Domain colors:** light=amber `#E0A013`, cover=blue `#2F6FD6`, lock=green `#1F9D57` (unlocked amber/red), climate=warm-red `#C2410C`, scene=purple `#8A5CD0`, sensor=neutral/blue, alert=red.
-- **Commit trailer:** every commit body ends with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- **Commit trailer:** every commit body ends with `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
 - **Tests use Swift Testing** (`import Testing`, `@Test`, `#expect`) and must assert concrete values.
 - **Shared-file discipline:** `DeviceTileView.swift` (Task 13) and `DeviceModalView.swift` (Task 17) are written complete once and **never edited again** — all nine tiles/modals are created as stubs in those tasks and later tasks only replace stub *bodies*. `HomeStore.swift` is the one genuinely shared file: each task states exactly which methods it adds, and must NOT redefine methods an earlier task added.
 - **Runtime checkpoints (not just builds):** almost every defect class here compiles cleanly (wrong service called, binding written backwards, sheet missing its environment, long-press never firing). Run the real app against the live HA **after Task 13** (first tile through dispatch — verify tap toggles a light and long-press sets `presented`) and **after Task 17** (first modal — verify the sheet presents and the header toggle writes back). Do not defer all runtime validation to Task 23.
@@ -153,7 +153,7 @@ public extension EntityState {
 ```bash
 git add Packages/HavenCore && git commit -m "feat(core): entity Domain enum + device_class accessor
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
