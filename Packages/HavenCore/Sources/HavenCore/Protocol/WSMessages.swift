@@ -69,6 +69,17 @@ public enum WSCommand {
     private static func data(_ dict: [String: Any]) -> Data {
         (try? JSONSerialization.data(withJSONObject: dict)) ?? Data()
     }
+    private static func plain(_ v: JSONValue) -> Any {
+        switch v {
+        case .string(let s): return s
+        case .int(let i): return i
+        case .double(let d): return d
+        case .bool(let b): return b
+        case .array(let a): return a.map(plain)
+        case .object(let o): return o.mapValues(plain)
+        case .null: return NSNull()
+        }
+    }
     public static func auth(token: String) -> Data { data(["type": "auth", "access_token": token]) }
     public static func ping(id: Int) -> Data { data(["id": id, "type": "ping"]) }
     public static func getStates(id: Int) -> Data { data(["id": id, "type": "get_states"]) }
@@ -79,5 +90,18 @@ public enum WSCommand {
     public static func callService(id: Int, domain: String, service: String, entityId: String) -> Data {
         data(["id": id, "type": "call_service", "domain": domain, "service": service,
               "target": ["entity_id": entityId]])
+    }
+    public static func callService(id: Int, domain: String, service: String, entityId: String,
+                                   serviceData: [String: JSONValue]) -> Data {
+        data(["id": id, "type": "call_service", "domain": domain, "service": service,
+              "target": ["entity_id": entityId], "service_data": serviceData.mapValues(plain)])
+    }
+    public static func historyDuringPeriod(id: Int, entityId: String, startISO: String, endISO: String) -> Data {
+        data(["id": id, "type": "history/history_during_period", "start_time": startISO, "end_time": endISO,
+              "entity_ids": [entityId], "minimal_response": true, "no_attributes": true])
+    }
+    public static func statisticsDuringPeriod(id: Int, statisticId: String, startISO: String, endISO: String, period: String) -> Data {
+        data(["id": id, "type": "recorder/statistics_during_period", "start_time": startISO, "end_time": endISO,
+              "statistic_ids": [statisticId], "period": period, "types": ["mean", "min", "max"]])
     }
 }
