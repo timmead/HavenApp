@@ -102,6 +102,6 @@ public enum WSCommand {
     }
     public static func statisticsDuringPeriod(id: Int, statisticId: String, startISO: String, endISO: String, period: String) -> Data {
         data(["id": id, "type": "recorder/statistics_during_period", "start_time": startISO, "end_time": endISO,
-              "statistic_ids": [statisticId], "period": period, "types": ["mean", "min", "max"]])
+              "statistic_ids": [statisticId], "period": period, "types": ["mean", "min", "max", "state", "sum"]])
     }
 }
