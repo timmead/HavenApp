@@ -36,3 +36,18 @@ import Foundation
     let result = try await client.request { WSCommand.getStates(id: $0) }
     #expect(result.asArray?.count == 3)
 }
+
+@Test func inFlightRequestFailsWhenReceiveLoopErrors() async throws {
+    let conn = FakeWebSocketConnection()
+    let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
+    await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    // Start a request that sends but whose result never arrives.
+    let task = Task { try await client.request { WSCommand.getStates(id: $0) } }
+    // Give the request a moment to register + send, then break the receive loop
+    // with an undecodable frame so ServerFrame.decode throws -> failAll runs.
+    try await Task.sleep(for: .milliseconds(50))
+    await conn.enqueueIncoming("not json at all")
+    await #expect(throws: (any Error).self) { _ = try await task.value }
+}

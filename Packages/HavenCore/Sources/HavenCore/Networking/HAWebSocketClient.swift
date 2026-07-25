@@ -35,7 +35,7 @@ public actor HAWebSocketClient {
             pending[id] = cont
             Task {
                 do { try await connection.send(data) }
-                catch { pending[id] = nil; cont.resume(throwing: error) }
+                catch { if self.pending.removeValue(forKey: id) != nil { cont.resume(throwing: error) } }
             }
         }
     }
