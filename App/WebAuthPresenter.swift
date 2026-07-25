@@ -1,4 +1,5 @@
 import AuthenticationServices
+import UIKit
 import HavenCore
 
 @MainActor
@@ -17,6 +18,9 @@ final class WebAuthPresenter: NSObject, WebAuthSession, ASWebAuthenticationPrese
         }
     }
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        ASPresentationAnchor()
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow } ?? ASPresentationAnchor()
     }
 }

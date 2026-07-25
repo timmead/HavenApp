@@ -8,6 +8,7 @@ final class AppModel {
     var serverURLText = ""
     let store = HomeStore()
 
+    private let maxConnectAttempts = 5
     private let tokens: TokenStore = KeychainTokenStore()
     private let oauth = OAuthClient()
     private let http = URLSessionHTTP()
@@ -22,7 +23,8 @@ final class AppModel {
     }
 
     func signIn() async {
-        guard let url = URL(string: serverURLText), url.scheme != nil else {
+        guard let url = URL(string: serverURLText),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             phase = .error("Enter a valid URL like http://homeassistant.local:8123"); return
         }
         baseURL = url
@@ -52,7 +54,11 @@ final class AppModel {
                 return
             } catch {
                 attempt += 1
-                phase = .error("Connection lost — retrying…")
+                if attempt >= maxConnectAttempts {
+                    phase = .error("Couldn't connect after \(attempt) attempts. Check the server URL and sign in again.")
+                    return
+                }
+                phase = .error("Connection lost — retrying… (\(attempt))")
                 try? await Task.sleep(for: policy.delay(forAttempt: attempt))
             }
         }
