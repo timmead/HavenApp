@@ -37,7 +37,7 @@ HavenApp is decomposed into independently-buildable sub-projects. This spec defi
 | **A** | **Product definition & dashboard paradigm** (this doc) | Vision, IA, dashboard model, interaction model, v1 scope | — |
 | B | `haven-hacs` integration | Custom HA integration (Python): efficient subscriptions, entity commands, config blob storage, push registration | A |
 | C | iOS connection engine | OAuth against HA, WebSocket transport (actor), local/Nabu Casa URL selection, live state, optimistic control | A, B |
-| D | Renderer catalog & dashboard UI | SwiftUI tile renderers + the dashboard canvas, config mode, control modals | A, C |
+| D | Renderer catalog & dashboard UI | SwiftUI tile renderers + the dashboard canvas + control modals (registry-derived rooms; config mode is a later sub-project) | A, C |
 | E | iOS-26 surfaces | Widgets, Control Center / Lock Screen controls, Live Activities, Watch, App Intents/Siri | C, D |
 | F | Notifications / critical alerts | Push pipeline within the no-cloud constraint (leverage HA/Nabu Casa push) | B, C |
 
@@ -138,7 +138,7 @@ A home-wide, always-curated list of things that need a human — the feature tha
 
 ## 10. Configuration capability
 
-A first-class pillar. Principle: **auto-generation/migration gets you to a great default in seconds; configuration makes it exactly yours; then you never think about it again.** All configuration happens in the explicit **configuration mode** (§8).
+A first-class pillar. Principle: **registry auto-generation gets you to a great default in seconds; configuration makes it exactly yours; then you never think about it again.** All configuration happens in the explicit **configuration mode** (§8).
 
 **Capabilities:**
 - **Structure:** rename floors/rooms, custom icons, hide rooms/floors/entities, create custom sections beyond the registry, and **reassign an entity to a different room** as a local override (HA's own area data is never modified).
@@ -148,19 +148,19 @@ A first-class pillar. Principle: **auto-generation/migration gets you to a great
 
 **Persistence & sync (privacy-first, no Haven cloud):** Haven's config is its own state and syncs across the user's devices by being stored **in the user's own Home Assistant** via the `haven-hacs` integration (a stored key/blob, the mechanism Domika uses for its dashboard blob). A local cache provides instant load; HA is the sync point. Nothing touches a Haven-operated server. (Contract for Sub-project B.)
 
-## 11. Onboarding & migration
+## 11. Onboarding (registry-first)
+
+> **Amended 2026-07-25** (during Sub-project D design): HavenApp is **registry-first** — HA's floor/area/device/entity registry *is* the structure of truth. The earlier "migrate an existing Lovelace dashboard" path is **dropped from v1** (deferred as a possible future import). See `docs/superpowers/specs/2026-07-25-havenapp-subproject-d-renderers-dashboard-design.md` §1.
 
 First-run should reach a ready-to-use app in seconds, not present an empty canvas.
 
 **Flow:**
 1. **Connect HA** — enter/discover the local HA URL, authenticate via OAuth (Sub-project C).
-2. **Choose a starting point:**
-   - **(A) Migrate an existing HA dashboard** — Haven **enumerates the user's HA (Lovelace) dashboards**, the user **picks one**, and Haven **translates its structure into Haven's own native config** (views → floors/sections, cards → tiles by entity domain, unsupported cards → generic fallback).
-   - **(B) Auto-generate from my rooms** — build floors → sections → tiles from the HA floor/area/device/entity registry (applying the entity→area→floor resolution rule, §16).
-   - **(C) Start blank** — an escape hatch for users who want to build up manually.
-3. **Land in a working app**, optionally refine in configuration mode.
+2. **Auto-generate from HA's core primitives** — build floors → rooms (sections) → device tiles directly from the HA floor/area/device/entity registry (applying the entity→area→floor resolution rule, §16). HA's registry already models floors, rooms (areas), device→area associations, and designated room temperature/humidity entities, so this yields a correct, complete structure with no manual setup.
+   - **Start blank** remains available as an escape hatch for users who want to build up manually.
+3. **Land in a working app**, optionally refine in configuration mode (later sub-project).
 
-**Migration is one-time and one-directional.** After migration/generation, Haven's config is independent: Haven never writes back to HA's dashboards and does not stay in sync with them. Re-running migration is a manual, explicit action that replaces (or is offered as a fresh view), never a live link.
+**Source of truth is HA, read-only in v1.** Haven derives structure from the registry and never writes area/floor assignments back to HA in v1. **Future bidirectionality** (editing structure in Haven and pushing it to HA) is noted and deferred. Lovelace dashboard *import* is likewise a deferred future option, not a v1 path.
 
 ## 12. Settings
 
@@ -182,7 +182,7 @@ A general settings flow, separate from dashboard configuration:
 
 **In scope (v1):**
 - Connect to HA (OAuth) + Nabu Casa remote; local-first.
-- Onboarding: migrate a chosen HA dashboard, auto-generate from rooms, or start blank.
+- Onboarding: auto-generate the floors/rooms/tiles structure from the HA registry (or start blank).
 - Home overview tab (Attention strip + light weather header + Favorites + whole-home actions) + floor tabs → room sections → 4-column tile grid.
 - Native renderer catalog (§7).
 - Normal-mode interaction: tap action + long-press control modal; configuration mode: drag/resize/label/icon/add/remove, section rename+icon, "+" tile.
@@ -196,7 +196,7 @@ A general settings flow, separate from dashboard configuration:
 - Full environmental experience ("indoor vs outdoor," "should I open the windows?" dew-point verdict).
 - Push notifications / Critical Alerts wiring (Sub-project F).
 - Widgets / Control Center / Lock Screen controls / Live Activities / Watch (Sub-project E).
-- Multiple dashboards/views per home; Lovelace re-sync; multi-home management UI; iPadOS-specific refinements beyond adaptive layout.
+- Lovelace dashboard import; bidirectional writes of structure back to HA; multiple dashboards/views per home; multi-home management UI; iPadOS-specific refinements beyond adaptive layout.
 
 ## 15. Success criteria
 
@@ -219,7 +219,7 @@ Full cited research was produced during design (four streams: iOS 26 design; HA 
 
 ## 17. Open questions / dependencies
 
-- **B (haven-hacs):** exact stored-config key/schema and whether v1 can ship against stock HA (registry + Lovelace + standard subscriptions) while the integration matures — decide in Sub-project B/C specs. (v1 product value does not strictly require the custom integration except for the most efficient subscriptions and config sync; a fallback to stock HA `store`/local-only is worth evaluating.)
+- **B (haven-hacs):** exact stored-config key/schema and whether v1 can ship against stock HA (registry + standard subscriptions) while the integration matures — decide in Sub-project B/C specs. (v1 product value does not strictly require the custom integration except for the most efficient subscriptions and config sync; a fallback to stock HA `store`/local-only is worth evaluating.)
 - **C (connection):** precise Nabu Casa remote URL acquisition + local/remote selection and failover; OAuth client identity (our own `client_id` URL + `havenapp://` redirect scheme).
 - **Weather header in v1:** confirmed light-touch (current conditions only); full environmental experience is v2.
 - **Repo:** not yet a git repository — initialize before committing specs/code.
