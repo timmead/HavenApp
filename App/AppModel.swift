@@ -37,30 +37,40 @@ final class AppModel {
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "baseURL")
         phase = .connecting
+        print("Haven: OAuth starting against \(url.absoluteString)")
         do {
             let t = try await oauth.login(baseURL: url, web: web, http: http)
+            print("Haven: token exchange OK (access \(t.accessToken.prefix(6))…, hasRefresh=\(t.refreshToken != nil))")
             try tokens.save(t)
             await connect(token: t.accessToken)
-        } catch { phase = .error("Sign-in failed: \(error)") }
+        } catch {
+            print("Haven: sign-in FAILED at OAuth/token stage: \(error)")
+            phase = .error("Sign-in failed: \(error)")
+        }
     }
 
     private func connect(token: String) async {
         guard let base = baseURL else { return }
         phase = .connecting
+        let wsURL = HAConfig(baseURL: base).webSocketURL
         var attempt = 0
         while true {
             do {
-                let conn = URLSessionWebSocketConnection(url: HAConfig(baseURL: base).webSocketURL)
+                print("Haven: WS connecting to \(wsURL.absoluteString) (attempt \(attempt + 1))")
+                let conn = URLSessionWebSocketConnection(url: wsURL)
                 let client = HAWebSocketClient(connection: conn)
                 try await client.authenticate(token: token)
+                print("Haven: WS auth_ok")
                 await client.startHeartbeat()
                 let home = HomeConnection(client: client)
                 store.attach(home)
                 try await store.bootstrap()
+                print("Haven: bootstrap OK — \(store.home.floors.count) floors, \(store.states.count) entities")
                 phase = .ready
                 return
             } catch {
                 attempt += 1
+                print("Haven: connect attempt \(attempt) FAILED: \(error)")
                 if attempt >= maxConnectAttempts {
                     phase = .error("Couldn't connect after \(attempt) attempts. Check the server URL and sign in again.")
                     return
