@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HavenCore",
-    platforms: [.iOS("26.0")],
+    platforms: [.iOS("26.0"), .macOS(.v15)],
     products: [.library(name: "HavenCore", targets: ["HavenCore"])],
     targets: [
         .target(name: "HavenCore", swiftSettings: [.swiftLanguageMode(.v6)]),
