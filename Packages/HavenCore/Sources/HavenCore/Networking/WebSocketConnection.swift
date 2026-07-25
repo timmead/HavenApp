@@ -14,17 +14,23 @@ public final class URLSessionWebSocketConnection: WebSocketConnection, @unchecke
     private let task: URLSessionWebSocketTask
     public init(url: URL, session: URLSession? = nil) {
         self.url = url
-        // A dedicated session (not URLSession.shared) is the recommended pattern for
-        // WebSocket tasks and avoids some shared-session quirks.
         if let session {
             self.session = session
         } else {
-            let config = URLSessionConfiguration.default
+            // The iOS Simulator's URLSession has known networking bugs where protocol/HTTP3
+            // state cached between app runs breaks later connections. An *ephemeral* session
+            // avoids that cached state — the documented workaround (Apple DTS thread 777999).
+            let config = URLSessionConfiguration.ephemeral
             config.waitsForConnectivity = true
             config.timeoutIntervalForRequest = 15
             self.session = URLSession(configuration: config)
         }
-        self.task = self.session.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        #if targetEnvironment(simulator)
+        // HTTP/3 negotiation is broken in the Simulator; force it off there.
+        request.assumesHTTP3Capable = false
+        #endif
+        self.task = self.session.webSocketTask(with: request)
     }
     public func connect() async throws { task.resume() }
     public func send(_ data: Data) async throws { try await task.send(.data(data)) }
