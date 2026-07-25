@@ -8,7 +8,7 @@ public extension HomeConnection {
 
     func setLight(_ id: String, on: Bool) async throws { try await call("light", on ? "turn_on" : "turn_off", id) }
     func setBrightness(_ id: String, percent: Int) async throws { try await call("light", "turn_on", id, ["brightness_pct": .int(max(0, min(100, percent)))]) }
-    func setColorTemp(_ id: String, mired: Int) async throws { try await call("light", "turn_on", id, ["color_temp": .int(mired)]) }
+    func setColorTemp(_ id: String, kelvin: Int) async throws { try await call("light", "turn_on", id, ["color_temp_kelvin": .int(kelvin)]) }
     func setSwitch(_ id: String, on: Bool) async throws { try await call(Domain.serviceDomain(of: id), on ? "turn_on" : "turn_off", id) }
     func openCover(_ id: String) async throws { try await call("cover", "open_cover", id) }
     func closeCover(_ id: String) async throws { try await call("cover", "close_cover", id) }
@@ -19,7 +19,8 @@ public extension HomeConnection {
     func setClimateTemp(_ id: String, temp: Double) async throws { try await call("climate", "set_temperature", id, ["temperature": .double(temp)]) }
     func setFanMode(_ id: String, mode: String) async throws { try await call("climate", "set_fan_mode", id, ["fan_mode": .string(mode)]) }
     func activate(sceneOrScript id: String) async throws {
-        let d = Domain.of(id)
-        try await call(d == .script ? "script" : d == .button ? "button" : "scene", d == .button ? "press" : "turn_on", id)
+        let d = Domain.serviceDomain(of: id)          // "scene" | "script" | "button" | "input_button" | ...
+        let isButton = (d == "button" || d == "input_button")
+        try await call(d, isButton ? "press" : "turn_on", id)
     }
 }

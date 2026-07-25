@@ -30,3 +30,22 @@ private func authed() async throws -> (FakeWebSocketConnection, HomeConnection) 
     try await home.setLock("lock.f", locked: true)
     #expect(await conn.sentTexts().contains { $0.contains("\"domain\":\"lock\"") && $0.contains("\"service\":\"lock\"") })
 }
+@Test func activateUsesEntityPrefixDomain() async throws {
+    let (conn, home) = try await authed()
+    try await home.activate(sceneOrScript: "input_button.doorbell")
+    let sent = await conn.sentTexts()
+    #expect(sent.contains { $0.contains("\"domain\":\"input_button\"") && $0.contains("\"service\":\"press\"") })
+}
+@Test func activateSceneAndScript() async throws {
+    let (conn, home) = try await authed()
+    try await home.activate(sceneOrScript: "scene.movie")
+    try await home.activate(sceneOrScript: "script.bedtime")
+    let sent = await conn.sentTexts()
+    #expect(sent.contains { $0.contains("\"domain\":\"scene\"") && $0.contains("\"service\":\"turn_on\"") })
+    #expect(sent.contains { $0.contains("\"domain\":\"script\"") && $0.contains("\"service\":\"turn_on\"") })
+}
+@Test func setSwitchUsesEntityPrefixDomain() async throws {
+    let (conn, home) = try await authed()
+    try await home.setSwitch("input_boolean.guest", on: true)
+    #expect(await conn.sentTexts().contains { $0.contains("\"domain\":\"input_boolean\"") })
+}
