@@ -23,6 +23,8 @@
 - **Domain colors:** light=amber `#E0A013`, cover=blue `#2F6FD6`, lock=green `#1F9D57` (unlocked amber/red), climate=warm-red `#C2410C`, scene=purple `#8A5CD0`, sensor=neutral/blue, alert=red.
 - **Commit trailer:** every commit body ends with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - **Tests use Swift Testing** (`import Testing`, `@Test`, `#expect`) and must assert concrete values.
+- **Shared-file discipline:** `DeviceTileView.swift` (Task 13) and `DeviceModalView.swift` (Task 17) are written complete once and **never edited again** — all nine tiles/modals are created as stubs in those tasks and later tasks only replace stub *bodies*. `HomeStore.swift` is the one genuinely shared file: each task states exactly which methods it adds, and must NOT redefine methods an earlier task added.
+- **Runtime checkpoints (not just builds):** almost every defect class here compiles cleanly (wrong service called, binding written backwards, sheet missing its environment, long-press never firing). Run the real app against the live HA **after Task 13** (first tile through dispatch — verify tap toggles a light and long-press sets `presented`) and **after Task 17** (first modal — verify the sheet presents and the header toggle writes back). Do not defer all runtime validation to Task 23.
 
 ## File Structure
 
@@ -85,6 +87,13 @@ import Testing
     #expect(Domain.of("binary_sensor.door") == .binarySensor)
     #expect(Domain.of("sensor.power") == .sensor)
     #expect(Domain.of("media_player.tv") == .unknown)   // out of scope -> unknown
+    #expect(Domain.of("fan.attic") == .unknown)         // fan is NOT in the D catalog -> Generic
+}
+@Test func serviceDomainComesFromEntityIdPrefix() {
+    // input_boolean.x must call input_boolean.turn_on, NOT switch.turn_on
+    #expect(Domain.serviceDomain(of: "input_boolean.guest") == "input_boolean")
+    #expect(Domain.serviceDomain(of: "switch.plug") == "switch")
+    #expect(Domain.serviceDomain(of: "light.k") == "light")
 }
 @Test func actuatorFlag() {
     #expect(Domain.light.isActuator)
@@ -110,7 +119,7 @@ public enum Domain: String, Sendable, Equatable {
     public static func of(_ entityId: String) -> Domain {
         switch String(entityId.prefix(while: { $0 != "." })) {
         case "light": return .light
-        case "switch", "input_boolean", "fan": return .switchOutlet
+        case "switch", "input_boolean": return .switchOutlet
         case "cover": return .cover
         case "lock": return .lock
         case "climate": return .climate
@@ -127,6 +136,11 @@ public enum Domain: String, Sendable, Equatable {
         case .light, .switchOutlet, .cover, .lock, .climate, .scene, .script, .button: return true
         case .sensor, .binarySensor, .unknown: return false
         }
+    }
+    /// The HA *service* domain — always the entity-id prefix, so `input_boolean.x`
+    /// calls `input_boolean.turn_on` rather than `switch.turn_on`.
+    public static func serviceDomain(of entityId: String) -> String {
+        String(entityId.prefix(while: { $0 != "." }))
     }
 }
 
@@ -543,7 +557,7 @@ public extension HomeConnection {
     func setLight(_ id: String, on: Bool) async throws { try await call("light", on ? "turn_on" : "turn_off", id) }
     func setBrightness(_ id: String, percent: Int) async throws { try await call("light", "turn_on", id, ["brightness_pct": .int(max(0, min(100, percent)))]) }
     func setColorTemp(_ id: String, mired: Int) async throws { try await call("light", "turn_on", id, ["color_temp": .int(mired)]) }
-    func setSwitch(_ id: String, on: Bool) async throws { try await call(Domain.of(id) == .light ? "light" : "switch", on ? "turn_on" : "turn_off", id) }
+    func setSwitch(_ id: String, on: Bool) async throws { try await call(Domain.serviceDomain(of: id), on ? "turn_on" : "turn_off", id) }
     func openCover(_ id: String) async throws { try await call("cover", "open_cover", id) }
     func closeCover(_ id: String) async throws { try await call("cover", "close_cover", id) }
     func stopCover(_ id: String) async throws { try await call("cover", "stop_cover", id) }
@@ -1024,8 +1038,11 @@ struct HavenChip: View {
 ### Task 13: Tile dispatch + Light + Switch tiles
 
 **Files:**
-- Create: `App/Renderers/DeviceTileView.swift`, `App/Renderers/Tiles/LightTile.swift`, `SwitchTile.swift`
-- Modify: `App/Views/LightTileView.swift` — delete (replaced by `LightTile`); update references in Task 21.
+- Create: `App/Renderers/DeviceTileView.swift`, `App/Renderers/TileName.swift`
+- Create ALL NINE tile files now: `App/Renderers/Tiles/{Light,Switch,Cover,Lock,Climate,Scene,Sensor,BinarySensor,Generic}Tile.swift` — `LightTile` and `SwitchTile` fully implemented in this task; the other seven as **minimal stubs** (see Step 6). Tasks 14–16 fill the stub bodies in place.
+- **DO NOT delete `App/Views/LightTileView.swift`** — `RoomSectionView` still references it until Task 22. Task 22 deletes it.
+
+> **Why stubs:** `DeviceTileView`'s switch is written complete and correct in this task and is **never edited again**. Every task therefore builds green, and later tasks only fill in a stub body — no shared-file churn across subagents.
 
 **Interfaces:**
 - `struct DeviceTileView: View { let entityId: String; @Environment(HomeStore.self) store }` — reads `store.state(entityId)`, computes `Domain`, switches to the concrete tile; unknown/sensor/etc handled in later tasks (Task 15/16), Generic fallback for the rest.
@@ -1033,7 +1050,29 @@ struct HavenChip: View {
 
 > **Store additions used here** (add in this task to `HomeStore`): `func state(_ id: String) -> EntityState?` returning `states[id]`; and the command methods forwarding to `HomeConnection` with optimistic updates (added incrementally per domain — for this task add `toggleActuator(_:)` covering light/switch, plus a generic `run(_:)`). Present the modal by binding a `@Published var presented: String?` (entityId) — the actual sheet is added in Task 17; for now `longPress` sets `store.presented = entityId`.
 
-- [ ] **Step 1: Add store hooks** (`App/HomeStore.swift`): `func state(_ id: String) -> EntityState? { states[id] }`, `var presented: String?` (as an `@Observable` stored var), and optimistic `func toggle(_ id: String)` that flips on/off state locally and calls the right command (`setSwitch`/`setLight` by domain) with rollback (mirror existing `toggleLightOptimistic`). Build.
+- [ ] **Step 1: Add store hooks** (`App/HomeStore.swift`). Add EXACTLY these — later tasks depend on these names and must not redefine them:
+```swift
+    var presented: String?                                   // entityId whose modal is open
+    func state(_ id: String) -> EntityState? { states[id] }
+
+    // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.
+    func setLight(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setLight(id, on: on) } }
+    func setSwitch(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setSwitch(id, on: on) } }
+    func toggle(_ id: String) {
+        let on = !(states[id]?.state == "on")
+        Domain.of(id) == .light ? setLight(id, on: on) : setSwitch(id, on: on)
+    }
+
+    /// Flip local state immediately, run the command, roll back on failure.
+    private func optimistic(_ id: String, on: Bool, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
+        guard let connection, var s = states[id] else { return }
+        let previous = s
+        s.state = on ? "on" : "off"
+        states[id] = s
+        Task { do { try await work(connection) } catch { self.states[id] = previous } }
+    }
+```
+Build.
 
 - [ ] **Step 2: Implement `DeviceTileView.swift`**
 ```swift
@@ -1126,17 +1165,37 @@ enum TileName {
 }
 ```
 
-- [ ] **Step 6: Build** (BUILD SUCCEEDED — note `CoverTile`/`LockTile`/… don't exist yet, so temporarily stub `DeviceTileView`'s missing cases to `GenericTile`; simplest: implement `GenericTile` now too — see Task 16 — OR comment out unbuilt cases. To keep the build green, implement a placeholder `GenericTile` in this task and route all not-yet-built domains to it, then replace routing as tiles land.) **Step 7: Commit** (`feat(app): tile dispatch + light/switch tiles`).
+- [ ] **Step 6: Create the seven stub tiles.** Each is a real, compiling view showing icon + name (no interaction yet). Create `CoverTile.swift`, `LockTile.swift`, `ClimateTile.swift`, `SceneTile.swift`, `SensorTile.swift`, `BinarySensorTile.swift`, `GenericTile.swift`, each with this body (substituting the type name and the `Domain` case):
 
-> **Implementation note for the executor:** to keep every task's build green, add the concrete tiles incrementally and keep `DeviceTileView` routing only to tiles that exist, sending the rest to `GenericTile`. Update the routing as Tasks 14–16 add tiles.
+```swift
+import SwiftUI
+import HavenCore
+struct CoverTile: View {            // <- rename per file: LockTile, ClimateTile, SceneTile, SensorTile, BinarySensorTile, GenericTile
+    let entityId: String
+    @Environment(HomeStore.self) private var store
+    var body: some View {
+        let e = store.state(entityId)
+        GlassTile(active: false, accent: .gray) {
+            VStack(alignment: .leading, spacing: 5) {
+                Image(systemName: IconMap.symbol(domain: Domain.of(entityId), deviceClass: e?.deviceClass))
+                    .font(.system(size: 20)).foregroundStyle(.secondary).symbolRenderingMode(.hierarchical)
+                Spacer(minLength: 2)
+                Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 7: Build** — `xcodegen generate && xcodebuild -project HavenApp.xcodeproj -scheme HavenApp -sdk iphoneos26.5 -configuration Debug build CODE_SIGNING_ALLOWED=NO` → BUILD SUCCEEDED. **Step 8: Commit** (`feat(app): tile dispatch + light/switch tiles + stubs`).
 
 ---
 
 ### Task 14: Cover + Lock tiles
 
-**Files:** Create `App/Renderers/Tiles/CoverTile.swift`, `LockTile.swift`. Route `DeviceTileView` `.cover`/`.lock` to them.
+**Files:** **Replace the stub bodies** of `App/Renderers/Tiles/CoverTile.swift` and `LockTile.swift` (both created in Task 13). **Do NOT edit `DeviceTileView.swift`** — its routing is already complete.
 
-**Interfaces:** Consumes `CoverState`, `LockState`, `LevelBar`, `GlassTile`, `store.openCloseCover(_:)`, `store.toggleLock(_:)` (add these to `HomeStore` here — optimistic flip + command).
+**Interfaces:** Consumes `CoverState`, `LockState`, `LevelBar`, `GlassTile`, `TileName`; adds `store.openCloseCover(_:)` and `store.toggleLock(_:)`. These call `HomeConnection.openCover/closeCover/setLock` **directly** — Task 18 adds the *modal-level* wrappers and must not re-add these two.
 
 - [ ] **Step 1: Add `HomeStore.openCloseCover(_:)`** (if open→close else open, optimistic) and `toggleLock(_:)` (locked→unlock else lock).
 - [ ] **Step 2: Implement `CoverTile.swift`**
@@ -1189,7 +1248,7 @@ struct LockTile: View {
 
 ### Task 15: Climate + Scene tiles
 
-**Files:** Create `App/Renderers/Tiles/ClimateTile.swift`, `SceneTile.swift`. Route `.climate`, `.scene/.script/.button`.
+**Files:** **Replace the stub bodies** of `App/Renderers/Tiles/ClimateTile.swift` and `SceneTile.swift` (created in Task 13). **Do NOT edit `DeviceTileView.swift`.**
 
 **Interfaces:** Consumes `ClimateState`; `store.run(_:)` (scene/script/button activation — add to store here). Climate tile is tap→present modal (no direct toggle).
 
@@ -1242,7 +1301,7 @@ struct SceneTile: View {
 
 ### Task 16: Sensor + Binary Sensor + Generic tiles
 
-**Files:** Create `App/Renderers/Tiles/SensorTile.swift`, `BinarySensorTile.swift`, `GenericTile.swift`. Route the remaining domains. (If `GenericTile` was stubbed in Task 13, replace the stub with this real one.)
+**Files:** **Replace the stub bodies** of `App/Renderers/Tiles/SensorTile.swift`, `BinarySensorTile.swift`, `GenericTile.swift` (created in Task 13). **Do NOT edit `DeviceTileView.swift`.**
 
 - [ ] **Step 1: `SensorTile.swift`** (value + unit; tap→modal)
 ```swift
@@ -1314,7 +1373,9 @@ struct GenericTile: View {
 
 ### Task 17: Modal scaffold + presentation + Light + Switch modals
 
-**Files:** Create `App/DesignSystem/ControlModalScaffold.swift`, `App/Renderers/DeviceModalView.swift`, `App/Renderers/Modals/LightModal.swift`, `SwitchModal.swift`. Modify `App/Views/DashboardView.swift` (or `RootView`) to present `DeviceModalView(entityId:)` as a sheet bound to `store.presented`.
+**Files:** Create `App/DesignSystem/ControlModalScaffold.swift`, `App/Renderers/DeviceModalView.swift`, and **ALL NINE modal files** `App/Renderers/Modals/{Light,Switch,Cover,Lock,Climate,Scene,Sensor,BinarySensor,Generic}Modal.swift` — `LightModal`/`SwitchModal` fully implemented here, the other seven as **minimal stubs** (Step 4b). Modify `App/Views/DashboardView.swift` to present `DeviceModalView(entityId:)` as a sheet bound to `store.presented`.
+
+> Same stub-first rule as Task 13: `DeviceModalView`'s switch is written complete here and **never edited again**; Tasks 18–20 fill stub bodies in place.
 
 **Interfaces:**
 - `struct ControlModalScaffold<Header: View, Body: View>: View` — renders the glass header row + a scroll of `body` cards.
@@ -1377,7 +1438,25 @@ struct DeviceModalView: View {
     }
 }
 ```
-(As with tiles, route only-implemented modals; send the rest to `GenericModal` until their task lands.)
+- [ ] **Step 2b: Create the seven stub modals.** `CoverModal.swift`, `LockModal.swift`, `ClimateModal.swift`, `SceneModal.swift`, `SensorModal.swift`, `BinarySensorModal.swift`, `GenericModal.swift`, each compiling with header-only (substitute the type name per file):
+
+```swift
+import SwiftUI
+import HavenCore
+struct CoverModal: View {          // <- rename per file
+    let entityId: String
+    @Environment(HomeStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        let e = store.state(entityId)
+        VStack {
+            ModalHeader(systemImage: IconMap.symbol(domain: Domain.of(entityId), deviceClass: e?.deviceClass),
+                        title: TileName.of(entityId, e), subtitle: e?.state ?? "—", accent: .gray) { dismiss() }
+            Spacer()
+        }
+    }
+}
+```
 
 - [ ] **Step 3: `LightModal.swift`** (header toggle; brightness slider; color-temp slider if supported)
 ```swift
@@ -1430,13 +1509,20 @@ struct SwitchModal: View {
     if let id = store.presented { DeviceModalView(entityId: id) }
 }
 ```
-Add the store command methods used (`setLight`, `setBrightness`, `setSwitch` — forwarding to `HomeConnection`, optimistic where trivial). Build + Commit (`feat(app): control-modal scaffold + light/switch modals`).
+**Store additions in this task: ONLY `setBrightness(_:percent:)`.** `setLight` and `setSwitch` already exist from Task 13 — reuse them, do not redefine.
+```swift
+    func setBrightness(_ id: String, percent: Int) {
+        guard let connection else { return }
+        Task { try? await connection.setBrightness(id, percent: percent) }
+    }
+```
+Build (`xcodegen generate && xcodebuild … CODE_SIGNING_ALLOWED=NO`) + Commit (`feat(app): control-modal scaffold + light/switch modals`).
 
 ---
 
 ### Task 18: Climate + Cover modals
 
-**Files:** Create `App/Renderers/Modals/ClimateModal.swift`, `CoverModal.swift`.
+**Files:** **Replace the stub bodies** of `App/Renderers/Modals/ClimateModal.swift` and `CoverModal.swift` (created in Task 17). **Do NOT edit `DeviceModalView.swift`.**
 
 - [ ] **Step 1: `ClimateModal.swift`** (header on/off; temp stepper; Mode + Fan segmented)
 ```swift
@@ -1502,13 +1588,13 @@ struct CoverModal: View {
 }
 ```
 
-- [ ] **Step 3: Add store methods** (`setClimateMode/setClimateTemp/setFanMode`, `openCover/stopCover/closeCover/setCoverPosition` forwarding to `HomeConnection`). Route + Build + Commit (`feat(app): climate + cover modals`).
+- [ ] **Step 3: Add store methods** — `setClimateMode`, `setClimateTemp`, `setFanMode`, `openCover`, `stopCover`, `closeCover`, `setCoverPosition` (thin `Task { try? await connection.… }` forwards). **`openCloseCover` and `toggleLock` already exist from Task 14 — do not redefine them.** Build + Commit (`feat(app): climate + cover modals`).
 
 ---
 
 ### Task 19: Lock + Scene + Generic modals
 
-**Files:** Create `App/Renderers/Modals/LockModal.swift`, `SceneModal.swift`, `GenericModal.swift`.
+**Files:** **Replace the stub bodies** of `App/Renderers/Modals/LockModal.swift`, `SceneModal.swift`, `GenericModal.swift` (created in Task 17). **Do NOT edit `DeviceModalView.swift`.**
 
 - [ ] **Step 1: `LockModal.swift`** (header lock/unlock toggle)
 ```swift
@@ -1576,7 +1662,7 @@ struct GenericModal: View {
 
 ### Task 20: Sensor history modal (Swift Charts) + Binary Sensor modal
 
-**Files:** Create `App/Renderers/Modals/SensorModal.swift`, `BinarySensorModal.swift`.
+**Files:** **Replace the stub bodies** of `App/Renderers/Modals/SensorModal.swift` and `BinarySensorModal.swift` (created in Task 17). **Do NOT edit `DeviceModalView.swift`.**
 
 **Interfaces:** `SensorModal` loads `store.loadHistory(entityId:range:)` (add to store — calls `HomeConnection.history`, publishes a `HistorySeries`), renders a smoothed Swift `Chart` (`.interpolationMethod(.catmullRom)`) + a `HavenSegmented` range selector + min/avg/max.
 
@@ -1658,7 +1744,7 @@ struct BinarySensorModal: View {
 
 ### Task 22: Rewrite `RoomSectionView` (dispatch + env chips + roll-ups) and wire into floors
 
-**Files:** Modify `App/Views/RoomSectionView.swift`, `App/Views/DashboardView.swift`. Delete `App/Views/LightTileView.swift`.
+**Files:** Modify `App/Views/RoomSectionView.swift`, `App/Views/DashboardView.swift`. **Delete `App/Views/LightTileView.swift` in THIS task** (it is referenced by the old `RoomSectionView` until now; deleting earlier breaks the build). Run `xcodegen generate` after deleting.
 
 **Interfaces:** `RoomSectionView` takes a `RoomSection`; renders heading (name + env chips from `headerSensors` using `store.state`), a roll-up line, and a 4-col grid of `DeviceTileView` for each `deviceRef` (entity only in D). `DashboardView` builds floors → for each floor, the rooms in that floor (filter `store.rooms()` by floor), each as a `RoomSectionView`; add the modal `.sheet` (Task 17 Step 5) and navigation to room detail (Task 23).
 
