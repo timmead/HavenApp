@@ -32,10 +32,13 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil) -> En
                  AreaRegistryEntry(areaId: "b", name: "B", floorId: "base", icon: nil, temperatureEntityId: nil, humidityEntityId: nil)]
     let home = RegistryResolver.resolve(floors: floors, areas: areas, devices: [], entities: [])
     #expect(home.floors.map(\.name) == ["Basement", "Upstairs"])
+    #expect(home.floors.first?.areas.first?.id == "b")
 }
 
 @Test func unassignedEntitiesBucketed() {
     let entities = [ent("sensor.orphan")]
     let home = RegistryResolver.resolve(floors: [], areas: [], devices: [], entities: entities)
     #expect(home.floors.flatMap(\.areas).flatMap(\.entityIds) == ["sensor.orphan"])
+    #expect(home.floors.count == 1)
+    #expect(home.floors.first?.name == "Home")
 }
