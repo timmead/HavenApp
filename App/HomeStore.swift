@@ -46,4 +46,24 @@ final class HomeStore {
             catch { self.states[entityId] = previous }    // rollback
         }
     }
+
+    var presented: String?                                   // entityId whose modal is open
+    func state(_ id: String) -> EntityState? { states[id] }
+
+    // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.
+    func setLight(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setLight(id, on: on) } }
+    func setSwitch(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setSwitch(id, on: on) } }
+    func toggle(_ id: String) {
+        let on = !(states[id]?.state == "on")
+        Domain.of(id) == .light ? setLight(id, on: on) : setSwitch(id, on: on)
+    }
+
+    /// Flip local state immediately, run the command, roll back on failure.
+    private func optimistic(_ id: String, on: Bool, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
+        guard let connection, var s = states[id] else { return }
+        let previous = s
+        s.state = on ? "on" : "off"
+        states[id] = s
+        Task { do { try await work(connection) } catch { self.states[id] = previous } }
+    }
 }
