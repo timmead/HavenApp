@@ -22,7 +22,10 @@ struct ClimateModal: View {
                 }.tint(accent)
             }
             if let modes = s?.modes.filter({ $0 != "off" }), modes.count > 1 {
-                FacetCard(title: "Mode") { HavenSegmented(options: modes, selection: Binding(get: { s?.hvacMode ?? modes[0] }, set: { store.setClimateMode(entityId, mode: $0) }), label: { $0.capitalized }, accent: accent) }
+                // When the unit is off, "off" isn't among the selectable modes — show the
+                // first real mode as the selection rather than leaving the control blank.
+                let currentMode = modes.contains(s?.hvacMode ?? "") ? (s?.hvacMode ?? "") : (modes.first ?? "")
+                FacetCard(title: "Mode") { HavenSegmented(options: modes, selection: Binding(get: { currentMode }, set: { store.setClimateMode(entityId, mode: $0) }), label: { $0.capitalized }, accent: accent) }
             }
             if let fans = s?.fanModes, fans.count > 1 {
                 FacetCard(title: "Fan") { HavenSegmented(options: fans, selection: Binding(get: { s?.fanMode ?? fans[0] }, set: { store.setFanMode(entityId, mode: $0) }), label: { $0.capitalized }, accent: accent) }

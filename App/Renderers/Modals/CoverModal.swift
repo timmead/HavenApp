@@ -35,5 +35,7 @@ struct CoverModal: View {
             }.buttonStyle(.bordered).tint(accent) }
             Spacer()
         }
+        .onChange(of: s?.positionPercent) { _, _ in dragPercent = nil }
+        .onChange(of: s?.isOpen ?? false) { _, _ in dragPercent = nil }
     }
 }
