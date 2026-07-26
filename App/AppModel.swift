@@ -23,6 +23,12 @@ final class AppModel {
     var phase: Phase = .loggedOut
     var serverURLText = "http://homeassistant.local:8123"
     let store = HomeStore()
+    /// Guided setup for the `havenapp` integration. Created once and re-`attach`ed on every
+    /// reconnect rather than rebuilt: the restart step deliberately kills the socket, and what
+    /// the flow already knows ("we downloaded it", "we restarted it") has to survive the
+    /// reconnection that follows, or Home Assistant coming back would look like a fresh arrival
+    /// with no history.
+    let onboarding = OnboardingModel()
 
     private let tokens: TokenStore = KeychainTokenStore()
     private let oauth = OAuthClient()
@@ -35,6 +41,30 @@ final class AppModel {
     /// cancellable — otherwise a stale loop from a previous session could keep retrying in the
     /// background and later flip `phase` back to `.ready` after a `signOut()`.
     private var connectTask: Task<Void, Never>?
+
+    init() {
+        // The onboarding flow can deliberately take Home Assistant down (its restart step), and
+        // `connect()` returns for good once it reaches `.ready` — nothing else in the app watches
+        // for a socket drop afterwards. So the restart has to be able to ask for a reconnect, or
+        // it would strand the user on "waiting for Home Assistant to come back" indefinitely.
+        onboarding.onNeedsReconnect = { [weak self] in
+            Task { await self?.reconnectAfterRestart() }
+        }
+    }
+
+    /// Re-runs the connect loop over the existing credentials after onboarding restarted Home
+    /// Assistant. Reuses the ordinary candidate/backoff machinery rather than inventing a
+    /// restart-specific wait: HA is simply unreachable for a while, which is exactly the case
+    /// that loop already handles — and the user sees the familiar retry UI instead of a spinner
+    /// with no end. On success, `connect()`'s own tail re-`attach`es the onboarding model and
+    /// re-probes, which is what clears `isAwaitingRestart`.
+    private func reconnectAfterRestart() async {
+        guard baseURL != nil, tokenProvider != nil else { return }
+        // Closes the now-dead socket (and its heartbeat) before a new one replaces it — the same
+        // leak `HomeStore.reset` exists to prevent on sign-out.
+        await store.reset()
+        await startConnecting()
+    }
 
     func restoreIfPossible() async {
         guard tokens.load() != nil, let url = savedBaseURL() else { return }
@@ -91,6 +121,7 @@ final class AppModel {
         baseURL = nil
         tokenProvider = nil
         await store.reset()
+        onboarding.reset()
         phase = .loggedOut
     }
 
@@ -104,6 +135,7 @@ final class AppModel {
         tokens.clear()
         tokenProvider = nil
         await store.reset()
+        onboarding.reset()
         phase = .loggedOut
     }
 
@@ -221,6 +253,16 @@ final class AppModel {
                         // discovered URL after the session it belongs to is already gone.
                         if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
                             rememberDiscoveredURLs(config)
+                        }
+                        // Same best-effort footing as the URL discovery above, and read-only:
+                        // `probeHavenIntegration` only ever asks questions. Nothing that changes
+                        // the user's Home Assistant can happen without them confirming it first
+                        // (see `OnboardingModel.confirmPendingMutation`), so this is safe to run
+                        // unattended on every connect — which is also what lets the flow pick
+                        // itself back up after the restart step drops the socket.
+                        if !Task.isCancelled {
+                            onboarding.attach(home)
+                            await onboarding.probe()
                         }
                         return
                     } catch TokenProviderError.reauthenticationRequired {

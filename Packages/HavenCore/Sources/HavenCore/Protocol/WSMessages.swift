@@ -1,6 +1,8 @@
 import Foundation
 
-public struct WSError: Sendable, Equatable, Error {
+/// `Hashable` so it can ride inside `HavenOnboardingStep` (which is itself `Hashable` for use as a
+/// SwiftUI identity/`Set` element); both stored properties are `String`, so the synthesis is free.
+public struct WSError: Sendable, Hashable, Error {
     public let code: String
     public let message: String
     public init(code: String, message: String) { self.code = code; self.message = message }
@@ -102,6 +104,57 @@ public enum WSCommand {
     /// for it exists (installing the files via HACS alone does not register it). Onboarding
     /// probes this to detect the integration; see `HavenIntegrationDetector`.
     public static func havenappInfo(id: Int) -> Data { data(["id": id, "type": "havenapp/info"]) }
+    /// Home Assistant's own "who am I" command — answerable by *any* authenticated user, whether
+    /// or not `havenapp` is installed. Onboarding needs `is_admin` from it to avoid walking a
+    /// non-admin through an admin-only HACS/HA step in the branches where `havenapp/info` (and so
+    /// its `ha_user_is_admin`) never ran at all. See `HavenIntegrationDetector.classify`'s
+    /// `isAdmin` parameter.
+    public static func currentUser(id: Int) -> Data { data(["id": id, "type": "auth/current_user"]) }
+
+    // MARK: - HACS
+    //
+    // The three command names below were verified against HACS's own source
+    // (`custom_components/hacs/websocket/`), not inferred — note the singular/plural split:
+    // `hacs/repositories/…` for list and add, `hacs/repository/…` (singular) for download. HA
+    // answers an unknown command with a `unknown_command` error rather than doing anything, so
+    // getting one of these wrong is a silent no-op for the user and an easy bug to ship. The
+    // exact strings each of these emits are asserted in `HACSRepositoryTests`.
+
+    /// Every repository HACS knows about — *not* only the downloaded ones. Each item carries an
+    /// `installed` flag; see `HACSRepository` for why the two lists must never be conflated.
+    /// `categories` is optional and narrows the answer (we only ever care about `"integration"`).
+    public static func hacsRepositoriesList(id: Int, categories: [String]? = nil) -> Data {
+        var body: [String: Any] = ["id": id, "type": "hacs/repositories/list"]
+        if let categories { body["categories"] = categories }
+        return data(body)
+    }
+
+    /// Registers a repository with HACS as a custom repository. `repository` is the GitHub
+    /// `owner/repo` string here — unlike `hacsRepositoryDownload`, which takes HACS's own id.
+    /// `category` must be lowercase (`"integration"`).
+    public static func hacsRepositoriesAdd(id: Int, repository: String, category: String) -> Data {
+        data(["id": id, "type": "hacs/repositories/add", "repository": repository, "category": category])
+    }
+
+    /// Downloads a repository HACS already knows about. `repository` is HACS's own **id**, not
+    /// the `owner/repo` full name (`hacs/repository/info` names the same parameter
+    /// `repository_id`, which is what confirms ids are the currency here). Always read the id
+    /// back from `hacsRepositoriesList` rather than assuming it — see
+    /// `HACSRepositoryIndex.match(fullName:in:)`.
+    public static func hacsRepositoryDownload(id: Int, repository: String, version: String? = nil) -> Data {
+        var body: [String: Any] = ["id": id, "type": "hacs/repository/download", "repository": repository]
+        if let version { body["version"] = version }
+        return data(body)
+    }
+
+    /// Restarts Home Assistant. Briefly takes the user's whole home offline, so this must only
+    /// ever be sent behind an explicit confirmation that says so — see
+    /// `HavenOnboardingStep.restartHomeAssistant`'s presentation, whose confirmation copy is
+    /// asserted in `HavenOnboardingFlowTests`.
+    public static func restartHomeAssistant(id: Int) -> Data {
+        data(["id": id, "type": "call_service", "domain": "homeassistant", "service": "restart"])
+    }
+
     public static func registryList(id: Int, type: String) -> Data { data(["id": id, "type": type]) }
     public static func subscribeEvents(id: Int, eventType: String) -> Data {
         data(["id": id, "type": "subscribe_events", "event_type": eventType])
