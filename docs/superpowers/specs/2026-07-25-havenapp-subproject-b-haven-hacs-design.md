@@ -78,6 +78,8 @@ Record = {
   version:    int,             # monotonic, server-assigned, incremented per successful write
   updated:    timestamp,       # server-assigned (UTC)
   updated_by: <ha_user_id>,
+  owner_user_id:  <ha_user_id>?,   # device scope only — set on first write (§5.5)
+  owner_token_id: <token_id>?,     # device scope only — when available (§5.5)
   payload:    JSON             # category A: schema-validated; category B: opaque
 }
 ```
@@ -100,9 +102,26 @@ No silent last-write-wins, and no server-side merging (impossible for opaque cat
 - **Read** `shared`: any authenticated HA user.
 - **Write** `shared`: **HA admins only.** This mirrors HA's own permission model — the person curating the house dashboard is the admin.
 - **Read/write** `user:<id>`: only that user.
-- **Read/write** `device:<id>`: any authenticated user (the installation id is the secret, and the data is non-sensitive presentation state).
+- **Read/write** `device:<id>`: **bound to an owner**, established on first write (trust-on-first-use) and enforced thereafter — see below.
 
 Permission failures return a distinct error code so the client can explain *why* rather than showing a generic failure.
+
+### 5.5 Device-scope ownership binding
+
+The `installation_id` is a client-generated UUID and must **not** be treated as a secret — UUIDs travel in backups, logs and diagnostics. Its job is namespacing, not authorization. Authorization is bound to identity the server can verify:
+
+**On first write** to `device:<installation_id>`, the record is stamped with an owner:
+```
+owner_user_id:  <ha_user_id>          # always recorded
+owner_token_id: <refresh_token_id>    # recorded when available (see below)
+```
+**On every subsequent read or write**, the caller must match the recorded owner. A mismatch returns `not_authorized`. This means another household member cannot read or manipulate your device record even if they learn its id.
+
+**Preferred binding — HA's own per-install identity.** HavenApp performs a fresh OAuth login per install, and Home Assistant issues a **distinct refresh token per login**, so HA already holds a per-install identity we do not have to invent or store a secret for. Where the WebSocket connection exposes the calling `refresh_token_id`, bind to it: then even the same user's *other* device cannot write this device's record, and there is no bearer secret in the client to leak, sync or rotate.
+
+> **Verify at implementation:** confirm `refresh_token_id` is reachable from the active WebSocket connection on the target HA version. If it is not, fall back to `owner_user_id` alone — which still closes the cross-user hole, just not the same-user-multi-device case. Do not design around the assumption without checking.
+
+**Reclaiming a record.** Because binding is trust-on-first-use, a reinstalled app generating a new `installation_id` simply creates a new record; the orphaned one is inert and owned by nobody reachable. Clients should not attempt to "take over" an existing device record — if the owner check fails, treat the id as unusable and generate a fresh one rather than adding a takeover path (which would reintroduce exactly the hole this closes).
 
 ## 6. Wire API
 
@@ -142,7 +161,7 @@ Each unit has one clear job: `store.py` is pure storage logic (scopes, versionin
 ## 8. Testing
 
 - **`pytest` + `pytest-homeassistant-custom-component`** — the standard harness for HA custom integrations. It provides a real in-process `hass` fixture, so WebSocket commands are tested end-to-end rather than mocked.
-- **Coverage that matters:** round-tripping a payload; version increments; a stale write is rejected and returns current state; a non-admin cannot write `shared` but can read it; a user cannot read another user's `user:` scope; unknown scope rejected; delete then get returns null; `haven/info` reports version and capabilities.
+- **Coverage that matters:** round-tripping a payload; version increments; a stale write is rejected and returns current state; a non-admin cannot write `shared` but can read it; a user cannot read another user's `user:` scope; a second user cannot read or write a `device:` record owned by someone else, and first-write ownership binding is applied; unknown scope rejected; delete then get returns null; `haven/info` reports version and capabilities.
 - **Manual verification (the part tests cannot prove):** install into the real Home Assistant via HACS as a custom repository, confirm it appears, sets up through the UI config flow, survives an HA restart, and that the iOS app can call `haven/info` against it.
 
 ## 9. Success criteria
@@ -159,5 +178,6 @@ Each unit has one clear job: `store.py` is pure storage logic (scopes, versionin
 - **Client onboarding (blocking for release, not for B):** detect-HACS → detect-`haven` → admin check → guided install/update flow, including the HA-restart step. Belongs to a client sub-project; B provides `haven/info` as its detection surface.
 - **What actually goes in each scope** is a client decision deferred until config mode exists — the storage layer deliberately supports all three so it need not be settled now.
 - **Category A's first real content** arrives with Sub-project F (critical-sensor rules). Expect the schema-versioning and forced-update path to get its first genuine exercise then.
-- **`installation_id` generation and stability** across app reinstall/restore is a client concern to define alongside device-scoped features.
+- **`installation_id` generation and stability** across app reinstall/restore is a client concern to define alongside device-scoped features. Note it is a namespace, not a secret (§5.5) — a reinstall generating a fresh id is expected and harmless.
+- **Confirm `refresh_token_id` availability** on the active WebSocket connection for the target HA version (§5.5); fall back to user-only binding if absent.
 - The efficiency work (batched subscriptions with priority tiers) remains unbuilt and unmeasured; revisit only if a large home shows a real problem.
