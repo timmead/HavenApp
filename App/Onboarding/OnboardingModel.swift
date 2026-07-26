@@ -118,12 +118,25 @@ final class OnboardingModel {
         isBusy = false
 
         switch result {
-        case .failure(let error):
-            failureMessage = "\(error.message) (\(error.code))"
-            return
         case .success:
-            if let action = step.recordedAction { flow.recordAttempt(action) }
+            break
+        case .failure(let error):
+            // Home Assistant's shutdown can beat the call_service result frame back to us: HA
+            // schedules the actual stop as a task and returns, so the common case *does* deliver
+            // the result first, but it's a race, not a guarantee. If the socket simply closed
+            // right after we asked for a restart, that closing is itself evidence the restart is
+            // proceeding, not proof it failed — treating it as a real failure would strand the
+            // user on a dead socket showing "server closed connection (closed)" for their single
+            // most disruptive action, with no recorded attempt and so no reconnect ever
+            // triggered (see `flow.isAwaitingRestart` below). Treat it as a probable success and
+            // let the reconnect-then-probe cycle below establish the truth — it's the only honest
+            // confirmation this design accepts even when the result frame *does* arrive on time.
+            guard mutation == .restartHomeAssistant, error.code == "closed" else {
+                failureMessage = "\(error.message) (\(error.code))"
+                return
+            }
         }
+        if let action = step.recordedAction { flow.recordAttempt(action) }
         // A restart takes the socket down with it, so there is nothing to ask and nobody to ask
         // it of until the app has reconnected. Probing now would fail for reasons that have
         // nothing to do with the integration and land the user on an "we can't tell what's

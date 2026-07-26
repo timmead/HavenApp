@@ -11,7 +11,15 @@ struct ModalHeader: View {
             // Grouped as one VoiceOver element ("name, state") — the icon carries no
             // information a sighted user gets that isn't already in the text, so exposing
             // it separately would just be a second, redundant stop while swiping.
-            Group {
+            //
+            // A real container, not `Group`: `Group` isn't a layout container at all — it
+            // propagates whatever modifiers are attached to it to *each child individually*
+            // rather than applying them once to the group as a whole. `.accessibilityElement`/
+            // `.accessibilityLabel` on a `Group` therefore applied twice, once to the `Image` and
+            // once to the `VStack`, producing exactly the two redundant VoiceOver stops this
+            // comment says it exists to avoid. `HStack` is a genuine container, so the modifiers
+            // below apply exactly once, to the row as a whole.
+            HStack(spacing: 10) {
                 Image(systemName: systemImage).font(.system(size: 20)).foregroundStyle(accent).frame(width: 38, height: 38).background(accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
                 VStack(alignment: .leading, spacing: 1) { Text(title).font(.system(size: 16, weight: .bold)); Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary) }
             }

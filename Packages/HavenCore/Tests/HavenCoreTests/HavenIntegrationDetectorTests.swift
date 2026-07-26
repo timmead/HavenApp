@@ -153,6 +153,57 @@ import Foundation
         #expect(status == .indeterminate)
     }
 
+    // MARK: - I-3 (final whole-branch review): transport failure vs. a genuine decoding surprise
+    //
+    // Probing over a dead socket must never produce `.indeterminate` — its copy confidently tells
+    // the user "this is a problem with Haven… please report it," which is simply wrong when the
+    // real cause is a dropped connection. `transportFailed` (threaded through from
+    // `HomeConnection.probeHavenIntegration` distinguishing a `DecodingError` from everything
+    // else) is what lets `classify` tell the two apart.
+
+    @Test func transportFailureYieldsDisconnectedNotIndeterminate() {
+        let status = HavenIntegrationDetector.classify(
+            components: nil,
+            infoResult: .failure(WSError(code: "closed", message: "server closed connection")),
+            transportFailed: true
+        )
+        #expect(status == .disconnected)
+    }
+
+    @Test func aGenuineDecodingSurpriseStillYieldsIndeterminateNotDisconnected() {
+        // transportFailed defaults to false — a real wire-shape surprise (the request completed,
+        // the payload just didn't decode as expected) must keep producing `.indeterminate`,
+        // unchanged from before this fix.
+        let status = HavenIntegrationDetector.classify(
+            components: nil,
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a"))
+        )
+        #expect(status == .indeterminate)
+    }
+
+    @Test func transportFailedIsIgnoredWhenComponentsIsActuallyTrustworthy() {
+        // transportFailed only matters for the same nil/empty-components gate that produces
+        // .indeterminate — it must not leak into (or override) the ordinary, components-driven
+        // branches below that gate.
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"],
+            transportFailed: true
+        )
+        #expect(status == .needsConfigEntry)
+    }
+
+    @Test func transportFailedIsIrrelevantWhenTheProbeItselfSucceeded() {
+        let info = readyInfo()
+        let status = HavenIntegrationDetector.classify(
+            components: nil,
+            infoResult: .success(info),
+            transportFailed: true
+        )
+        #expect(status == .ready(info))
+    }
+
     @Test func indeterminateIsNeverReachedWhenTheProbeItselfSucceeded() {
         // A successful havenapp/info is positive, direct proof — stronger than components — so it
         // must win outright even if components came back nil/empty/malformed.

@@ -37,44 +37,45 @@ import Foundation
     }
 
     @Test func isNabuCasaHostRejectsAHostileValueArrivingFromPersistedState() {
-        // Simulates constraint A of the I-3 fix: a hostile `external_url` an earlier,
-        // unvalidated build (commit a78bdc2) already wrote to UserDefaults with no check at all.
-        // `AppModel.discoveredURLs()` round-trips exactly this way (read the stored string, parse
-        // it back to a URL, run it through this same predicate) before ever treating it as a
-        // candidate — proving the predicate rejects it identically regardless of whether it just
-        // arrived on the wire or was already sitting in persisted state from before this fix
-        // existed.
-        let persisted = "https://evil.example"
+        // A hostile `external_url` an earlier, less careful build (commits a78bdc2/43043c2, both
+        // superseded — see `DiscoveredCandidateURLs`'s documentation for the full incident) may
+        // already have written to `UserDefaults` — proving the predicate answers identically for
+        // a value round-tripped through storage as for one straight off the wire.
+        let persisted = "https://abc123.ui.nabu.casa"
         let roundTripped = UserDefaults.standard
         roundTripped.set(persisted, forKey: "test.legacyDiscoveredExternalURL")
         defer { roundTripped.removeObject(forKey: "test.legacyDiscoveredExternalURL") }
         let loaded = roundTripped.string(forKey: "test.legacyDiscoveredExternalURL").flatMap(URL.init(string:))
         #expect(loaded != nil)
-        #expect(!ConnectionEndpoint.isNabuCasaHost(loaded!))
+        // Note what this proves and what it doesn't: the host genuinely *is* a Nabu Casa
+        // instance — that's true whether it's the user's own or an attacker's. That's exactly
+        // the category-vs-identity gap `isNabuCasaHost`'s documentation now spells out, and why
+        // `DiscoveredCandidateURLs.validating` (below) no longer uses this predicate to decide
+        // what to adopt from `get_config` at all.
+        #expect(ConnectionEndpoint.isNabuCasaHost(loaded!))
     }
 
-    // MARK: - DiscoveredCandidateURLs.validating — the whole stored-state → candidate decision
+    // MARK: - DiscoveredCandidateURLs.validating — adopts nothing from get_config, ever
     //
-    // Fix round 1 validated `external_url` but left `internal_url` completely unchecked — the
-    // exact same attack (a MITM'd get_config injecting a hostile host) through the adjacent
-    // field, since internal_url was classified `.local` for any non-Nabu-Casa host and appended
-    // as a candidate *ahead of* the user-entered URL. `internal_url` cannot be validated as "a
-    // private address" inside this app's threat model (see `DiscoveredCandidateURLs`'s doc), so
-    // it is dropped unconditionally rather than checked. This is the pure function that decision
-    // lives in — `AppModel.rememberDiscoveredURLs`/`discoveredExternalURL` call only this and
-    // hold no validation logic of their own, so these tests exercise the actual fix, not a claim
-    // about untested App-layer code.
+    // C-1 (final whole-branch review): `isNabuCasaHost` proves a host is *a* Nabu Casa instance,
+    // never that it is *this user's* — Nabu Casa subdomains are issued to any paying subscriber,
+    // including an attacker who buys their own and MITMs one `get_config` response to inject it.
+    // Two prior fix rounds used that predicate to decide whether to auto-adopt `external_url`;
+    // both were the same mistake. There is no property of data arriving over an
+    // attacker-controlled channel that proves it belongs to the user's instance, so the only
+    // correct answer is to adopt nothing from `get_config` at all, ever — remote access comes
+    // only from the URL the user actually typed. This is the pure function that decision lives
+    // in — `AppModel.rememberDiscoveredURLs`/`discoveredExternalURL` (renamed
+    // `purgeDiscoveredURLs`) call only this and hold no validation logic of their own, so these
+    // tests exercise the actual fix, not a claim about untested App-layer code.
 
     @Test func validatingNeverAdoptsInternalURLRegardlessOfValue() {
-        // "Hostile internal_url straight off the wire is never persisted": simulates
-        // `rememberDiscoveredURLs` receiving a `get_config` result where a MITM injected a
-        // hostile `internal_url` instead of `external_url`.
         let hostileInternal = url("https://evil.example")
         let result = DiscoveredCandidateURLs.validating(rawInternalURL: hostileInternal, rawExternalURL: nil)
         #expect(result.externalURL == nil)
         // There is no `internalURL` field on the result at all — by construction, nothing given
-        // as `rawInternalURL` can ever become a candidate. Varying it (even to a Nabu-Casa host,
-        // which would very much matter if this were `rawExternalURL`) never changes the outcome.
+        // as `rawInternalURL` can ever become a candidate. Varying it (even to a genuine Nabu
+        // Casa host) never changes the outcome.
         let evenANabuCasaHostAsInternal = DiscoveredCandidateURLs.validating(
             rawInternalURL: url("https://abc123.ui.nabu.casa"),
             rawExternalURL: nil
@@ -82,28 +83,28 @@ import Foundation
         #expect(evenANabuCasaHostAsInternal.externalURL == nil)
     }
 
-    @Test func validatingDropsAHostileInternalURLEvenWhenAGenuineExternalURLIsAlsoPresent() {
-        // Proves the two fields are decided independently: a hostile internal_url alongside a
-        // legitimate external_url doesn't taint or otherwise affect the external_url outcome.
-        let result = DiscoveredCandidateURLs.validating(
-            rawInternalURL: url("https://evil.example"),
-            rawExternalURL: url("https://abc123.ui.nabu.casa")
-        )
-        #expect(result.externalURL == url("https://abc123.ui.nabu.casa"))
+    @Test func validatingNeverAdoptsAGenuineNabuCasaExternalURLStraightOffTheWire() {
+        // The C-1 finding, made concrete: this is exactly what a fresh get_config result would
+        // hand `rememberDiscoveredURLs` — a syntactically perfect, genuinely-issued Nabu Casa
+        // host — whether it's the user's own or one an attacker bought for this exact purpose is
+        // not something this function (or anything downstream of it) can tell, so it must not be
+        // adopted either way.
+        let result = DiscoveredCandidateURLs.validating(rawInternalURL: nil, rawExternalURL: url("https://abc123.ui.nabu.casa"))
+        #expect(result.externalURL == nil)
     }
 
-    @Test func validatingRejectsAHostileExternalURLStraightOffTheWire() {
+    @Test func validatingNeverAdoptsAnArbitraryHTTPSExternalURL() {
         let result = DiscoveredCandidateURLs.validating(rawInternalURL: nil, rawExternalURL: url("https://evil.example"))
         #expect(result.externalURL == nil)
     }
 
-    @Test func validatingAcceptsAGenuineNabuCasaExternalURL() {
-        // "A legitimate *.ui.nabu.casa external_url still survives both boundaries": this same
-        // function is called identically at the write boundary (a fresh get_config result) and
-        // the read boundary (a value loaded back from UserDefaults) — there's only one code path
-        // to prove this for.
-        let result = DiscoveredCandidateURLs.validating(rawInternalURL: nil, rawExternalURL: url("https://abc123.ui.nabu.casa"))
-        #expect(result.externalURL == url("https://abc123.ui.nabu.casa"))
+    @Test func validatingNeverAdoptsAPersistedExternalURLEvenAGenuineNabuCasaOne() {
+        // "A persisted one is dropped [when read back]": a genuine `*.ui.nabu.casa` value an
+        // earlier build already wrote to `UserDefaults` is exactly as untrusted, read back, as a
+        // fresh one arriving on the wire right now — same function, same answer, either way.
+        let persisted = url("https://abc123.ui.nabu.casa")
+        let result = DiscoveredCandidateURLs.validating(rawInternalURL: nil, rawExternalURL: persisted)
+        #expect(result.externalURL == nil)
     }
 
     @Test func validatingWithNoInputsYieldsNoExternalURL() {
@@ -111,11 +112,11 @@ import Foundation
         #expect(result.externalURL == nil)
     }
 
-    @Test func userEnteredURLStillBecomesACandidateWhenDiscoveredInternalIsNil() {
+    @Test func userEnteredURLStillBecomesACandidateWhenNothingIsDiscovered() {
         // "User-entered URL is unaffected": this is exactly the shape `AppModel` now always
-        // builds candidates with — `discoveredInternal` permanently `nil` (see
-        // `ConnectionEndpoint.candidates`'s documentation for why) and `discoveredExternal` from
-        // `DiscoveredCandidateURLs`. The user's own typed/restored URL must still show up.
+        // builds candidates with — both `discoveredInternal` and `discoveredExternal` permanently
+        // `nil` (see `ConnectionEndpoint.candidates`'s documentation for why). The user's own
+        // typed/restored URL must still show up; remote access can now only ever come from here.
         let validated = DiscoveredCandidateURLs.validating(
             rawInternalURL: nil,
             rawExternalURL: url("https://abc123.ui.nabu.casa")
@@ -125,10 +126,21 @@ import Foundation
             discoveredInternal: nil,
             discoveredExternal: validated.externalURL
         )
-        #expect(candidates == [
-            .local(url("http://192.168.1.42:8123")),
-            .remote(url("https://abc123.ui.nabu.casa")),
-        ])
+        #expect(candidates == [.local(url("http://192.168.1.42:8123"))])
+    }
+
+    @Test func userEnteredOwnNabuCasaURLStillWorksDirectly() {
+        // The one path remote access still has: a user who *typed* their own Nabu Casa address
+        // (or it was restored from a previous sign-in) gets it classified remote exactly as
+        // before — `isNabuCasaHost` remains correct and necessary for classifying a URL the
+        // caller already has an independent reason to trust; it's only auto-adoption from
+        // `get_config` that's gone.
+        let candidates = ConnectionEndpoint.candidates(
+            userEntered: url("https://abc123.ui.nabu.casa"),
+            discoveredInternal: nil,
+            discoveredExternal: nil
+        )
+        #expect(candidates == [.remote(url("https://abc123.ui.nabu.casa"))])
     }
 
     @Test func singleUserEnteredURLYieldsOneLocalCandidate() {

@@ -81,7 +81,20 @@ public enum HavenIntegrationStatus: Sendable, Equatable {
     /// instead of silently as a wrong remediation instruction shown to a correctly-configured
     /// user. Never produced when `havenapp/info` itself succeeded — see `classify`'s
     /// documentation for why a successful probe is trusted outright regardless of `components`.
+    ///
+    /// Distinct from `disconnected` below: this means the probe *reached* Home Assistant and got
+    /// an answer, just not one shaped the way this app expects. See `classify`'s
+    /// `transportFailed` parameter for how the two are told apart.
     case indeterminate
+
+    /// The probe couldn't reach Home Assistant at all — the same missing-`components` signal as
+    /// `indeterminate`, but caused by a transport failure (the socket was already dead, or died
+    /// mid-probe), not a decoding assumption. This is not a Haven bug and nothing on the user's
+    /// Home Assistant needs changing; the honest thing to say is "try again once you're
+    /// reconnected," not "please report this," which is what `indeterminate`'s copy says and
+    /// would otherwise be shown for a plain dropped Wi-Fi connection. See `classify`'s
+    /// `transportFailed` parameter.
+    case disconnected
 }
 
 /// Which of `HavenIntegrationStatus`'s admin-only remediation steps `blockedByNonAdmin` is
@@ -168,11 +181,23 @@ public enum HavenIntegrationDetector {
     ///     entirely once `havenapp/info` has succeeded: `info.haUserIsAdmin` is the authority
     ///     there (see `notAdmin`), since it reflects the same request that produced every other
     ///     field being gated on.
+    ///   - transportFailed: Whether `components` is missing/empty *because the probe couldn't
+    ///     reach Home Assistant at all* (a dead or dropped socket), as opposed to a genuine
+    ///     decoding-shape surprise in a response that actually arrived. Only consulted alongside
+    ///     the same `nil`/empty `components` check that produces `.indeterminate` — it exists
+    ///     purely to pick between that case and `.disconnected`, which is the honest one when the
+    ///     real cause is "we couldn't ask," not "we asked and didn't understand the answer." Get
+    ///     this wrong in the direction of `false` and a dropped Wi-Fi connection gets told to the
+    ///     user as a Haven bug to report; get it wrong in the direction of `true` and a genuine
+    ///     wire-shape surprise gets dismissed as "just try again" — see `HomeConnection.probeHavenIntegration`
+    ///     for how it's actually determined (a `DecodingError` from `get_config` is the only thing
+    ///     that keeps this `false`; anything else means the request itself didn't complete).
     public static func classify(
         components: [String]?,
         infoResult: Result<HavenIntegrationInfo, WSError>,
         hacsRepositories: [String]? = nil,
-        isAdmin: Bool? = nil
+        isAdmin: Bool? = nil,
+        transportFailed: Bool = false
     ) -> HavenIntegrationStatus {
         switch infoResult {
         case .success(let info):
@@ -199,7 +224,7 @@ public enum HavenIntegrationDetector {
             // function's `components` documentation for why `nil`/`[]` cannot be read as "nothing
             // is loaded."
             guard let components, !components.isEmpty else {
-                return .indeterminate
+                return transportFailed ? .disconnected : .indeterminate
             }
             guard components.contains("havenapp") else {
                 guard components.contains("hacs") else {

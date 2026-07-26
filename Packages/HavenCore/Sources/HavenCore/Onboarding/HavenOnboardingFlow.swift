@@ -12,17 +12,23 @@ public struct HavenOnboardingProbe: Sendable, Equatable {
     /// happy path doesn't ask) or couldn't answer.
     public let hacsRepositories: [HACSRepository]?
     public let isAdmin: Bool?
+    /// Whether `components` is `nil` because the `get_config` request itself never completed —
+    /// see `HavenIntegrationDetector.classify`'s `transportFailed` parameter, which this feeds
+    /// directly. Distinguishes "the socket was down" from "we got an answer we didn't expect."
+    public let transportFailed: Bool
 
     public init(
         components: [String]?,
         info: Result<HavenIntegrationInfo, WSError>,
         hacsRepositories: [HACSRepository]? = nil,
-        isAdmin: Bool? = nil
+        isAdmin: Bool? = nil,
+        transportFailed: Bool = false
     ) {
         self.components = components
         self.info = info
         self.hacsRepositories = hacsRepositories
         self.isAdmin = isAdmin
+        self.transportFailed = transportFailed
     }
 
     /// Our repository's HACS entry, installed or not. This is what the download step reads its id
@@ -45,7 +51,8 @@ public struct HavenOnboardingProbe: Sendable, Equatable {
             components: components,
             infoResult: info,
             hacsRepositories: hacsRepositories.map(HACSRepositoryIndex.downloadedFullNames(in:)),
-            isAdmin: isAdmin
+            isAdmin: isAdmin,
+            transportFailed: transportFailed
         )
     }
 }
@@ -179,6 +186,9 @@ public struct HavenOnboardingFlow: Sendable, Equatable {
         case .indeterminate:
             return .diagnostic(.indeterminateComponents)
 
+        case .disconnected:
+            return .diagnostic(.disconnected)
+
         case .hacsMissing:
             return .installHACS
 
@@ -224,20 +234,40 @@ extension HomeConnection {
     /// Assistant — this is safe to run automatically on connect, which is the whole reason the
     /// mutating steps are separate, individually-confirmed calls.
     ///
-    /// Runs its own `get_config` rather than reusing the one `AppModel` issues for URL discovery:
-    /// this has to work identically for a manual "check again" from the onboarding screen, where
-    /// there is no connect in progress to borrow a result from. A second `get_config` is cheap.
+    /// Runs its own `get_config` — this has to work identically for a manual "check again" from
+    /// the onboarding screen, where there is no connect in progress to borrow a result from. A
+    /// second `get_config` is cheap.
     ///
     /// The two follow-up queries are conditional on purpose. HACS is only asked when the probe
     /// failed *and* `hacs` is actually loaded — a fully working instance should never see
     /// onboarding touch HACS at all — and `auth/current_user` is only asked when the probe failed,
     /// because `classify` ignores `isAdmin` entirely once `havenapp/info` has answered (its own
     /// `ha_user_is_admin` is the authority there).
+    ///
+    /// `get_config`'s failure mode is captured explicitly, not folded into a plain `nil` via
+    /// `try?`: if the socket is simply dead (walked out of Wi-Fi range with the onboarding sheet
+    /// on screen, or the restart step's own socket drop beating this probe to it), that is not
+    /// evidence of anything about `havenapp`/HACS, and must not be shown to the user as
+    /// `.indeterminate`'s "this is a problem with Haven… please report it" — that copy asserts,
+    /// with total confidence, a wire-shape mistake that a dropped Wi-Fi connection has nothing to
+    /// do with. A `DecodingError` is the one specific case that *is* a wire-shape surprise (the
+    /// request completed; the response just didn't parse as expected); anything else thrown here
+    /// means the request never completed at all, which is `.disconnected`'s territory instead —
+    /// see `HavenIntegrationDetector.classify`'s `transportFailed` parameter.
     public func probeHavenIntegration() async -> HavenOnboardingProbe {
-        let components = (try? await fetchInstanceConfig())?.components
+        var components: [String]?
+        var transportFailed = false
+        do {
+            components = try await fetchInstanceConfig().components
+        } catch is DecodingError {
+            components = nil
+        } catch {
+            components = nil
+            transportFailed = true
+        }
         let info = await fetchIntegrationInfo()
         guard case .failure = info else {
-            return HavenOnboardingProbe(components: components, info: info)
+            return HavenOnboardingProbe(components: components, info: info, transportFailed: transportFailed)
         }
         let repositories: [HACSRepository]?
         if components?.contains("hacs") == true {
@@ -250,7 +280,8 @@ extension HomeConnection {
             components: components,
             info: info,
             hacsRepositories: repositories,
-            isAdmin: isAdmin
+            isAdmin: isAdmin,
+            transportFailed: transportFailed
         )
     }
 }

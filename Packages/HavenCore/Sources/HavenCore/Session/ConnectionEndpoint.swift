@@ -41,8 +41,12 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     ///     this app's MITM-on-the-LAN threat model isn't implementable. This parameter, and its
     ///     existing tests, are kept for callers (present or future) able to supply an
     ///     independently-validated value.
-    ///   - discoveredExternal: Home Assistant's own `external_url` from `get_config`. For a Nabu
-    ///     Casa subscriber this is the `*.ui.nabu.casa` URL once cloud remote access is enabled.
+    ///   - discoveredExternal: Home Assistant's own `external_url` from `get_config`, **if the
+    ///     caller has independently verified it belongs to this user** — `isNabuCasaHost` below
+    ///     does *not* establish that (see its documentation) and must never be used as the sole
+    ///     gate for this parameter. `AppModel` deliberately always passes `nil` here — see
+    ///     `DiscoveredCandidateURLs`'s documentation for the full reasoning. Kept for callers
+    ///     (present or future) able to supply a value verified some other way.
     ///   - preferredFirst: A previously-successful URL to hoist to the front of the list, ahead
     ///     of the default local-before-remote ordering. Pass `nil` to always get the default
     ///     ordering (e.g. to re-probe the local candidate first).
@@ -94,13 +98,25 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         return ordered
     }
 
-    /// The single, strict definition of "this is a genuine Nabu Casa host" — a suffix match on
+    /// Answers exactly one question: **is this host *a* Nabu Casa host** — a suffix match on
     /// `.ui.nabu.casa` (so `abc123.ui.nabu.casa` matches, but a lookalike like
     /// `evil-ui.nabu.casa` or a host merely containing the string, e.g. `attacker.com` serving a
     /// path of `/.ui.nabu.casa`, does not: `URL.host` is just the authority's host component,
-    /// never a path). Exposed publicly so callers outside this type — e.g. `AppModel` deciding
-    /// whether a `get_config`-reported `external_url` is safe to auto-adopt — apply the exact
-    /// same check `classify` does below, rather than a second, potentially-drifting copy of it.
+    /// never a path).
+    ///
+    /// **This is a category check, not an identity check, and must never be used as one.**
+    /// `*.ui.nabu.casa` subdomains are issued to any paying Nabu Casa subscriber — including an
+    /// attacker, who can legitimately obtain their own. A URL passing this check proves only that
+    /// it is *some* Nabu Casa instance; it proves nothing about whether it is *this user's*
+    /// instance. An earlier fix round used this predicate to decide whether a `get_config`-
+    /// reported `external_url` was safe to auto-adopt as a future connection candidate (one that
+    /// `TokenProvider` would later trust with the refresh token) — that was the bug: it let an
+    /// attacker who MITM'd exactly one `get_config` response inject their own genuine, valid Nabu
+    /// Casa host and have it trusted indefinitely afterwards. See `DiscoveredCandidateURLs`'s
+    /// documentation for the full incident and why `get_config` no longer feeds a candidate at
+    /// all. This function is still correct and still needed for what it actually answers:
+    /// *classifying* a URL the caller already has some other reason to trust (chiefly, one the
+    /// user typed themselves) as local vs. remote — see `classify` below, its only caller.
     public static func isNabuCasaHost(_ url: URL) -> Bool {
         url.host?.lowercased().hasSuffix(".ui.nabu.casa") ?? false
     }

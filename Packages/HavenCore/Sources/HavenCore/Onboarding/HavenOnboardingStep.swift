@@ -78,6 +78,10 @@ public enum HavenOnboardingDiagnostic: Sendable, Equatable, Hashable {
     /// `havenapp` is loaded but `havenapp/info` still failed — per the integration source this
     /// shouldn't happen, so the underlying error is surfaced as a diagnostic instead of a guess.
     case commandsUnregistered(WSError)
+    /// The probe couldn't reach Home Assistant at all — see `HavenIntegrationStatus.disconnected`.
+    /// Not a Haven bug, and never told to the user as one: the honest thing to say is "try again
+    /// once you're reconnected."
+    case disconnected
 }
 
 /// A privileged Home Assistant mutation a step performs over the WebSocket API. Modelled as data
@@ -475,6 +479,26 @@ public extension HavenOnboardingStep {
                     If it doesn't, please report it with the message above.
                     """,
                     symbolName: "exclamationmark.triangle",
+                    actionLabel: nil,
+                    intent: .reprobe,
+                    allowsRecheck: true,
+                    didNotLandHint: nil
+                )
+            case .disconnected:
+                // Deliberately does NOT say "this is a problem with Haven" or ask for a bug
+                // report — see `HavenIntegrationStatus.disconnected`'s documentation. The probe
+                // never reached Home Assistant at all, most likely because the connection just
+                // dropped (Wi-Fi lost, a restart's socket closing before this ran), which is not
+                // evidence of anything about the integration or HACS.
+                return .init(
+                    title: "Haven lost its connection",
+                    explanation: """
+                    Haven couldn't reach Home Assistant just now, so it couldn't check what's \
+                    installed. This usually just means the connection dropped — check your Wi-Fi, \
+                    or that Home Assistant is reachable, then check again. There's nothing to \
+                    report here unless this keeps happening once you're reconnected.
+                    """,
+                    symbolName: "wifi.slash",
                     actionLabel: nil,
                     intent: .reprobe,
                     allowsRecheck: true,

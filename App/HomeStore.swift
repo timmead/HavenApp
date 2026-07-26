@@ -8,6 +8,24 @@ final class HomeStore {
     var historyByKey: [String: HistorySeries] = [:]
     private var connection: HomeConnection?
     private var subscriptionTask: Task<Void, Never>?
+    /// True only while `reset()` is deliberately tearing a live connection down (sign-out,
+    /// reauth, or `AppModel`'s own reconnect already replacing it). Guards `onDisconnected`
+    /// below: without it, `reset()`'s own teardown of `subscriptionTask` would look — from
+    /// inside that task — identical to the socket dying on its own, and fire a reconnect nobody
+    /// asked for on top of a teardown already in progress.
+    private var isResetting = false
+    /// Fired when the state-change subscription's stream ends *without* `reset()` having been
+    /// the cause — i.e. the underlying WebSocket actually dropped (Wi-Fi lost, Home Assistant
+    /// restarted, anything else), not a deliberate sign-out/reconnect already under way.
+    ///
+    /// Before this existed, nothing in the app observed a socket drop once `phase == .ready`:
+    /// `connect()` returns for good the moment it succeeds, so walking out of Wi-Fi range left
+    /// the dashboard rendering stale `states` forever (including lock status), every command
+    /// silently no-op'd (the optimistic flip's `try?`'d call fails quietly and rolls back), and
+    /// C2's whole local/remote candidate failover never got a chance to engage — the one
+    /// scenario it exists for. `AppModel` wires this to the same reconnect it already runs after
+    /// `OnboardingModel`'s restart step, generalized to any drop.
+    var onDisconnected: (() -> Void)?
 
     func attach(_ connection: HomeConnection) {
         subscriptionTask?.cancel(); subscriptionTask = nil
@@ -24,11 +42,16 @@ final class HomeStore {
         subscriptionTask?.cancel()
         subscriptionTask = Task { [weak self] in
             for await s in stream { self?.states[s.entityId] = s }
+            // The stream only ends when the underlying socket's receive loop does — either
+            // `reset()` deliberately tore it down (in which case `isResetting` is still true; see
+            // its documentation), or it dropped on its own and nobody has been told yet.
+            guard let self, !self.isResetting else { return }
+            self.onDisconnected?()
         }
     }
 
-    /// Tear down the live session (used on sign-out). Clears history and any open modal
-    /// too — otherwise signing into a different HA instance can show the previous
+    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and
+    /// any open modal too — otherwise signing into a different HA instance can show the previous
     /// account's chart data for a same-named sensor, or leave a stale modal presented.
     ///
     /// Disconnects the underlying `HomeConnection` before dropping it — nothing else in the app
@@ -37,6 +60,7 @@ final class HomeStore {
     /// like the abandoned-clients-in-`connect()` bug this mirrors, just triggered by a sign-out
     /// of a *working* connection instead of a failed attempt.
     func reset() async {
+        isResetting = true
         subscriptionTask?.cancel(); subscriptionTask = nil
         await connection?.disconnect()
         connection = nil
@@ -44,6 +68,7 @@ final class HomeStore {
         states = [:]
         historyByKey = [:]
         presented = nil
+        isResetting = false
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }

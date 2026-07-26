@@ -82,6 +82,19 @@ import Foundation
         #expect(p.actionLabel == nil)
     }
 
+    @Test func disconnectedBecomesADiagnosticThatDoesNotBlameHaven() {
+        // I-3 (final whole-branch review): probing over a dead socket must not produce the same
+        // "this is a problem with Haven… please report it" copy as a genuine decoding surprise —
+        // that's confidently wrong for a plain dropped Wi-Fi connection.
+        let s = step(.disconnected)
+        #expect(s == .diagnostic(.disconnected))
+        let p = s.presentation()
+        #expect(p.intent == .reprobe)
+        #expect(!p.explanation.lowercased().contains("problem with haven"))
+        #expect(!p.explanation.lowercased().contains("please report"))
+        #expect(p.actionLabel == nil)
+    }
+
     @Test func commandsUnregisteredCarriesTheUnderlyingErrorIntoTheDiagnostic() {
         let s = step(.commandsUnregistered(probeFailed))
         #expect(s == .diagnostic(.commandsUnregistered(probeFailed)))
@@ -291,6 +304,7 @@ import Foundation
             .restartHomeAssistant, .addConfigEntry, .updateIntegration(missingCapabilities: ["config.v1"]),
             .updateApp(schemaVersion: 2), .adminRequired(.needsInstall), .notAdmin,
             .diagnostic(.indeterminateComponents), .diagnostic(.commandsUnregistered(probeFailed)),
+            .diagnostic(.disconnected),
         ]
         for s in allSteps {
             guard let mutation = s.mutation else {
@@ -418,6 +432,26 @@ import Foundation
         ])
         #expect(!sent.contains { $0.hasPrefix("hacs/") })
         #expect(probe.status == .blockedByNonAdmin(.hacsMissing))
+    }
+
+    @Test func probeHavenIntegrationTreatsATransportFailureAsDisconnectedNotIndeterminate() async throws {
+        // I-3 (final whole-branch review): the socket dying before get_config's result ever
+        // arrives must not be told to the user as "this is a problem with Haven… please report
+        // it" — that's `.indeterminate`'s copy, reserved for a genuine decoding-shape surprise.
+        // `disconnect()` fails every request in flight with `WSError(code: "closed", ...)` — not
+        // a `DecodingError` — which is exactly the signal `probeHavenIntegration` looks for.
+        let conn = FakeWebSocketConnection()
+        let client = HAWebSocketClient(connection: conn)
+        await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
+        await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+        try await client.authenticate(token: "t")
+        await conn.setOnSend { _ in await client.disconnect() }
+
+        let probe = await HomeConnection(client: client).probeHavenIntegration()
+
+        #expect(probe.components == nil)
+        #expect(probe.transportFailed)
+        #expect(probe.status == .disconnected)
     }
 
     @Test func aNonAdminIsNeverWalkedThroughAnInstall() {
