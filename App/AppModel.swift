@@ -75,6 +75,22 @@ final class AppModel {
     private let customRemoteURLStore = CustomRemoteURLStore()
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
+
+    /// Loads images that live behind Home Assistant's authentication — media-player artwork and
+    /// camera snapshots — for the current session. `nil` while signed out.
+    ///
+    /// Built alongside the `TokenProvider` (see `beginSession`) rather than once at launch,
+    /// because its in-memory cache belongs to *one instance*: carried across a sign-in against a
+    /// different Home Assistant it would serve the previous account's pictures for same-named
+    /// entities, the same reason `HomeStore.reset` clears history.
+    ///
+    /// Within a session it never needs updating, and that is by construction: it holds no base URL
+    /// and no token of its own, asking the `TokenProvider` for both at the moment each request is
+    /// made. So a local↔remote failover — which changes the address mid-session — is picked up
+    /// with nothing to notify. Views read it from here; there is deliberately no `EnvironmentKey`
+    /// for it, since such a key needs a default value and a loader pointed at nothing is a
+    /// blank-tile generator.
+    private(set) var imageLoader: AuthenticatedImageLoader?
     /// The class of the connection `remoteAccess`/`remoteAccessOffer` were last computed over.
     /// Needed again when `remoteAccessOfferModel`'s own re-probe (after a successful enable) comes
     /// back, so that re-probe can go through the exact same adoption path
@@ -152,8 +168,20 @@ final class AppModel {
         // So `requireReauthentication()`'s "re-authorize, don't retype the host" holds even on a
         // cold launch — LoginView binds to `serverURLText`, not `baseURL`.
         serverURLText = url.absoluteString
-        tokenProvider = TokenProvider(baseURL: url, store: tokens, oauth: oauth, http: http)
+        beginSession(at: url)
         await startConnecting()
+    }
+
+    /// Creates the per-session objects that depend on a `TokenProvider`, together.
+    ///
+    /// One function rather than a pair of assignments at each call site so the two cannot drift:
+    /// an `imageLoader` left holding a *previous* session's provider would resolve every image
+    /// against an address nothing else is using any more — and since it caches, would keep serving
+    /// the old instance's pictures without a single failed request to show for it.
+    private func beginSession(at url: URL) {
+        let provider = TokenProvider(baseURL: url, store: tokens, oauth: oauth, http: http)
+        tokenProvider = provider
+        imageLoader = AuthenticatedImageLoader(credentials: provider)
     }
 
     func signIn() async {
@@ -194,7 +222,7 @@ final class AppModel {
             let t = try await oauth.login(baseURL: url, web: web, http: http)
             havenLog.info("token exchange OK (hasRefresh=\(t.refreshToken != nil, privacy: .public))")
             try tokens.save(t)
-            tokenProvider = TokenProvider(baseURL: url, store: tokens, oauth: oauth, http: http)
+            beginSession(at: url)
             await startConnecting()
         } catch {
             havenLog.error("sign-in failed at OAuth/token stage: \(error, privacy: .public)")
@@ -221,6 +249,9 @@ final class AppModel {
         clearCustomRemoteURL()
         baseURL = nil
         tokenProvider = nil
+        // Dropped, not just cleared: these are pictures of the user's home, fetched with their
+        // token, and nothing signed out has any business still holding them in memory.
+        imageLoader = nil
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
@@ -236,6 +267,7 @@ final class AppModel {
         await tokenProvider?.invalidate()
         tokens.clear()
         tokenProvider = nil
+        imageLoader = nil
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
