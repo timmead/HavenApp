@@ -10,7 +10,21 @@ public protocol HTTPPoster: Sendable {
 
 public struct URLSessionHTTP: HTTPPoster {
     private let session: URLSession
-    public init(session: URLSession = .shared) { self.session = session }
+    /// `nil` builds a session with a short, explicit request timeout rather than using `.shared`
+    /// (whose defaults amount to ~60s). This matters for candidate failover: `TokenProvider`'s
+    /// refresh POST can be the very first network call `AppModel` makes against a candidate
+    /// (before any WebSocket is even opened), so on a cold launch away from home it must fail
+    /// fast against the unreachable local address rather than stalling the whole connect attempt
+    /// for the better part of a minute before the next candidate ever gets tried.
+    public init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 8
+            self.session = URLSession(configuration: config)
+        }
+    }
     public func post(_ url: URL, form: [String: String]) async throws -> Data {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

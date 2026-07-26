@@ -53,11 +53,13 @@ final class FakeHTTP: HTTPPoster, @unchecked Sendable {
     /// their own request.
     var delay: Duration?
     private(set) var lastForm: [String: String]?
+    private(set) var lastURL: URL?
     private(set) var callCount = 0
     init(response: String) { self.response = response }
     func post(_ url: URL, form: [String: String]) async throws -> Data {
         callCount += 1
         lastForm = form
+        lastURL = url
         if let delay { try? await Task.sleep(for: delay) }
         if let error { throw error }
         return Data(response.utf8)

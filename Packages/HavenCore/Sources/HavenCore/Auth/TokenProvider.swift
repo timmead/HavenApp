@@ -18,7 +18,11 @@ public enum TokenProviderError: Error, Sendable, Equatable {
 /// callers that arrive while a refresh is already underway are coalesced onto that one
 /// in-flight attempt rather than each triggering their own network round trip.
 public actor TokenProvider {
-    private let baseURL: URL
+    /// The host the refresh-token HTTP POST (`{baseURL}/auth/token`) targets. `var`, not `let`:
+    /// a single Home Assistant instance is reachable at more than one address (local vs.
+    /// remote/Nabu Casa), and refreshing must go to whichever one the caller is currently trying
+    /// — see `setBaseURL(_:)`.
+    private var baseURL: URL
     private let store: TokenStore
     private let oauth: OAuthClient
     private let http: HTTPPoster
@@ -40,6 +44,15 @@ public actor TokenProvider {
         self.oauth = oauth
         self.http = http
         self.skew = skew
+    }
+
+    /// Repoints this provider at a different address for the *same* Home Assistant instance —
+    /// e.g. `AppModel`'s candidate failover switching from the local URL to the remote/Nabu Casa
+    /// one. Call this before `validAccessToken`/`forceRefresh` for whichever candidate is about
+    /// to be tried, so a refresh triggered from here on posts to the right host. (Doesn't affect
+    /// a refresh that's already in flight when it's called — see `refreshTask` coalescing above.)
+    public func setBaseURL(_ url: URL) {
+        baseURL = url
     }
 
     public func validAccessToken(now: Date) async throws -> String {

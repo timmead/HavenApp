@@ -168,6 +168,13 @@ final class AppModel {
                     // for as long as the app runs.
                     var client: HAWebSocketClient?
                     do {
+                        // Must happen before `validAccessToken`: a refresh triggered for this
+                        // candidate has to POST to *this* candidate's host, not whichever one a
+                        // previous candidate (or the last app launch) left the provider pointed
+                        // at — otherwise a refresh needed on a cold launch away from home would
+                        // try to reach the now-unreachable local address even while attempting
+                        // the remote candidate, defeating failover before a socket is ever opened.
+                        await tokenProvider.setBaseURL(candidate.url)
                         let token = try await tokenProvider.validAccessToken(now: Date())
                         if Task.isCancelled { return }
                         havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(attempt + 1, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")

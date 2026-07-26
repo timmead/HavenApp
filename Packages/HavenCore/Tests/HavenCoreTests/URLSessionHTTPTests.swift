@@ -63,3 +63,16 @@ private func stubURL(status: Int, body: String? = nil) -> URL {
         _ = try await http.post(url, form: [:])
     }
 }
+
+@Test func defaultSessionFailsFastAgainstAnUnreachableHostRatherThanHangingOnSharedsDefaults() async throws {
+    // Candidate failover's token refresh is often the very first network call made against a
+    // candidate — it must not hang anywhere near URLSession.shared's default (~60s) timeout, or a
+    // cold launch away from home stalls the whole connect attempt before a socket is ever opened.
+    // 192.0.2.0/24 (IANA TEST-NET-1) is reserved and guaranteed to never have a live host.
+    let http = URLSessionHTTP()
+    let start = Date()
+    await #expect(throws: Error.self) {
+        _ = try await http.post(URL(string: "http://192.0.2.1:8123/auth/token")!, form: [:])
+    }
+    #expect(Date().timeIntervalSince(start) < 15)
+}

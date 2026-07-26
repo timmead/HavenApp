@@ -241,6 +241,38 @@ private let baseURL = URL(string: "http://ha.local:8123")!
     #expect(http.callCount == 2)
 }
 
+@Test func setBaseURLRedirectsWhereAFutureRefreshPosts() async throws {
+    // Guards the candidate-failover fix: AppModel.connect() calls setBaseURL(candidate.url)
+    // before every attempt, so a refresh triggered while trying the *remote* candidate must POST
+    // there, not to whatever host this TokenProvider was originally constructed with (or last
+    // left pointed at by a previous, failed local candidate).
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(-10)))
+    let http = FakeHTTP(response: #"{"access_token":"AT2","refresh_token":"RT2","expires_in":1800}"#)
+    let provider = TokenProvider(baseURL: baseURL, store: store, oauth: OAuthClient(), http: http)
+
+    let remote = URL(string: "https://abc123.ui.nabu.casa")!
+    await provider.setBaseURL(remote)
+    _ = try await provider.validAccessToken(now: now)
+
+    #expect(http.lastURL == remote.appendingPathComponent("auth/token"))
+}
+
+@Test func setBaseURLAlsoRedirectsForceRefresh() async throws {
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(3600)))
+    let http = FakeHTTP(response: #"{"access_token":"AT2","refresh_token":"RT2","expires_in":1800}"#)
+    let provider = TokenProvider(baseURL: baseURL, store: store, oauth: OAuthClient(), http: http)
+
+    let remote = URL(string: "https://abc123.ui.nabu.casa")!
+    await provider.setBaseURL(remote)
+    _ = try await provider.forceRefresh()
+
+    #expect(http.lastURL == remote.appendingPathComponent("auth/token"))
+}
+
 @Test func invalidatePreventsAPendingRefreshFromWritingToTheStore() async throws {
     let now = Date()
     let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
