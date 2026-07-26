@@ -319,19 +319,6 @@ final class AppModel {
                         if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
                             rememberDiscoveredURLs(config, learnedOver: learnedOver)
                         }
-                        // Nabu Casa bootstrap: ask the instance whether it has remote access and
-                        // at what domain, so remote access needs zero configuration. Same
-                        // best-effort footing as `get_config` above — `fetchCloudStatus` never
-                        // throws, and an instance without the `cloud` component simply answers
-                        // `unknown_command`, which is the ordinary self-hosted user rather than a
-                        // failure. Deliberately runs on *every* connection, local or remote: the
-                        // classification is safe to know either way, and gating the probe itself
-                        // on the connection class would put a security decision here, in code with
-                        // no test target, instead of in the one function that owns it.
-                        let cloudStatus = await home.fetchCloudStatus()
-                        if !Task.isCancelled {
-                            rememberNabuCasaRemoteAccess(cloudStatus, learnedOver: learnedOver)
-                        }
                         // Capture the home Wi-Fi network automatically, so the user never types an
                         // SSID — and only on a connection the *peer address* proved was local, so
                         // a café's SSID can never be recorded as home. A no-op without Location
@@ -350,6 +337,29 @@ final class AppModel {
                         if !Task.isCancelled {
                             onboarding.attach(home)
                             await onboarding.probe()
+                        }
+                        // Nabu Casa bootstrap: ask the instance whether it has remote access and
+                        // at what domain, so remote access needs zero configuration. Same
+                        // best-effort footing as `get_config` above — `fetchCloudStatus` never
+                        // throws, and an instance without the `cloud` component simply answers
+                        // `unknown_command`, which is the ordinary self-hosted user rather than a
+                        // failure. Deliberately runs on *every* connection, local or remote: the
+                        // classification is safe to know either way, and gating the probe itself
+                        // on the connection class would put a security decision here, in code with
+                        // no test target, instead of in the one function that owns it.
+                        //
+                        // **Last, deliberately.** `HAWebSocketClient.request` has no deadline (see
+                        // the `phase = .ready` comment above), so every unbounded call added here
+                        // can starve the ones after it. An instance that authenticates, bootstraps
+                        // and answers `get_config` but hangs on `cloud/status` must not be able to
+                        // stop the guided-install probe from ever running — that would surface as
+                        // "the havenapp setup flow never appears", with nothing logged. Nothing
+                        // here depends on ordering except that it follow `rememberDiscoveredURLs`,
+                        // which it still does, so `cloud/status` keeps precedence over
+                        // `external_url` for the discovered-remote slot.
+                        let cloudStatus = await home.fetchCloudStatus()
+                        if !Task.isCancelled {
+                            rememberNabuCasaRemoteAccess(cloudStatus, learnedOver: learnedOver)
                         }
                         return
                     } catch TokenProviderError.reauthenticationRequired {
