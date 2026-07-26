@@ -21,14 +21,34 @@ struct SensorModal: View {
                         title: TileName.of(entityId, e), subtitle: "", accent: accent) { dismiss() }
 
             FacetCard {
+                let selected = series.flatMap { nearestPoint(to: selectedDate, in: $0.points) }
+
+                // A single baseline-aligned row: the left (current value) and right
+                // (scrub readout) groups share one `.firstTextBaseline` HStack rather
+                // than nesting a VStack on the right, so the row's height is always
+                // governed by the 30pt current-value text — adding the smaller scrub
+                // readout beside it (not beneath it) can't grow the row and cause the
+                // chart/segmented-control/stats below to shift when scrubbing starts.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(s?.value ?? "—").font(.system(size: 30, weight: .bold))
                     Text(s?.unit ?? "").foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    if let selected {
+                        Text(String(format: "%.1f", selected.value))
+                            .font(.headline)
+                        if !unit.isEmpty {
+                            Text(unit).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Text(selected.time, format: scrubTimestampFormat)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 2)
+                    }
                 }
 
                 if let series, !series.points.isEmpty {
-                    let selected = nearestPoint(to: selectedDate, in: series.points)
-
                     Chart {
                         ForEach(series.points, id: \.time) { p in
                             AreaMark(x: .value("Time", p.time), y: .value("Value", p.value))
@@ -41,27 +61,11 @@ struct SensorModal: View {
 
                         if let selected {
                             RuleMark(x: .value("Time", selected.time))
-                                .foregroundStyle(.secondary.opacity(0.5))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                                .foregroundStyle(.secondary)
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                             PointMark(x: .value("Time", selected.time), y: .value("Value", selected.value))
                                 .foregroundStyle(accent)
                                 .symbolSize(80)
-                                .annotation(position: .top, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                                    VStack(spacing: 2) {
-                                        Text(unit.isEmpty ? String(format: "%.1f", selected.value) : "\(String(format: "%.1f", selected.value)) \(unit)")
-                                            .font(.caption.weight(.semibold))
-                                        Text(selected.time, format: .dateTime.month().day().hour().minute())
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .strokeBorder(HavenColor.glassFill)
-                                    }
-                                }
                         }
                     }
                     .frame(height: 150)
@@ -104,6 +108,15 @@ struct SensorModal: View {
     private func nearestPoint(to date: Date?, in points: [HistoryPoint]) -> HistoryPoint? {
         guard let date else { return nil }
         return points.min { abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date)) }
+    }
+
+    /// A compact, range-appropriate readout for the scrubbed timestamp: a short time
+    /// for Day (where the whole series spans a single day, so the date is redundant),
+    /// otherwise a short date (where the time-of-day is the redundant part).
+    private var scrubTimestampFormat: Date.FormatStyle {
+        range == .day
+            ? .dateTime.hour().minute()
+            : .dateTime.month(.abbreviated).day()
     }
 
     @ViewBuilder private func stat(_ l: String, _ v: Double?) -> some View {
