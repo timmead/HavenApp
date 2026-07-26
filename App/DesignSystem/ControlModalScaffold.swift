@@ -27,6 +27,6 @@ struct FacetCard<Content: View>: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
+        .background(HavenColor.glassFill, in: RoundedRectangle(cornerRadius: 16))
     }
 }
