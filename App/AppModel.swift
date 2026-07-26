@@ -6,7 +6,9 @@ import HavenCore
 /// `UserDefaults` is fine.
 private enum DefaultsKeys {
     static let baseURL = "baseURL"
-    /// Learned from `get_config`'s `internal_url` after a successful connection.
+    /// No longer written or read (see `DiscoveredCandidateURLs`'s documentation for why
+    /// `internal_url` is never adopted at all) — kept only as the name of a key a build prior to
+    /// this fix may have already written, so `discoveredURLs()` can find and purge it.
     static let discoveredInternalURL = "discoveredInternalURL"
     /// Learned from `get_config`'s `external_url` — for a Nabu Casa subscriber, the
     /// `*.ui.nabu.casa` remote address, once cloud remote access is enabled.
@@ -152,11 +154,12 @@ final class AppModel {
         var didForceRefreshAfterAuthInvalid = false
         while true {
             if Task.isCancelled { return }
-            let discovered = discoveredURLs()
             let candidates = ConnectionEndpoint.candidates(
                 userEntered: base,
-                discoveredInternal: discovered.internal,
-                discoveredExternal: discovered.external,
+                // Deliberately always nil — see `DiscoveredCandidateURLs`'s documentation for why
+                // a discovered `internal_url` is never adopted as a candidate at all.
+                discoveredInternal: nil,
+                discoveredExternal: discoveredExternalURL(),
                 preferredFirst: lastWorkingURL()
             )
             // Only escalate to `requireReauthentication()` once *every* candidate this round has
@@ -292,27 +295,37 @@ final class AppModel {
         UserDefaults.standard.string(forKey: DefaultsKeys.baseURL).flatMap(URL.init(string:))
     }
 
-    /// SECURITY (read boundary — see `rememberDiscoveredURLs` for the write boundary and the full
-    /// threat model): the fix there only stops a hostile `external_url` from being written *from
-    /// now on*. It does nothing for a device that already ran the earlier, unvalidated build —
-    /// commit a78bdc2 persisted whatever `get_config` returned with no check at all, so a hostile
-    /// host may already be sitting in this exact `UserDefaults` key. Re-running the identical
-    /// `isNabuCasaHost` check here, and dropping (and purging) anything that fails it, treats
-    /// already-stored state as just as untrustworthy as a fresh value straight off the wire —
-    /// which it is; it was written by a build that trusted the wire.
-    private func discoveredURLs() -> (internal: URL?, external: URL?) {
+    /// SECURITY (read boundary — see `rememberDiscoveredURLs` for the write boundary and
+    /// `DiscoveredCandidateURLs` for the full threat model, including why `internal_url` is
+    /// dropped unconditionally, not merely "validated"): the write-boundary fix alone only stops
+    /// a hostile value from being written *from now on*. It does nothing for a device that
+    /// already ran an earlier, less careful build — `discoveredInternalURL` was never validated
+    /// at all, and an early revision of the `external_url` fix validated on write but not on
+    /// read — so either key may already hold an untrusted value from before. `AppModel` holds no
+    /// validation logic of its own here: both raw stored strings are handed to
+    /// `DiscoveredCandidateURLs.validating`, the same pure function the write boundary calls, and
+    /// whatever it rejects is purged from `UserDefaults`, not merely skipped, so a stale hostile
+    /// value doesn't keep silently failing this check (and logging about it) forever.
+    private func discoveredExternalURL() -> URL? {
         let d = UserDefaults.standard
-        let internalURL = d.string(forKey: DefaultsKeys.discoveredInternalURL).flatMap(URL.init(string:))
-        var externalURL = d.string(forKey: DefaultsKeys.discoveredExternalURL).flatMap(URL.init(string:))
-        if let candidate = externalURL, !ConnectionEndpoint.isNabuCasaHost(candidate) {
-            havenLog.error("stored discoveredExternalURL (host: \(candidate.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — dropping it as untrusted (possibly left over from an earlier build)")
-            d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
-            externalURL = nil
+        // internal_url is never consumed as a candidate, period — see `DiscoveredCandidateURLs`.
+        // Any value under this key can only be left over from a build that predates that
+        // decision; purge it so it doesn't linger indefinitely for no purpose.
+        if d.object(forKey: DefaultsKeys.discoveredInternalURL) != nil {
+            d.removeObject(forKey: DefaultsKeys.discoveredInternalURL)
         }
-        return (internalURL, externalURL)
+        let rawExternal = d.string(forKey: DefaultsKeys.discoveredExternalURL).flatMap(URL.init(string:))
+        // rawInternalURL is always nil here: this app never reads discoveredInternalURL back as
+        // a candidate source, so there is nothing untrusted to hand `.validating` for it.
+        let validated = DiscoveredCandidateURLs.validating(rawInternalURL: nil, rawExternalURL: rawExternal)
+        if let rawExternal, validated.externalURL == nil {
+            havenLog.error("stored discoveredExternalURL (host: \(rawExternal.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — dropping it as untrusted (possibly left over from an earlier build)")
+            d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
+        }
+        return validated.externalURL
     }
 
-    /// SECURITY: also re-validated on read, same reasoning as `discoveredURLs()` above. A
+    /// SECURITY: also re-validated on read, same reasoning as `discoveredExternalURL()` above. A
     /// genuine remote candidate can, after the write-boundary fix, only ever be a Nabu Casa host
     /// — so requiring that here to trust `lastWorkingURL` as a preference costs nothing for the
     /// legitimate local case: a local candidate is already tried first by `ConnectionEndpoint`'s
@@ -342,26 +355,23 @@ final class AppModel {
     /// `http://homeassistant.local:8123` and the app allows arbitrary cleartext loads, so a
     /// transient on-LAN attacker can MITM this exact response — `forcedHTTPS` on the candidate
     /// side is no defense, since they can simply serve a valid cert for a host they control.
-    /// Without this check, injecting `external_url: https://evil.example` into one MITM'd
-    /// `get_config` would get it persisted and later tried — and trusted with the refresh token —
-    /// every time local fails from then on, e.g. once the phone is on cellular. Home Assistant
-    /// Cloud's `*.ui.nabu.casa` is the one remote address this app has a product reason to trust
-    /// automatically (the user's own existing Nabu Casa subscription); anything else must be
-    /// rejected, not silently dropped — logged clearly so a real HA feature (e.g. a self-hosted
-    /// reverse proxy `external_url`) failing to appear as a candidate doesn't look like a bug with
-    /// no explanation. (A user-confirmed opt-in for non-Nabu-Casa remote URLs is a real, separate
-    /// feature this does not implement.)
+    /// `config.internalURL` is never persisted at all (see `DiscoveredCandidateURLs`'s
+    /// documentation for why — it isn't validated, it's dropped, because there's no way to
+    /// validate it as "a private address" inside this exact MITM-on-the-LAN threat model, and it
+    /// has no consumer this app needs anyway). `config.externalURL` is persisted only if
+    /// `DiscoveredCandidateURLs.validating` — the same pure function the read boundary calls —
+    /// says it's a genuine Nabu Casa host; anything else is rejected, not silently dropped —
+    /// logged clearly so a real HA feature (e.g. a self-hosted reverse proxy `external_url`)
+    /// failing to appear as a candidate doesn't look like a bug with no explanation. (A
+    /// user-confirmed opt-in for non-Nabu-Casa remote URLs is a real, separate feature this does
+    /// not implement.)
     private func rememberDiscoveredURLs(_ config: HAInstanceConfig) {
         let d = UserDefaults.standard
-        if let internalURL = config.internalURL {
-            d.set(internalURL.absoluteString, forKey: DefaultsKeys.discoveredInternalURL)
-        }
-        if let externalURL = config.externalURL {
-            if ConnectionEndpoint.isNabuCasaHost(externalURL) {
-                d.set(externalURL.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
-            } else {
-                havenLog.error("get_config's external_url (host: \(externalURL.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — rejecting, not persisting; HavenApp only auto-adopts the user's own Nabu Casa remote address")
-            }
+        let validated = DiscoveredCandidateURLs.validating(rawInternalURL: config.internalURL, rawExternalURL: config.externalURL)
+        if let externalURL = validated.externalURL {
+            d.set(externalURL.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
+        } else if let rejected = config.externalURL {
+            havenLog.error("get_config's external_url (host: \(rejected.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — rejecting, not persisting; HavenApp only auto-adopts the user's own Nabu Casa remote address")
         }
         if config.internalURL == nil && config.externalURL == nil {
             // The wire shape here (get_config's internal_url/external_url fields) is assumed from

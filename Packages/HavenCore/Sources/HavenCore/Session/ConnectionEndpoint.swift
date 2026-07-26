@@ -31,7 +31,16 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     ///     the LAN address, but classified remote if it happens to be a `*.ui.nabu.casa` host —
     ///     e.g. a user who signed in directly against their Nabu Casa URL.
     ///   - discoveredInternal: Home Assistant's own `internal_url` from `get_config`, if learned
-    ///     from a previous successful connection.
+    ///     from a previous successful connection. **The caller must validate this before passing
+    ///     it** — this function does no more with it than with any other parameter here, and
+    ///     `internal_url` carries no reachability/privacy guarantee of any kind (see
+    ///     `DiscoveredCandidateURLs`'s documentation for why it cannot be validated as "a private
+    ///     address" at all). `AppModel` deliberately always passes `nil` here — it does not
+    ///     persist or read back a discovered `internal_url` — since it has no legitimate use this
+    ///     app needs (local access is already served by `userEntered`) and validating it within
+    ///     this app's MITM-on-the-LAN threat model isn't implementable. This parameter, and its
+    ///     existing tests, are kept for callers (present or future) able to supply an
+    ///     independently-validated value.
     ///   - discoveredExternal: Home Assistant's own `external_url` from `get_config`. For a Nabu
     ///     Casa subscriber this is the `*.ui.nabu.casa` URL once cloud remote access is enabled.
     ///   - preferredFirst: A previously-successful URL to hoist to the front of the list, ahead
