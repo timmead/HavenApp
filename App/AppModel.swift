@@ -311,6 +311,14 @@ final class AppModel {
             // hit the "already spent this call's one forced refresh, still auth_invalid" wall —
             // see the check after this round's candidate loop, and the comment at the guard below.
             var candidatesWithPersistentAuthInvalid = 0
+            // Same shape, same reason: one candidate blocked by App Transport Security is not a
+            // reason to stop. A user whose *typed* address is a FQDN that resolves to a LAN IP has
+            // that candidate blocked (ATS judges the hostname, not the address it resolves to)
+            // while their discovered `internal_url` — a private-IP literal, which
+            // `NSAllowsLocalNetworking` permits — refreshes and connects perfectly. Only when
+            // *every* candidate this round was refused is there nothing left to try.
+            var candidatesBlockedByATS = 0
+            var atsBlockedMessage: String?
 
             for candidate in candidates {
                 if Task.isCancelled { return }
@@ -444,6 +452,20 @@ final class AppModel {
                         havenLog.error("token refresh requires reauthentication — signing out")
                         await requireReauthentication()
                         return
+                    } catch TokenProviderError.insecureTransportBlocked(let host) {
+                        await client?.disconnect()
+                        if Task.isCancelled { return }
+                        candidatesBlockedByATS += 1
+                        // The message is HavenCore's, not assembled here — see
+                        // `TokenProviderError.message`.
+                        atsBlockedMessage = TokenProviderError.insecureTransportBlocked(host: host).message
+                        // Logged by name, at error level, because the whole point of classifying
+                        // this is that it stops being invisible: before, a blocked refresh arrived
+                        // as an opaque URLError, was retried forever, and left the user on
+                        // "connecting…" with nothing anywhere naming ATS.
+                        havenLog.error("App Transport Security refused the token refresh to \(host, privacy: .public) — cleartext http:// to a host iOS judges public. This candidate cannot succeed until the address is https, or a local-network address; see the ATS comment in Info.plist.")
+                        // Nothing is retried in place and the session is left intact (the grant is
+                        // fine, the address isn't); the next candidate gets its turn.
                     } catch let wsError as WSError where wsError.isAuthInvalid {
                         await client?.disconnect()
                         if Task.isCancelled { return }
@@ -491,6 +513,18 @@ final class AppModel {
             }
 
             if Task.isCancelled { return }
+            if !candidates.isEmpty, candidatesBlockedByATS == candidates.count, let atsBlockedMessage {
+                // Terminal, and the one failure in this loop that must NOT back off and retry: it
+                // is deterministic and caused by configuration, so the thousandth attempt fails
+                // exactly like the first. Retrying it is the silent hang this classification
+                // exists to remove. `.error` lands on `LoginView` with the address prefilled and
+                // editable, which is precisely the remedy the message describes — and the tokens
+                // are left alone, so a user who fixes the address doesn't have to sign in again if
+                // the session is still good.
+                havenLog.error("every candidate this round was refused by App Transport Security — stopping rather than retrying a failure that cannot resolve itself")
+                phase = .error(atsBlockedMessage)
+                return
+            }
             if !candidates.isEmpty, candidatesWithPersistentAuthInvalid == candidates.count {
                 // Every candidate this round said the same thing after its own forced-refresh
                 // chance: this is corroborated across the whole instance, not just one rogue

@@ -9,6 +9,64 @@ public enum TokenProviderError: Error, Sendable, Equatable {
     /// `TokenProvider` has already moved on (signed out, or replaced it with a fresh instance for
     /// a new session) and should ignore the result.
     case invalidated
+
+    /// iOS App Transport Security refused the refresh POST outright:
+    /// `URLError.appTransportSecurityRequiresSecureConnection` (-1022). The session is fine; the
+    /// **address** is not — a cleartext `http://` URL whose hostname ATS judges to be a public host.
+    ///
+    /// ## Why this needs a case of its own rather than falling through as a network error
+    ///
+    /// It is deterministic and configuration-caused: every retry against that address produces it
+    /// again, for as long as the app is installed. Left unclassified it arrives at `AppModel` as an
+    /// opaque `URLError`, is handled by the same generic `catch` as "Wi-Fi dropped", and feeds the
+    /// unbounded retry loop — so the user sees "connecting…" forever, with nothing anywhere naming
+    /// ATS. Worse, the trigger is a *token expiry hours later*: the app works fine right up until
+    /// the first refresh, so nothing in testing that immediately follows a change would ever show
+    /// it. That is this project's recurring failure shape — a wrong assumption producing a
+    /// confident wrong state instead of an error — and the fix for it is always the same: name it.
+    ///
+    /// **The stored tokens are deliberately not cleared.** Unlike `reauthenticationRequired`, the
+    /// grant is untouched — signing the user out would destroy a perfectly good session over a URL
+    /// they can simply edit. It is also only terminal for *this address*: `AppModel` tries other
+    /// candidates first (a private-IP LAN address is allowed by `NSAllowsLocalNetworking` and will
+    /// still refresh normally), and only stops when every candidate in a round was blocked this way.
+    ///
+    /// See the ATS comment in `App/Resources/Info.plist` for what is and isn't covered, and why the
+    /// remedy is a narrow exception rather than re-enabling arbitrary loads.
+    case insecureTransportBlocked(host: String)
+
+    /// Whether retrying can ever help.
+    ///
+    /// `invalidated` is neither — it means "this result belongs to a session that has already been
+    /// replaced; ignore it" — so it answers `false` and the caller's ordinary "ignore and move on"
+    /// path is correct for it.
+    public var isTerminal: Bool {
+        switch self {
+        case .reauthenticationRequired, .insecureTransportBlocked: return true
+        case .invalidated: return false
+        }
+    }
+
+    /// Copy to show the user, for the cases where there is something they can actually do. `nil`
+    /// where there isn't: `reauthenticationRequired` already routes to the sign-in screen, and
+    /// `invalidated` is never user-visible.
+    ///
+    /// Lives here rather than in `App/` for the usual reason — the message *is* the fix for
+    /// `insecureTransportBlocked` (a silent hang made into a named failure), and `App/` has no test
+    /// target. It names the address, the rule that refused it, and both ways out.
+    public var message: String? {
+        switch self {
+        case .reauthenticationRequired, .invalidated:
+            return nil
+        case .insecureTransportBlocked(let host):
+            return """
+            iOS blocked Haven from reaching \(host): the address is http://, and \(host) isn't \
+            recognised as a local network address, so the connection can't be unencrypted. Change \
+            the address above to https://\(host) if your Home Assistant serves it, or to its \
+            local network address — something like http://192.168.1.10:8123.
+            """
+        }
+    }
 }
 
 /// The single place that answers "give me a valid access token" for a Home Assistant instance.
@@ -126,6 +184,14 @@ public actor TokenProvider {
                 // the user must sign in again.
                 self.store.clear()
                 throw TokenProviderError.reauthenticationRequired
+            } catch let urlError as URLError where urlError.code == .appTransportSecurityRequiresSecureConnection {
+                guard self.generation == myGeneration else {
+                    throw TokenProviderError.invalidated
+                }
+                // Named rather than left to escape as an opaque `URLError`, which the caller's
+                // generic network-failure path would retry forever. The store is deliberately
+                // untouched — the grant is fine, the address isn't. See the case's documentation.
+                throw TokenProviderError.insecureTransportBlocked(host: self.baseURL.host() ?? self.baseURL.absoluteString)
             }
         }
         refreshTask = task

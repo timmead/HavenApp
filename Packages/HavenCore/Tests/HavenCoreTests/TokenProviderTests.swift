@@ -296,3 +296,101 @@ private let baseURL = URL(string: "http://ha.local:8123")!
     #expect(store.current?.accessToken == "NEWSESSION")
     #expect(store.current?.refreshToken == "NEWRT")
 }
+
+// MARK: - App Transport Security (-1022): terminal and named, never transient
+//
+// The failure this classification exists to remove is a *silent hang*, and it is the shape this
+// project has shipped three times: a wrong assumption producing a confident wrong state rather than
+// an error. A user signed in against a cleartext `http://` FQDN that resolves to a LAN address keeps
+// working — right up until the access token expires hours later and the refresh POST is refused by
+// ATS. Unclassified, that arrives at `AppModel` as an opaque `URLError`, is handled by the same
+// generic `catch` as "Wi-Fi dropped", and feeds the unbounded retry loop: "connecting…" forever,
+// with nothing anywhere naming ATS. It also cannot show up in testing that immediately follows the
+// plist change, because the trigger is the token expiry, not the change.
+
+@Test func atsBlockedRefreshIsClassifiedTerminalNotTransient() async throws {
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(-10)))
+    let http = FakeHTTP(response: "unused")
+    // Exactly what URLSession throws when ATS refuses the request: -1022.
+    http.error = URLError(.appTransportSecurityRequiresSecureConnection)
+    let provider = TokenProvider(baseURL: URL(string: "http://hass.example.com")!,
+                                 store: store, oauth: OAuthClient(), http: http)
+
+    // Named — not the raw URLError that `transientRefreshFailurePropagatesUnderlyingError` shows
+    // every other network failure surfacing as, and which the caller retries.
+    await #expect(throws: TokenProviderError.insecureTransportBlocked(host: "hass.example.com")) {
+        _ = try await provider.validAccessToken(now: now)
+    }
+    #expect(TokenProviderError.insecureTransportBlocked(host: "hass.example.com").isTerminal)
+    // The distinction that stops the retry loop: every other refresh failure is non-terminal.
+    #expect(!TokenProviderError.invalidated.isTerminal)
+}
+
+@Test func anATSBlockedRefreshLeavesTheSessionIntact() async throws {
+    // Unlike `invalid_grant`, the grant is untouched — the *address* is wrong. Clearing the store
+    // here would sign a user out of a perfectly good session over a URL they can simply edit, and
+    // would also lose the refresh token they need for the address they change it to.
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(-10)))
+    let http = FakeHTTP(response: "unused")
+    http.error = URLError(.appTransportSecurityRequiresSecureConnection)
+    let provider = TokenProvider(baseURL: URL(string: "http://hass.example.com")!,
+                                 store: store, oauth: OAuthClient(), http: http)
+
+    _ = try? await provider.validAccessToken(now: now)
+
+    #expect(store.current?.accessToken == "AT1")
+    #expect(store.current?.refreshToken == "RT1")
+}
+
+@Test func aForcedRefreshIsBlockedTheSameWay() async throws {
+    // `forceRefresh` is the path taken after Home Assistant answers `auth_invalid`, and it goes
+    // through the same `refresh` — so it must classify identically rather than leaking a URLError
+    // out of a second route.
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(3600)))
+    let http = FakeHTTP(response: "unused")
+    http.error = URLError(.appTransportSecurityRequiresSecureConnection)
+    let provider = TokenProvider(baseURL: URL(string: "http://hass.example.com")!,
+                                 store: store, oauth: OAuthClient(), http: http)
+
+    await #expect(throws: TokenProviderError.insecureTransportBlocked(host: "hass.example.com")) {
+        _ = try await provider.forceRefresh()
+    }
+}
+
+@Test func theBlockedHostFollowsSetBaseURLRatherThanTheOriginalOne() async throws {
+    // `AppModel` repoints the provider at each candidate before trying it, so the host named in the
+    // message must be the candidate that was actually refused — otherwise the remedy would point at
+    // an address that is working fine.
+    let now = Date()
+    let store = InMemoryTokenStore(HATokens(accessToken: "AT1", refreshToken: "RT1",
+                                             expiresAt: now.addingTimeInterval(-10)))
+    let http = FakeHTTP(response: "unused")
+    http.error = URLError(.appTransportSecurityRequiresSecureConnection)
+    let provider = TokenProvider(baseURL: URL(string: "http://192.168.1.10:8123")!,
+                                 store: store, oauth: OAuthClient(), http: http)
+
+    await provider.setBaseURL(URL(string: "http://hass.example.com")!)
+
+    await #expect(throws: TokenProviderError.insecureTransportBlocked(host: "hass.example.com")) {
+        _ = try await provider.validAccessToken(now: now)
+    }
+}
+
+@Test func theBlockedMessageNamesTheAddressAndBothWaysOut() async throws {
+    // The message is the fix — a silent hang made into a named failure — so it lives in HavenCore
+    // and is asserted rather than trusted. `App/` has no test target.
+    let message = TokenProviderError.insecureTransportBlocked(host: "hass.example.com").message
+    #expect(message?.contains("hass.example.com") == true)
+    #expect(message?.contains("http://") == true)
+    #expect(message?.contains("https://hass.example.com") == true)
+    #expect(message?.contains("local network address") == true)
+    // Nothing to say where there is nothing the user can do about it.
+    #expect(TokenProviderError.reauthenticationRequired.message == nil)
+    #expect(TokenProviderError.invalidated.message == nil)
+}
