@@ -1,14 +1,25 @@
 import Foundation
 @testable import HavenCore
 
+/// Nonisolated, lock-protected flag — `WebSocketConnection.close()` is a synchronous, non-async
+/// protocol requirement, so `FakeWebSocketConnection` (an actor) must implement it `nonisolated`
+/// and can't touch actor-isolated storage from there directly.
+final class ClosedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _closed = false
+    var closed: Bool { lock.lock(); defer { lock.unlock() }; return _closed }
+    func markClosed() { lock.lock(); _closed = true; lock.unlock() }
+}
+
 actor FakeWebSocketConnection: WebSocketConnection {
     private var incoming: [Data] = []
     private var waiters: [CheckedContinuation<Data, Error>] = []
     private(set) var sent: [Data] = []
     var onSend: (@Sendable (Data) async -> Void)?
+    let closedFlag = ClosedFlag()
 
     func connect() async throws {}
-    nonisolated func close() {}
+    nonisolated func close() { closedFlag.markClosed() }
     func send(_ data: Data) async throws {
         sent.append(data)
         await onSend?(data)

@@ -58,6 +58,15 @@ public actor HomeConnection {
     public func toggleLight(entityId: String) async throws {
         _ = try await client.request { WSCommand.callService(id: $0, domain: "light", service: "toggle", entityId: entityId) }
     }
+
+    /// Tears down the underlying WebSocket client — cancels its heartbeat/receive loops and
+    /// closes the socket. Must be called before a `HomeConnection` for a session that reached
+    /// `.ready` is dropped (e.g. on sign-out), or the client — and its 10s heartbeat timer —
+    /// leaks for as long as the process runs, since nothing else retains or disconnects it once
+    /// this actor's reference goes away.
+    public func disconnect() async {
+        await client.disconnect()
+    }
 }
 
 extension JSONValue { public var asArray: [JSONValue]? { if case .array(let a) = self { return a }; return nil } }

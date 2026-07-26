@@ -69,7 +69,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "baseURL")
         baseURL = nil
         tokenProvider = nil
-        store.reset()
+        await store.reset()
         phase = .loggedOut
     }
 
@@ -82,7 +82,7 @@ final class AppModel {
         await tokenProvider?.invalidate()
         tokens.clear()
         tokenProvider = nil
-        store.reset()
+        await store.reset()
         phase = .loggedOut
     }
 

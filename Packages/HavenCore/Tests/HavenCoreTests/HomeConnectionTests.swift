@@ -32,3 +32,15 @@ import Foundation
     let structure = try await home.loadStructure()
     #expect(structure.floors.first?.areas.first?.entityIds == ["light.k"])
 }
+
+@Test func homeConnectionDisconnectReachesTheUnderlyingClient() async throws {
+    // Guards the sign-out-of-a-working-session leak: HomeConnection.disconnect() must actually
+    // forward to HAWebSocketClient.disconnect(), which is what closes the underlying socket.
+    let conn = FakeWebSocketConnection()
+    let client = HAWebSocketClient(connection: conn)
+    let home = HomeConnection(client: client)
+
+    #expect(conn.closedFlag.closed == false)
+    await home.disconnect()
+    #expect(conn.closedFlag.closed == true)
+}

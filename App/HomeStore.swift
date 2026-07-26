@@ -30,8 +30,15 @@ final class HomeStore {
     /// Tear down the live session (used on sign-out). Clears history and any open modal
     /// too — otherwise signing into a different HA instance can show the previous
     /// account's chart data for a same-named sensor, or leave a stale modal presented.
-    func reset() {
+    ///
+    /// Disconnects the underlying `HomeConnection` before dropping it — nothing else in the app
+    /// retains the `HAWebSocketClient` once this reference goes away, so skipping this would
+    /// leak the socket and its heartbeat timer for the rest of the process's lifetime, exactly
+    /// like the abandoned-clients-in-`connect()` bug this mirrors, just triggered by a sign-out
+    /// of a *working* connection instead of a failed attempt.
+    func reset() async {
         subscriptionTask?.cancel(); subscriptionTask = nil
+        await connection?.disconnect()
         connection = nil
         home = ResolvedHome(floors: [])
         states = [:]
