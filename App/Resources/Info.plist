@@ -23,6 +23,14 @@
     <key>NSAllowsLocalNetworking</key><true/>
   </dict>
   <key>NSLocalNetworkUsageDescription</key><string>Haven connects to your Home Assistant server on your local network.</string>
+  <!--
+    Required by NEHotspotNetwork.fetchCurrent(), which iOS gates on Location Services. Haven asks
+    for this ONLY from Settings › Connection, framed as "connect faster at home" — never during
+    onboarding. It is used to compare the current Wi-Fi network's name against the one Haven last
+    reached Home Assistant on locally; no location is read, stored or transmitted. Declining leaves
+    the app fully functional (it probes the local address first and falls back).
+  -->
+  <key>NSLocationWhenInUseUsageDescription</key><string>Haven uses this only to see which Wi-Fi network you're on, so it can connect straight to your home instead of trying and waiting. Your location is never read, stored or shared.</string>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>app.haven.HavenApp</string>
     <key>CFBundleURLSchemes</key><array><string>havenapp</string></array>

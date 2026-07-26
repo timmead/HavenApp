@@ -29,9 +29,36 @@ public final class NWWebSocketConnection: WebSocketConnection, @unchecked Sendab
     /// timeout is much longer (tens of seconds), which would otherwise starve `AppModel`'s
     /// candidate failover of any real chance to fall back to the remote URL in a reasonable time.
     /// Deliberately *not* applied to `receive()` — see the note on that method.
+    ///
+    /// The default is **2 seconds**, down from 8. A LAN connect is sub-100ms, so 2s is already
+    /// orders of magnitude of headroom for the case this bounds; 8s was C2 review finding I-1 and
+    /// made the local candidate a dead spinner on any foreign Wi-Fi, which is precisely where the
+    /// candidate list most needs to reach its remote entry. At 2s the worst case is a brief stall.
     private let deadline: Duration
 
-    public init(url: URL, deadline: Duration = .seconds(8)) {
+    private let peerLock = NSLock()
+    private var _observedPeerAddress: String?
+
+    /// The peer's resolved IP literal, observed once this connection reached `.ready`, or `nil` if
+    /// it never did (or the path reported no address).
+    ///
+    /// **This is a security input, not diagnostics.** It is what
+    /// `ConnectionClass.observed(peerAddress:)` classifies, and therefore what decides whether
+    /// `get_config`'s URLs may be adopted — see that function, and
+    /// `DiscoveredCandidateURLs.validating`. It reads the *socket*, not the URL we dialled, which
+    /// is the whole point: a hostname (and, on a hostile network, DNS) cannot answer "is this on my
+    /// LAN", but the address the kernel is sending bytes to can.
+    ///
+    /// Deliberately **not** on the `WebSocketConnection` protocol: `URLSessionWebSocketConnection`
+    /// cannot answer it, and a protocol requirement returning `nil` from one conformance is an
+    /// invitation to read `nil` as "local by default" somewhere. `AppModel` holds the concrete type
+    /// for exactly as long as it needs this.
+    public var observedPeerAddress: String? {
+        peerLock.lock(); defer { peerLock.unlock() }
+        return _observedPeerAddress
+    }
+
+    public init(url: URL, deadline: Duration = .seconds(2)) {
         self.deadline = deadline
         let isTLS = (url.scheme?.lowercased() == "wss")
         let options = NWProtocolWebSocket.Options()
@@ -51,9 +78,20 @@ public final class NWWebSocketConnection: WebSocketConnection, @unchecked Sendab
         try await withDeadline {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
                 let box = ContinuationBox(c)
-                self.connection.stateUpdateHandler = { state in
+                // `[weak self]` deliberately: the handler is owned by `connection`, which this
+                // object owns, so a strong capture would be a retain cycle — and `AppModel`'s retry
+                // loop creates one of these per candidate per round, unbounded. It can't be nil
+                // here in practice (the caller holds `self` for the whole of this await), so
+                // nothing is lost by asking.
+                self.connection.stateUpdateHandler = { [weak self] state in
                     switch state {
-                    case .ready:            box.resume(returning: ())
+                    case .ready:
+                        // Recorded BEFORE resuming: the awaiting task goes on to authenticate and
+                        // then read `observedPeerAddress` to decide whether this connection may be
+                        // trusted, so it must not be able to observe the property still empty and
+                        // conclude "address unavailable".
+                        self?.recordPeerAddress()
+                        box.resume(returning: ())
                     case .failed(let e):    box.resume(throwing: e)
                     case .waiting(let e):   box.resume(throwing: e)
                     case .cancelled:        box.resume(throwing: WSError(code: "cancelled", message: "connection cancelled"))
@@ -63,6 +101,14 @@ public final class NWWebSocketConnection: WebSocketConnection, @unchecked Sendab
                 self.connection.start(queue: self.queue)
             }
         }
+    }
+
+    /// Reads the peer address off the *current path* rather than off `connection.endpoint`. The
+    /// latter is what we asked for (`http://homeassistant.local:8123`, a name); the former is what
+    /// we got (`192.168.1.10`, or `::1`) — see `PeerEndpointAddress`.
+    private func recordPeerAddress() {
+        let address = PeerEndpointAddress.address(of: connection.currentPath?.remoteEndpoint)
+        peerLock.lock(); _observedPeerAddress = address; peerLock.unlock()
     }
 
     /// Races `operation` against `deadline`. On timeout, cancels the underlying `NWConnection` —

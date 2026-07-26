@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!--
+    Access WiFi Information. Required by `NEHotspotNetwork.fetchCurrent()`, which HomeNetwork uses
+    to read the current SSID for layer 1 of the connection model's home detection (see
+    docs/superpowers/specs/2026-07-26-havenapp-connection-model-design.md §4.1).
+
+    This is an *accelerator only*. Without it — and without Location Services authorization, which
+    is also required and is never requested during onboarding — `fetchCurrent` yields nil, the SSID
+    is "unknown", and connection ordering falls through to the network path class and the 2s local
+    probe. The app is fully correct in that state.
+
+    NOTE FOR DEVICE BUILDS: this capability must be enabled on the App ID in the Apple Developer
+    portal (it generally requires paid-program membership). Builds here run with
+    CODE_SIGNING_ALLOWED=NO and therefore cannot verify that it is provisionable for this team. If
+    signing fails with a missing-entitlement error, remove the CODE_SIGN_ENTITLEMENTS line from
+    project.yml and re-run `xcodegen generate` — nothing else depends on it, and the SSID layer
+    simply stays unavailable.
+  -->
+  <key>com.apple.developer.networking.wifi-info</key><true/>
+</dict></plist>

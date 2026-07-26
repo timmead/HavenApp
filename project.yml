@@ -24,3 +24,7 @@ targets:
         INFOPLIST_FILE: App/Resources/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
+        # Access WiFi Information, for the optional "connect faster at home" SSID layer. See the
+        # comment in the entitlements file — including how to back this out if the capability
+        # isn't provisionable for this team, which builds here cannot verify.
+        CODE_SIGN_ENTITLEMENTS: App/Resources/HavenApp.entitlements

@@ -193,12 +193,13 @@ import Foundation
         }
     }
 
-    @Test func connectionClassMirrorsTheEndpointCase() {
-        // What `AppModel` passes as `learnedOver`: the class of the candidate it is connected
-        // through.
-        #expect(ConnectionEndpoint.local(url("http://a:1")).connectionClass == .local)
-        #expect(ConnectionEndpoint.remote(url("https://b:2")).connectionClass == .remote)
-    }
+    // DELETED: `connectionClassMirrorsTheEndpointCase`. It asserted
+    // `ConnectionEndpoint.connectionClass == isRemote ? .remote : .local`, the hostname-derived
+    // guess that `AppModel` passed as `learnedOver`. That property is now **removed**, not
+    // deprecated: because `isRemote` is true only for `*.ui.nabu.casa`, a user-entered Tailscale or
+    // reverse-proxy URL classified `.local` and `get_config`'s URLs would have been adopted over a
+    // connection that crossed the internet. Keeping the test would mean keeping the property.
+    // What replaces it: `ObservedConnectionClassTests`, over the address read off the live socket.
 
     @Test func aLocallyLearnedExternalURLBecomesARemoteCandidate() {
         // End to end through both pure functions, the way `AppModel` composes them: learned

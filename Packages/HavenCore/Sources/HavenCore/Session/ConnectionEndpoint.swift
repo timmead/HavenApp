@@ -23,24 +23,16 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         return false
     }
 
-    /// This candidate's classification, expressed as the parameter
-    /// `DiscoveredCandidateURLs.validating` takes.
-    ///
-    /// **Known limitation — read this before building on it.** This reflects how `classify` sorted
-    /// the URL, which today keys on its *hostname* (`*.ui.nabu.casa` ⇒ remote) and on which
-    /// parameter supplied it — **not** on the network path actually in use. So a user-entered FQDN
-    /// that is genuinely remote, e.g. a Tailscale address or their own reverse proxy
-    /// `https://ha.example.com`, is classified `.local` here, and `get_config`'s URLs would be
-    /// adopted from a connection that in fact crossed the internet.
-    ///
-    /// That misclassification is older than the adoption rule, and was harmless while nothing was
-    /// adopted at all — but adoption is now keyed on this value, which makes it a **trust input**.
-    /// Whoever adds real path-class detection (plan Task 4) or custom remote URLs (Task 6) must
-    /// make this reflect the actual connection; until then, treat `.local` as "not classified
-    /// remote", not as "observed on the local network".
-    public var connectionClass: ConnectionClass {
-        isRemote ? .remote : .local
-    }
+    // NOTE — there is deliberately **no** `connectionClass` property here, and adding one back
+    // would be a security regression. It existed briefly as `isRemote ? .remote : .local` and was
+    // passed to `DiscoveredCandidateURLs.validating` as `learnedOver`, which made this type's
+    // *hostname-based bucketing* a trust input: `isRemote` is true only for `*.ui.nabu.casa`, so a
+    // user-entered Tailscale address or reverse proxy (`https://ha.example.com`) landed in `.local`
+    // and `get_config`'s URLs would have been adopted over a connection that crossed the internet.
+    // The classification this type performs is for *ordering and scheme forcing* only — "which
+    // bucket does this URL belong in" — and it is not evidence about the network a socket actually
+    // travelled over. The only thing that is: `ConnectionClass.observed(peerAddress:)`, over the
+    // address read off the live connection. Use that.
 
     /// Builds the ordered list of candidates to try for one connection attempt, from whatever
     /// URLs are known for this instance.
@@ -149,7 +141,10 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         return components.url ?? url
     }
 
-    private static func normalizedKey(_ url: URL) -> String {
+    /// Module-internal rather than private so `ConnectionPreference` can hoist `lastWorking` on the
+    /// exact same identity this function de-duplicates on, instead of maintaining a second notion
+    /// of "the same endpoint" that could drift.
+    static func normalizedKey(_ url: URL) -> String {
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let scheme = (components?.scheme ?? url.scheme ?? "").lowercased()
         let host = (components?.host ?? url.host ?? "").lowercased()

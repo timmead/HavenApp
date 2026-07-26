@@ -31,6 +31,14 @@ final class AppModel {
     /// with no history.
     let onboarding = OnboardingModel()
 
+    /// Layers 1 and 2 of the home-detection stack. Both are **accelerators**: they only ever change
+    /// the *order* `ConnectionEndpoint`'s candidates are tried in, never which ones exist, so the
+    /// app stays fully correct with the SSID layer permanently unavailable (Location Services
+    /// denied — the expected choice, and never prompted for during onboarding). Neither holds any
+    /// ordering logic; that lives in `ConnectionPreference`, in HavenCore, with tests.
+    let pathObserver = NetworkPathObserver()
+    let homeNetwork = HomeNetwork()
+
     private let tokens: TokenStore = KeychainTokenStore()
     private let oauth = OAuthClient()
     private let http = URLSessionHTTP()
@@ -174,19 +182,23 @@ final class AppModel {
     }
 
     /// Tries local and remote candidates in order each round, only backing off once every
-    /// candidate in a round has failed. See `ConnectionEndpoint.candidates` for the ordering
-    /// rules (local before remote, `*.ui.nabu.casa` always remote, remote always `https`/`wss`,
-    /// no duplicates).
+    /// candidate in a round has failed. Which candidates exist is `ConnectionEndpoint.candidates`
+    /// (`*.ui.nabu.casa` always remote, remote always `https`/`wss`, no duplicates); what order
+    /// they are tried in is `ConnectionPreference.candidates`, from the SSID match and the network
+    /// path class. Both are pure functions in HavenCore with tests — no ordering decision is made
+    /// here, because `App/` has no test target and a decision made here is unverifiable.
     ///
     /// Discovered URLs are read fresh at the top of each round (rather than hoisted out of the
     /// loop) so that a URL learned by a *previous* round's successful-then-dropped connection is
     /// picked up on the next one. Nothing in this loop ever deletes them — see
     /// `DiscoveredURLMigration` for why that sentence is load-bearing.
     ///
-    /// `lastWorkingURL` feeds `preferredFirst`, which avoids paying a local connection timeout on
-    /// every retry while away from home. It needs no validation of its own: `preferredFirst` can
-    /// only *hoist* a candidate that is already in the list, never introduce one, so the worst a
-    /// bogus value can do is nothing at all.
+    /// `lastWorkingURL` feeds `ConnectionPreference`'s hoist, which avoids re-probing a candidate
+    /// that already lost when several of the same class are known. It needs no validation of its
+    /// own: the hoist can only *reorder* a candidate already in the list, never introduce one, so
+    /// the worst a bogus value can do is nothing at all — and it is deliberately not allowed to
+    /// outrank the SSID/path signal, so a value written last night at home cannot drag the local
+    /// candidate back to the front this morning on cellular.
     private func connect() async {
         guard let base = baseURL, let tokenProvider else { return }
         phase = .connecting
@@ -205,11 +217,21 @@ final class AppModel {
         var didForceRefreshAfterAuthInvalid = false
         while true {
             if Task.isCancelled { return }
-            let candidates = ConnectionEndpoint.candidates(
+            // Layer 1, re-read every round because the phone may have moved between rounds. Returns
+            // `nil` — "unknown", behaving exactly as if this layer did not exist — whenever Location
+            // Services is not authorized or no home network has been captured yet. That is the
+            // common case and it must stay fully correct; see `HomeNetwork`.
+            let ssidMatch = ConnectionPreference.homeSSIDMatch(
+                current: await homeNetwork.currentSSID(),
+                home: homeNetwork.homeSSID
+            )
+            let candidates = ConnectionPreference.candidates(
                 userEntered: base,
                 discoveredInternal: storedURL(DefaultsKeys.discoveredInternalURL),
                 discoveredExternal: storedURL(DefaultsKeys.discoveredExternalURL),
-                preferredFirst: storedURL(DefaultsKeys.lastWorkingURL)
+                lastWorking: storedURL(DefaultsKeys.lastWorkingURL),
+                homeSSIDMatch: ssidMatch,
+                pathClass: pathObserver.pathClass
             )
             // Only escalate to `requireReauthentication()` once *every* candidate this round has
             // hit the "already spent this call's one forced refresh, still auth_invalid" wall —
@@ -267,8 +289,31 @@ final class AppModel {
                         // write specifically — without it, a `connect()` cancelled while this
                         // await was in flight (e.g. by a sign-out that started after
                         // `phase = .ready`) could still persist a URL for a session already gone.
+                        // **The trust decision, and it is made from the socket.** Not from the URL
+                        // we dialled, not from its hostname, not from DNS — from the address the
+                        // kernel is actually sending bytes to, read off this connection once it
+                        // reached `.ready`. A hostname cannot answer "is this on my LAN", and on a
+                        // hostile network neither can the resolver; `ha.example.com` looks exactly
+                        // like a LAN address in every respect except the one that matters.
+                        // Unavailable address ⇒ `.remote` ⇒ nothing adopted: fail closed, because
+                        // the two mistakes cost wildly different amounts (see
+                        // `ConnectionClass.observed`).
+                        let peerAddress = conn.observedPeerAddress
+                        let learnedOver = ConnectionClass.observed(peerAddress: peerAddress)
+                        // Logged because "remote access never appeared" otherwise has three
+                        // indistinguishable causes, and one of them is an address we simply could
+                        // not read.
+                        havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
                         if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
-                            rememberDiscoveredURLs(config, learnedOver: candidate.connectionClass)
+                            rememberDiscoveredURLs(config, learnedOver: learnedOver)
+                        }
+                        // Capture the home Wi-Fi network automatically, so the user never types an
+                        // SSID — and only on a connection the *peer address* proved was local, so
+                        // a café's SSID can never be recorded as home. A no-op without Location
+                        // Services; granting it later simply means the next local connection
+                        // captures it.
+                        if learnedOver == .local, !Task.isCancelled {
+                            await homeNetwork.rememberCurrentNetworkAsHome()
                         }
                         // Same best-effort footing, and read-only: `probeHavenIntegration` only
                         // ever asks questions. Nothing that changes the user's Home Assistant can
@@ -402,5 +447,8 @@ final class AppModel {
         d.removeObject(forKey: DefaultsKeys.discoveredInternalURL)
         d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
         d.removeObject(forKey: DefaultsKeys.lastWorkingURL)
+        // The captured home SSID describes the network *this* instance was reached on. Carried
+        // into a different instance it would be a confidently wrong "you are home" signal.
+        homeNetwork.forgetHomeNetwork()
     }
 }
