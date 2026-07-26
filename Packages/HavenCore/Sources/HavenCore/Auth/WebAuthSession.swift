@@ -23,11 +23,24 @@ public struct URLSessionHTTP: HTTPPoster {
         }
         if (200..<300).contains(http.statusCode) { return data }
         // OAuth token endpoints use 400/401 for a rejected grant (expired/revoked refresh token,
-        // bad code, etc.) — a distinct, non-transient failure from network/server errors.
-        if http.statusCode == 400 || http.statusCode == 401 {
+        // bad code, etc.) — but per RFC 6749 the discriminator is the response BODY
+        // (`{"error":"invalid_grant"}`), not the status code alone. A body-less or
+        // differently-shaped 400/401 — e.g. a reverse proxy (Authelia, Cloudflare Access) whose
+        // own session expired in front of Home Assistant — is a transient/infra failure, not
+        // proof the OAuth grant itself is dead, and must not be treated as one: destroying the
+        // stored session on a guess would be exactly the "signs out on a flaky moment" bug this
+        // was meant to prevent. Erring toward "http" here just leaves the user retrying with a
+        // working "Change server" escape hatch, which is the safer failure.
+        if (http.statusCode == 400 || http.statusCode == 401), Self.bodyIndicatesInvalidGrant(data) {
             throw WSError(code: WSError.invalidGrantCode, message: "token endpoint rejected the request (\(http.statusCode))")
         }
         throw WSError(code: "http", message: "token endpoint failed (\(http.statusCode))")
+    }
+
+    private static func bodyIndicatesInvalidGrant(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = object["error"] as? String else { return false }
+        return error == "invalid_grant"
     }
 }
 

@@ -5,10 +5,16 @@ public struct WSError: Sendable, Equatable, Error {
     public let message: String
     public init(code: String, message: String) { self.code = code; self.message = message }
 
-    /// The token endpoint rejected the request with a 400/401 — a clear signal the refresh
-    /// (or authorization) grant is invalid/revoked, as opposed to a transient network/server failure.
+    /// The token endpoint rejected the request with a 400/401 body shaped like RFC 6749's
+    /// `invalid_grant` — a clear signal the refresh (or authorization) grant is invalid/revoked,
+    /// as opposed to a transient network/server failure.
     public static let invalidGrantCode = "invalid_grant"
     public var isInvalidGrant: Bool { code == Self.invalidGrantCode }
+
+    /// Home Assistant's WebSocket layer rejected the access token outright during the auth
+    /// handshake.
+    public static let authInvalidCode = "auth_invalid"
+    public var isAuthInvalid: Bool { code == Self.authInvalidCode }
 }
 
 public enum ServerFrame: Sendable, Equatable {

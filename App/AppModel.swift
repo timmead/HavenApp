@@ -23,6 +23,9 @@ final class AppModel {
     func restoreIfPossible() async {
         guard tokens.load() != nil, let url = savedBaseURL() else { return }
         baseURL = url
+        // So `requireReauthentication()`'s "re-authorize, don't retype the host" holds even on a
+        // cold launch — LoginView binds to `serverURLText`, not `baseURL`.
+        serverURLText = url.absoluteString
         tokenProvider = TokenProvider(baseURL: url, store: tokens, oauth: oauth, http: http)
         await startConnecting()
     }
@@ -56,8 +59,12 @@ final class AppModel {
     }
 
     /// Clear the saved session and return to the login screen (also used to change server).
-    func signOut() {
+    func signOut() async {
         connectTask?.cancel(); connectTask = nil
+        // Must happen before dropping the reference: an in-flight refresh on the old
+        // TokenProvider shares this same TokenStore, and would otherwise be able to write a
+        // stale token back after we've already moved on (see TokenProvider.invalidate()).
+        await tokenProvider?.invalidate()
         tokens.clear()
         UserDefaults.standard.removeObject(forKey: "baseURL")
         baseURL = nil
@@ -70,8 +77,9 @@ final class AppModel {
     /// itself invalid/revoked, or Home Assistant rejected the (freshly refreshed) token outright.
     /// Unlike `signOut()`, this keeps the server URL around so the user only has to re-authorize,
     /// not retype the host.
-    private func requireReauthentication() {
+    private func requireReauthentication() async {
         connectTask?.cancel(); connectTask = nil
+        await tokenProvider?.invalidate()
         tokens.clear()
         tokenProvider = nil
         store.reset()
@@ -98,51 +106,71 @@ final class AppModel {
         var attempt = 0
         // Home Assistant can reject a token TokenProvider believed was still valid (revoked out
         // of band, or clock skew) — allow exactly one forced refresh to recover from that before
-        // treating a further rejection as terminal.
+        // treating a further rejection as terminal. Reset once we get past authentication again,
+        // so two `auth_invalid`s separated by hours of otherwise-ordinary retrying each still get
+        // their own forced-refresh chance instead of the second one being terminal by accident.
         var didForceRefreshAfterAuthInvalid = false
         while true {
             if Task.isCancelled { return }
+            // Declared fresh each iteration: whichever client this attempt creates must be torn
+            // down on every non-success exit (every catch below, and every cancellation check),
+            // or the abandoned socket + its 10s heartbeat loop leak for as long as the app runs.
+            var client: HAWebSocketClient?
             do {
                 let token = try await tokenProvider.validAccessToken(now: Date())
+                if Task.isCancelled { return }
                 havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (attempt \(attempt + 1, privacy: .public))")
                 let conn = NWWebSocketConnection(url: wsURL)
-                let client = HAWebSocketClient(connection: conn)
-                try await client.authenticate(token: token)
+                let c = HAWebSocketClient(connection: conn)
+                client = c
+                try await c.authenticate(token: token)
+                if Task.isCancelled { await c.disconnect(); return }
                 havenLog.info("WS auth_ok")
-                await client.startHeartbeat()
-                let home = HomeConnection(client: client)
+                didForceRefreshAfterAuthInvalid = false
+                await c.startHeartbeat()
+                if Task.isCancelled { await c.disconnect(); return }
+                let home = HomeConnection(client: c)
                 store.attach(home)
                 try await store.bootstrap()
+                if Task.isCancelled { await c.disconnect(); return }
                 havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
-                if Task.isCancelled { return }
                 phase = .ready
                 return
             } catch TokenProviderError.reauthenticationRequired {
+                await client?.disconnect()
+                if Task.isCancelled { return }
                 havenLog.error("token refresh requires reauthentication — signing out")
-                requireReauthentication()
+                await requireReauthentication()
                 return
-            } catch let wsError as WSError where wsError.code == "auth_invalid" {
+            } catch let wsError as WSError where wsError.isAuthInvalid {
+                await client?.disconnect()
+                if Task.isCancelled { return }
                 guard !didForceRefreshAfterAuthInvalid else {
                     havenLog.error("token still invalid after a forced refresh — signing out")
-                    requireReauthentication()
+                    await requireReauthentication()
                     return
                 }
                 didForceRefreshAfterAuthInvalid = true
                 havenLog.error("Home Assistant rejected the access token as invalid — forcing a refresh")
                 do {
                     _ = try await tokenProvider.forceRefresh()
+                    if Task.isCancelled { return }
                     // Retry immediately with the fresh token; doesn't count as a backoff attempt.
                 } catch TokenProviderError.reauthenticationRequired {
+                    if Task.isCancelled { return }
                     havenLog.error("forced refresh requires reauthentication — signing out")
-                    requireReauthentication()
+                    await requireReauthentication()
                     return
                 } catch {
+                    if Task.isCancelled { return }
                     attempt += 1
                     havenLog.error("forced refresh failed: \(error, privacy: .public)")
                     phase = .retrying(attempt: attempt)
                     try? await Task.sleep(for: policy.delay(forAttempt: attempt))
                 }
             } catch {
+                await client?.disconnect()
+                if Task.isCancelled { return }
                 attempt += 1
                 havenLog.error("connect attempt \(attempt, privacy: .public) failed: \(error, privacy: .public)")
                 phase = .retrying(attempt: attempt)

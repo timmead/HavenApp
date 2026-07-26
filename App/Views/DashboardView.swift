@@ -29,7 +29,7 @@ struct DashboardView: View {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Menu {
                                     Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                                        app.signOut()
+                                        Task { await app.signOut() }
                                     }
                                 } label: {
                                     Image(systemName: "ellipsis.circle")

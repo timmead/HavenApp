@@ -24,7 +24,7 @@ public actor HAWebSocketClient {
         let second = try ServerFrame.decode(try await connection.receive())
         switch second {
         case .authOK: startReceiveLoop()
-        case .authInvalid(let m): throw WSError(code: "auth_invalid", message: m)
+        case .authInvalid(let m): throw WSError(code: WSError.authInvalidCode, message: m)
         default: throw WSError(code: "proto", message: "expected auth_ok")
         }
     }

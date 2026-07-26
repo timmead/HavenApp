@@ -9,7 +9,7 @@ struct RootView: View {
         case .retrying(let attempt):
             VStack(spacing: 16) {
                 ProgressView("Connection lost — retrying… (attempt \(attempt))")
-                Button("Change server") { model.signOut() }
+                Button("Change server") { Task { await model.signOut() } }
             }
         case .ready: DashboardView().environment(model.store)
         }
