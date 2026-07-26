@@ -32,6 +32,12 @@ import Foundation
     #expect(obj["type"] as? String == "auth")
     #expect(obj["access_token"] as? String == "abc")
 }
+@Test func encodesGetConfig() throws {
+    let data = WSCommand.getConfig(id: 4)
+    let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    #expect(obj["type"] as? String == "get_config")
+    #expect(obj["id"] as? Int == 4)
+}
 @Test func encodesCallService() throws {
     let data = WSCommand.callService(id: 3, domain: "light", service: "toggle", entityId: "light.k")
     let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]

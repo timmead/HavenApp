@@ -94,6 +94,10 @@ public enum WSCommand {
     public static func auth(token: String) -> Data { data(["type": "auth", "access_token": token]) }
     public static func ping(id: Int) -> Data { data(["id": id, "type": "ping"]) }
     public static func getStates(id: Int) -> Data { data(["id": id, "type": "get_states"]) }
+    /// Home Assistant's own advertised config, including `internal_url`/`external_url` — how the
+    /// instance itself thinks it can be reached, which is how HavenApp discovers a remote/Nabu
+    /// Casa address without the user having to type it in. See `HAInstanceConfig`.
+    public static func getConfig(id: Int) -> Data { data(["id": id, "type": "get_config"]) }
     public static func registryList(id: Int, type: String) -> Data { data(["id": id, "type": type]) }
     public static func subscribeEvents(id: Int, eventType: String) -> Data {
         data(["id": id, "type": "subscribe_events", "event_type": eventType])
