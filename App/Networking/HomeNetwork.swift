@@ -23,7 +23,12 @@ import HavenCore
 ///   `ConnectionPreference.homeSSIDMatch` as "unknown", which is defined to behave exactly like the
 ///   layer not existing. **`nil` must never be read as "not home".**
 /// - The home SSID is **captured automatically on a successful local connection** — we know we were
-///   home, because the peer's address said so — so the user never types it.
+///   home, because the peer's address said so — so the user never types it in the common case.
+/// - It can also be **set explicitly from `ConnectionSettingsView`** ("Use this Wi-Fi network as my
+///   home network"). This is the only bootstrap path for a home whose Home Assistant answers on a
+///   globally-routable IPv6 address (SLAAC GUA): `ConnectionClass.observed` never classifies that
+///   connection `.local` from the address alone, so auto-capture (which is gated on exactly that)
+///   never fires, and the user would otherwise have no way to teach the app "this network is home".
 ///
 /// ## Degradation
 ///
@@ -42,11 +47,22 @@ final class HomeNetwork {
     /// made in the system Settings app without needing to be reopened.
     private(set) var authorization: CLAuthorizationStatus
 
+    /// The SSID the app will treat as "home", or `nil` if none has been captured or set yet.
+    ///
+    /// A **stored**, `@Observable`-tracked property, not a computed read of `UserDefaults` — the
+    /// settings screen is now both writer (the explicit "use this network" action) and reader (it
+    /// displays this value) of the same instance, and `@Observable` only tracks stored properties.
+    /// A computed re-read would leave the button appearing to do nothing until the view happened to
+    /// re-render for an unrelated reason. Seeded from `UserDefaults` at init and kept in sync with it
+    /// on every write below, so it still survives relaunches exactly as before.
+    private(set) var homeSSID: String?
+
     private let manager = CLLocationManager()
     private var authorizationObserver: LocationAuthorizationObserver?
 
     init() {
         authorization = manager.authorizationStatus
+        homeSSID = UserDefaults.standard.string(forKey: Self.homeSSIDKey)
         let observer = LocationAuthorizationObserver { [weak self] status in
             Task { @MainActor in self?.authorization = status }
         }
@@ -62,11 +78,6 @@ final class HomeNetwork {
     /// `true` only before the user has been asked — the settings surface uses this to decide
     /// between offering the prompt and pointing at the Settings app (iOS only ever prompts once).
     var canRequestPermission: Bool { authorization == .notDetermined }
-
-    /// The SSID the app will treat as "home", or `nil` if no local connection has been made yet.
-    var homeSSID: String? {
-        UserDefaults.standard.string(forKey: Self.homeSSIDKey)
-    }
 
     /// **The only place that may trigger a system permission prompt, and it must stay that way.**
     /// Called from `ConnectionSettingsView` in response to a deliberate tap, never from a connect
@@ -90,23 +101,34 @@ final class HomeNetwork {
         }
     }
 
-    /// Records the current network as "home". Called by `AppModel` after a connection whose
-    /// **observed peer address** was private — i.e. we have positive evidence we were on the home
-    /// LAN, from the socket rather than from anything self-reported.
+    /// Records the current network as "home". Has two callers, deliberately sharing one
+    /// implementation rather than two:
     ///
-    /// A no-op when the SSID can't be read, which is why granting permission later still works:
-    /// the next local connection captures it. Overwrites rather than appends — a single home
-    /// network, matching the design's deferral of BSSID/multi-AP handling.
+    /// 1. **`AppModel`, automatically**, after a connection whose **observed peer address** was
+    ///    private — i.e. positive evidence we were on the home LAN, from the socket rather than from
+    ///    anything self-reported.
+    /// 2. **`ConnectionSettingsView`, explicitly**, when the user taps "Use this Wi-Fi network as my
+    ///    home network". This is the only bootstrap path for a GUA-on-LAN home (see the type doc) —
+    ///    there, `learnedOver` can never be `.local` from the address alone, so caller 1 never runs
+    ///    until *after* caller 2 has already told the app which network is home.
+    ///
+    /// A no-op when the SSID can't be read, which is why granting permission later still works: the
+    /// next local connection (or another tap of the settings button) captures it. Overwrites rather
+    /// than appends — a single home network, matching the design's deferral of BSSID/multi-AP
+    /// handling.
     func rememberCurrentNetworkAsHome() async {
         guard let ssid = await currentSSID(), !ssid.isEmpty else { return }
         guard ssid != homeSSID else { return }
         UserDefaults.standard.set(ssid, forKey: Self.homeSSIDKey)
-        havenLog.info("captured the home Wi-Fi network from a connection whose peer address was on the local network")
+        homeSSID = ssid
+        havenLog.info("captured the home Wi-Fi network")
     }
 
-    /// Cleared on sign-out with everything else that describes how to reach the old instance.
+    /// Cleared on sign-out with everything else that describes how to reach the old instance, and
+    /// reachable directly from the settings screen as the explicit "forget this network" action.
     func forgetHomeNetwork() {
         UserDefaults.standard.removeObject(forKey: Self.homeSSIDKey)
+        homeSSID = nil
     }
 }
 

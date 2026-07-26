@@ -301,29 +301,41 @@ final class AppModel {
                         // write specifically — without it, a `connect()` cancelled while this
                         // await was in flight (e.g. by a sign-out that started after
                         // `phase = .ready`) could still persist a URL for a session already gone.
-                        // **The trust decision, and it is made from the socket.** Not from the URL
-                        // we dialled, not from its hostname, not from DNS — from the address the
-                        // kernel is actually sending bytes to, read off this connection once it
-                        // reached `.ready`. A hostname cannot answer "is this on my LAN", and on a
-                        // hostile network neither can the resolver; `ha.example.com` looks exactly
-                        // like a LAN address in every respect except the one that matters.
-                        // Unavailable address ⇒ `.remote` ⇒ nothing adopted: fail closed, because
-                        // the two mistakes cost wildly different amounts (see
+                        // **The trust decision, and it is made from the socket — plus one more
+                        // signal.** Not from the URL we dialled, not from its hostname, not from
+                        // DNS — from the address the kernel is actually sending bytes to, read off
+                        // this connection once it reached `.ready`. A hostname cannot answer "is
+                        // this on my LAN", and on a hostile network neither can the resolver;
+                        // `ha.example.com` looks exactly like a LAN address in every respect except
+                        // the one that matters. Unavailable address ⇒ `.remote` ⇒ nothing adopted:
+                        // fail closed, because the two mistakes cost wildly different amounts (see
                         // `ConnectionClass.observed`).
+                        //
+                        // `ssidMatch` (computed once per round, above) is passed straight through as
+                        // the second signal rather than re-derived here: a globally-routable IPv6
+                        // home network (SLAAC GUA) is otherwise indistinguishable from an internet
+                        // host by address alone, and this is the one place that gap is closed. `nil`
+                        // (permission absent / no home network captured yet) flows through unchanged
+                        // as "unknown" — never as "home".
                         let peerAddress = conn.observedPeerAddress
-                        let learnedOver = ConnectionClass.observed(peerAddress: peerAddress)
-                        // Logged because "remote access never appeared" otherwise has three
-                        // indistinguishable causes, and one of them is an address we simply could
-                        // not read.
-                        havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
+                        let learnedOver = ConnectionClass.observed(peerAddress: peerAddress, onKnownHomeNetwork: ssidMatch)
+                        // Logged because "remote access never appeared" otherwise has several
+                        // indistinguishable causes, and two of them are signals we simply couldn't
+                        // read (address unavailable, SSID unknown).
+                        havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public), SSID match \(ssidMatch.map(String.init(describing:)) ?? "unknown", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
                         if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
                             rememberDiscoveredURLs(config, learnedOver: learnedOver)
                         }
                         // Capture the home Wi-Fi network automatically, so the user never types an
-                        // SSID — and only on a connection the *peer address* proved was local, so
-                        // a café's SSID can never be recorded as home. A no-op without Location
-                        // Services; granting it later simply means the next local connection
-                        // captures it.
+                        // SSID for the common case — gated on `learnedOver`, which the SSID match
+                        // itself now feeds. When it was the *peer address* that said local, this is
+                        // positive independent evidence, so a café's SSID still can never be
+                        // recorded as home that way. When it was the SSID match that said local
+                        // (the GUA case), this simply re-records the same network already on file —
+                        // `rememberCurrentNetworkAsHome` no-ops once the current SSID already equals
+                        // `homeSSID`, so nothing new is captured either way. A no-op without
+                        // Location Services; granting it later simply means the next local
+                        // connection captures it.
                         if learnedOver == .local, !Task.isCancelled {
                             await homeNetwork.rememberCurrentNetworkAsHome()
                         }

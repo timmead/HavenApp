@@ -173,4 +173,38 @@ import Network
         #expect(PeerEndpointAddress.address(of: nil) == nil)
         #expect(PeerEndpointAddress.address(of: .service(name: "ha", type: "_http._tcp", domain: "local", interface: nil)) == nil)
     }
+
+    // MARK: - `onKnownHomeNetwork` — the SSID signal that closes the IPv6-GUA gap
+
+    /// The IP signal alone is untouched: a private address is still `.local` whether or not the
+    /// caller even knows about SSIDs, matched or not.
+    @Test func privateAddressIsLocalRegardlessOfSSIDSignal() {
+        #expect(ConnectionClass.observed(peerAddress: "192.168.1.10", onKnownHomeNetwork: false) == .local)
+        #expect(ConnectionClass.observed(peerAddress: "192.168.1.10", onKnownHomeNetwork: nil) == .local)
+    }
+
+    /// This is the case the parameter exists for: a globally-routable IPv6 address — indistinguishable
+    /// from an internet host by address alone — is `.local` once the current Wi-Fi is known to match
+    /// the user's configured home network.
+    @Test func publicGUAWithMatchingSSIDIsLocal() {
+        #expect(ConnectionClass.observed(peerAddress: "2600:1901::1", onKnownHomeNetwork: true) == .local)
+    }
+
+    @Test func publicGUAWithNoSSIDMatchIsStillRemote() {
+        #expect(ConnectionClass.observed(peerAddress: "2600:1901::1", onKnownHomeNetwork: false) == .remote)
+    }
+
+    /// `nil` — SSID unknown, e.g. Location Services not authorized — must behave exactly like
+    /// `false`, not like `true`. This is the fail-closed rule from `homeSSIDMatch` propagated all the
+    /// way through, and it is what keeps this change from being a loosening for every user who never
+    /// grants the permission — unchanged from Task 4's behaviour.
+    @Test func publicGUAWithUnknownSSIDIsRemoteUnchangedFromBeforeThisSignalExisted() {
+        #expect(ConnectionClass.observed(peerAddress: "2600:1901::1", onKnownHomeNetwork: nil) == .remote)
+    }
+
+    /// An unresolved/unavailable address is still `.remote` unless the SSID signal says otherwise —
+    /// the two signals are a genuine OR, neither one gates the other.
+    @Test func unavailableAddressWithMatchingSSIDIsStillLocal() {
+        #expect(ConnectionClass.observed(peerAddress: nil, onKnownHomeNetwork: true) == .local)
+    }
 }

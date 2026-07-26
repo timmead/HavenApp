@@ -37,16 +37,35 @@ extension ConnectionClass {
     /// address by hand. Classifying a genuinely remote connection as local adopts an attacker's URL
     /// as a permanent, token-receiving candidate. So every uncertainty resolves the first way.
     ///
-    /// **Known consequence, deliberately accepted.** A home whose Home Assistant is reached over a
-    /// *globally routable* IPv6 address (a GUA from SLAAC, rather than a ULA or link-local) is
-    /// classified `.remote` even while the phone is sitting on that LAN, because the address alone
-    /// genuinely does not distinguish it from a host on the internet. The cost is that such a setup
-    /// never auto-learns its remote URL and the user enters one by hand; that is the fail-closed
-    /// side of the trade, and it is the correct side.
+    /// **The IPv6-GUA gap, and the second signal that closes it.** A home whose Home Assistant is
+    /// reached over a *globally routable* IPv6 address (a GUA from SLAAC, rather than a ULA or
+    /// link-local) cannot be told apart from a host on the internet **by address alone** — a growing
+    /// number of consumer routers hand these out on the LAN. The IP check above therefore classifies
+    /// that connection `.remote` even while the phone is sitting in the house. `onKnownHomeNetwork`
+    /// is how the caller supplies the other fact that resolves it: `ConnectionPreference.homeSSIDMatch`,
+    /// the same "is the current Wi-Fi the one I called home" comparison layer 1 already uses for
+    /// candidate *ordering* — reused here, not recomputed, so there is exactly one place that decides
+    /// what "home" means.
     ///
-    /// - Parameter peerAddress: The peer's resolved IP literal, e.g. from
-    ///   `NWWebSocketConnection.observedPeerAddress`. An IPv6 zone suffix (`fe80::1%en0`) is fine.
-    public static func observed(peerAddress: String?) -> ConnectionClass {
+    /// **This is not a loosening of the trust rule, it is the same rule read correctly.** The
+    /// existing IP check already trusts *any* private address as "the local network" — which really
+    /// means "whatever network handed out that private address", rogue access point included. A
+    /// matching SSID is exactly as spoofable as that, no more and no less; it is not a weaker signal
+    /// bolted onto a strong one, it is a second way to observe the same thing the IP check observes.
+    /// Both still describe *where a fact was learned*, which is what §1 requires — neither says
+    /// anything about *what* the fact says.
+    ///
+    /// - Parameters:
+    ///   - peerAddress: The peer's resolved IP literal, e.g. from
+    ///     `NWWebSocketConnection.observedPeerAddress`. An IPv6 zone suffix (`fe80::1%en0`) is fine.
+    ///   - onKnownHomeNetwork: Whether the current Wi-Fi is known to match the user's configured home
+    ///     network — `ConnectionPreference.homeSSIDMatch(current:home:)`. `nil` and `false` are
+    ///     treated identically: **"unknown" must never be read as "home"**, the same fail-closed
+    ///     posture as an unresolved address below. Defaulted to `nil` so every existing call site
+    ///     (all of §1–§4's IP-only tests) keeps its original meaning unchanged.
+    public static func observed(peerAddress: String?, onKnownHomeNetwork: Bool? = nil) -> ConnectionClass {
+        if onKnownHomeNetwork == true { return .local }
+
         guard let peerAddress, !peerAddress.isEmpty else { return .remote }
 
         if let octets = strictIPv4Octets(peerAddress) {

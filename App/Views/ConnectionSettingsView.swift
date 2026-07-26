@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 import HavenCore
 
 /// Where the optional "connect faster at home" upgrade is offered — **and the only place a
@@ -10,9 +11,26 @@ import HavenCore
 /// cost of declining stated plainly ("Haven still works — it just tries your local address first
 /// and falls back"). Asking during onboarding instead would trade a first-run permission prompt —
 /// in a privacy-led, local-first app — for about two seconds, which is a bad trade and reads worse.
+///
+/// ## Why this screen also lets the user set the home network directly
+///
+/// Auto-capture (`HomeNetwork.rememberCurrentNetworkAsHome`, fired from `AppModel` after a
+/// connection classified `.local`) covers the common case, but it cannot be the *only* path: a home
+/// whose Home Assistant answers on a globally-routable IPv6 address is never classified `.local` by
+/// address alone (see `ConnectionClass.observed`), so auto-capture never runs there. "Use this Wi-Fi
+/// network as my home network" is the explicit way to teach the app that fact instead — the same
+/// thing the Home Assistant companion app asks the user to configure directly, rather than trying to
+/// infer it.
 struct ConnectionSettingsView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    /// The SSID of the network currently joined, independent of whether it matches `homeSSID`.
+    /// Fetched fresh whenever authorization changes (including a grant made while this screen is
+    /// open, via the system Settings app) rather than once on appear — a stale `nil` here would
+    /// read as "not on Wi-Fi" even after the user just granted permission.
+    @State private var currentSSID: String?
 
     var body: some View {
         NavigationStack {
@@ -27,16 +45,20 @@ struct ConnectionSettingsView: View {
                             Label("Connect faster at home", systemImage: "wifi")
                         }
                     case .authorizedWhenInUse, .authorizedAlways:
-                        Label {
-                            Text(app.homeNetwork.homeSSID.map { "Home network: \($0)" }
-                                 ?? "Home network not learned yet")
-                        } icon: {
-                            Image(systemName: "wifi")
-                        }
-                        .foregroundStyle(.primary)
+                        authorizedRows
                     default:
                         Label("Wi-Fi network access is off", systemImage: "wifi.slash")
                             .foregroundStyle(.secondary)
+                        // Not a dead end: iOS only ever shows the system prompt once, so the only
+                        // way back from "denied" is the Settings app. Offer it rather than making
+                        // the user go find it themselves.
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                        } label: {
+                            Label("Open Settings", systemImage: "gear")
+                        }
                     }
                 } header: {
                     Text("Home Wi-Fi")
@@ -51,12 +73,57 @@ struct ConnectionSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // Re-fetched on every authorization change, not just once at appear — see the
+            // property's doc comment.
+            .task(id: app.homeNetwork.authorization) {
+                currentSSID = await app.homeNetwork.currentSSID()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var authorizedRows: some View {
+        Label {
+            Text(currentSSID.map { "Current network: \($0)" } ?? "Not on Wi-Fi")
+        } icon: {
+            Image(systemName: "wifi")
+        }
+        .foregroundStyle(.primary)
+
+        Label {
+            Text(app.homeNetwork.homeSSID.map { "Home network: \($0)" } ?? "Home network not set")
+        } icon: {
+            Image(systemName: "house")
+        }
+        .foregroundStyle(.primary)
+
+        if let currentSSID, currentSSID != app.homeNetwork.homeSSID {
+            Button {
+                Task { await app.homeNetwork.rememberCurrentNetworkAsHome() }
+            } label: {
+                Label("Use this Wi-Fi network as my home network", systemImage: "house.fill")
+            }
+        }
+
+        if app.homeNetwork.homeSSID != nil {
+            Button(role: .destructive) {
+                app.homeNetwork.forgetHomeNetwork()
+            } label: {
+                Label("Forget home network", systemImage: "trash")
+            }
         }
     }
 
     /// Every branch says the same underlying thing — this is optional and nothing breaks without
     /// it — because that is true, and because a user who reads "denied" as "something is wrong"
     /// will grant a permission they didn't want to.
+    ///
+    /// The authorized case is split on `currentSSID` rather than assumed readable: authorization
+    /// alone doesn't guarantee `currentSSID()` returns a value (not currently on Wi-Fi, or the
+    /// *Access WiFi Information* entitlement isn't provisioned on this build — see `HomeNetwork`).
+    /// `authorizedRows` doesn't show the "use this network" button when `currentSSID` is `nil`, so
+    /// this text must not claim it's there either — a footer promising a button the screen doesn't
+    /// show is exactly the dead end this screen exists to avoid.
     private var footer: String {
         switch app.homeNetwork.authorization {
         case .notDetermined:
@@ -69,15 +136,20 @@ struct ConnectionSettingsView: View {
             falls back to your remote one, which takes a couple of seconds longer when you're out.
             """
         case .authorizedWhenInUse, .authorizedAlways:
+            if currentSSID == nil {
+                return app.homeNetwork.homeSSID == nil
+                    ? "Haven can't read the current Wi-Fi network right now — join a Wi-Fi network to set it as home, or Haven will remember it automatically the next time it connects over your local network."
+                    : "Haven can't read the current Wi-Fi network right now, but it will still go straight to your local address on your home network and your remote one everywhere else."
+            }
             return app.homeNetwork.homeSSID == nil
-                ? "Haven will remember your home Wi-Fi the next time it connects over your local network."
-                : "Haven goes straight to your local address on this network, and straight to your remote one everywhere else."
+                ? "Haven will remember your home Wi-Fi the next time it connects over your local network, or you can set the network above as home right now."
+                : "Haven goes straight to your local address on this network, and straight to your remote one everywhere else. Setting a new home network here takes effect the next time Haven connects, not immediately."
         default:
             return """
             Haven can't tell which Wi-Fi network you're on, so it tries your local address first \
             and falls back to your remote one. Everything works; connecting away from home just \
-            takes a couple of seconds longer. You can turn location access on for Haven in the \
-            Settings app if you'd like it to be instant.
+            takes a couple of seconds longer. Turn location access on for Haven in Settings if \
+            you'd like it to be instant.
             """
         }
     }
