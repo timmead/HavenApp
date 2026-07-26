@@ -33,7 +33,10 @@ import Foundation
     }
 
     @Test func readyDoesNotRequireHACSToBeLoaded() {
-        // A manually-installed havenapp (no HACS involved at all) is just as ready.
+        // A manually-installed havenapp (no HACS involved at all) is just as ready. Note: the
+        // success branch doesn't actually consult `components` at all (see
+        // `indeterminateIsNeverReachedWhenTheProbeItselfSucceeded` for the property this really
+        // rests on) — this test's `components` value is incidental, not load-bearing.
         let info = readyInfo()
         let status = HavenIntegrationDetector.classify(components: ["havenapp"], infoResult: .success(info))
         #expect(status == .ready(info))
@@ -111,14 +114,169 @@ import Foundation
     }
 
     @Test func hacsMissingEvenWhenARepoListIsSomehowSupplied() {
-        // hacsRepositories is meaningless without HACS itself loaded; must not accidentally
-        // produce .needsConfigEntry or .needsInstall.
+        // hacsRepositories is meaningless without HACS itself loaded (a genuine, non-empty
+        // components list here); must not accidentally produce .needsConfigEntry or .needsInstall.
+        let status = HavenIntegrationDetector.classify(
+            components: ["light", "sensor"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"]
+        )
+        #expect(status == .hacsMissing)
+    }
+
+    // MARK: - Coordinator follow-up: components missing/empty must never be read as "confirmed
+    // nothing installed"
+    //
+    // `HAInstanceConfig.components` decodes to `nil` if `get_config`'s response never included the
+    // key — a real possibility, since this exact wire shape has never been verified against a live
+    // instance. Defaulting that to `[]` and letting `classify` fall through the same path as a
+    // genuinely-empty list would make a broken decoding assumption indistinguishable from "nothing
+    // is installed," and the app would confidently walk a fully-configured user through installing
+    // HACS. `.indeterminate` exists so that failure mode surfaces as an honest diagnostic instead.
+
+    @Test func nilComponentsYieldsIndeterminateNeverHACSMissing() {
+        let status = HavenIntegrationDetector.classify(
+            components: nil,
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a"))
+        )
+        #expect(status == .indeterminate)
+    }
+
+    @Test func emptyComponentsIsTreatedIdenticallyToNil() {
+        // A real HA instance never reports zero loaded components — an empty list here is exactly
+        // as untrustworthy as a missing key, not proof of anything.
         let status = HavenIntegrationDetector.classify(
             components: [],
             infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
             hacsRepositories: ["timmead/hacs-havenapp"]
         )
+        #expect(status == .indeterminate)
+    }
+
+    @Test func indeterminateIsNeverReachedWhenTheProbeItselfSucceeded() {
+        // A successful havenapp/info is positive, direct proof — stronger than components — so it
+        // must win outright even if components came back nil/empty/malformed.
+        let info = readyInfo()
+        let status = HavenIntegrationDetector.classify(components: nil, infoResult: .success(info))
+        #expect(status == .ready(info))
+    }
+
+    @Test func aRealNonEmptyListWithoutHavenappButWithHACSIsUnaffectedByTheIndeterminateChange() {
+        // Sanity check that the fix didn't change behavior for the actual "ambiguous, needs HACS
+        // disambiguation" row — only nil/[] changed meaning.
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs", "light"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"]
+        )
+        #expect(status == .needsConfigEntry)
+    }
+
+    // MARK: - Coordinator follow-up: non-admin detected pre-`havenapp/info` via auth/current_user
+    //
+    // `ha_user_is_admin` only exists once `havenapp/info` has succeeded. The three branches below
+    // never get that far — `havenapp` isn't even loaded — so without a separate signal, a
+    // non-admin household member would be walked through an admin-only HACS/HA step (installing
+    // HACS itself, adding our custom repository, or completing its config flow) they cannot
+    // finish. `isAdmin` (sourced from HA's stock `auth/current_user`, independent of havenapp)
+    // closes that gap. `nil` must reproduce today's behavior exactly — the fallback always fails
+    // toward *showing* the remediation, never hiding it, since withholding it from someone who
+    // could actually act (a caller that simply didn't query admin status) would be strictly worse
+    // than the non-admin annoyance this exists to prevent.
+
+    @Test func nonAdminBlockedFromNeedsInstall() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["someone/unrelated-repo"],
+            isAdmin: false
+        )
+        #expect(status == .blockedByNonAdmin(.needsInstall))
+    }
+
+    @Test func nonAdminBlockedFromNeedsConfigEntry() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"],
+            isAdmin: false
+        )
+        #expect(status == .blockedByNonAdmin(.needsConfigEntry))
+    }
+
+    @Test func nonAdminBlockedFromHACSMissing() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["light", "sensor"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            isAdmin: false
+        )
+        #expect(status == .blockedByNonAdmin(.hacsMissing))
+    }
+
+    @Test func isAdminNilReproducesTodaysBehaviorForNeedsInstall() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["someone/unrelated-repo"],
+            isAdmin: nil
+        )
+        #expect(status == .needsInstall)
+    }
+
+    @Test func isAdminNilReproducesTodaysBehaviorForNeedsConfigEntry() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"],
+            isAdmin: nil
+        )
+        #expect(status == .needsConfigEntry)
+    }
+
+    @Test func isAdminNilReproducesTodaysBehaviorForHACSMissing() {
+        let status = HavenIntegrationDetector.classify(
+            components: ["light", "sensor"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            isAdmin: nil
+        )
         #expect(status == .hacsMissing)
+    }
+
+    @Test func adminTrueLeavesNeedsInstallNeedsConfigEntryAndHACSMissingUnchanged() {
+        #expect(HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["someone/unrelated-repo"],
+            isAdmin: true
+        ) == .needsInstall)
+
+        #expect(HavenIntegrationDetector.classify(
+            components: ["hacs"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            hacsRepositories: ["timmead/hacs-havenapp"],
+            isAdmin: true
+        ) == .needsConfigEntry)
+
+        #expect(HavenIntegrationDetector.classify(
+            components: ["light", "sensor"],
+            infoResult: .failure(WSError(code: "unknown_command", message: "n/a")),
+            isAdmin: true
+        ) == .hacsMissing)
+    }
+
+    @Test func postInfoNotAdminPathIsUnaffectedByTheIsAdminParameter() {
+        // `notAdmin` (once `havenapp/info` succeeded) is decided from `info.haUserIsAdmin` alone;
+        // `isAdmin` — a pre-info signal — must not override or interact with it either way.
+        let info = readyInfo(admin: false)
+        let ignoredEvenTrue = HavenIntegrationDetector.classify(
+            components: ["havenapp"], infoResult: .success(info), isAdmin: true
+        )
+        #expect(ignoredEvenTrue == .notAdmin)
+
+        let ignoredEvenFalse = HavenIntegrationDetector.classify(
+            components: ["havenapp"], infoResult: .success(info), isAdmin: false
+        )
+        #expect(ignoredEvenFalse == .notAdmin)
     }
 
     // MARK: - Brief extras: forward-compatible capabilities

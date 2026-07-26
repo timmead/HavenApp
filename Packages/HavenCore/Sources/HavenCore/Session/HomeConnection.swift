@@ -32,7 +32,19 @@ public actor HomeConnection {
     public func fetchInstanceConfig() async throws -> HAInstanceConfig {
         let v = try await client.request { WSCommand.getConfig(id: $0) }
         let data = try JSONEncoder().encode(v)
-        return try JSONDecoder().decode(HAInstanceConfig.self, from: data)
+        let config = try JSONDecoder().decode(HAInstanceConfig.self, from: data)
+        // Same discipline as `AppModel.rememberDiscoveredURLs`'s both-URLs-nil warning: this
+        // wire shape (get_config's `components` field) has never been verified against a live
+        // response, so if the assumption is wrong, this is how it would otherwise silently
+        // degrade `HavenIntegrationDetector.classify` into confidently telling a fully-configured
+        // user to go install HACS (see `HavenIntegrationStatus.indeterminate`). A `nil` or empty
+        // list here is exactly the condition that produces that case, so it's logged loudly at
+        // the earliest possible point — this decode — rather than left to surface only once
+        // onboarding acts on it.
+        if config.components?.isEmpty ?? true {
+            havenCoreLog.error("get_config's components list was missing or empty — havenapp/HACS presence cannot be determined from this response alone; onboarding will fall back to the havenapp/info probe result")
+        }
+        return config
     }
 
     public func loadStructure() async throws -> ResolvedHome {

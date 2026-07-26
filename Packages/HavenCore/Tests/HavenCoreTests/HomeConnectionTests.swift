@@ -86,10 +86,13 @@ import Foundation
     #expect(config.components == ["hacs", "havenapp", "light"])
 }
 
-@Test func fetchInstanceConfigDefaultsComponentsToEmptyWhenAbsent() async throws {
-    // Guards both existing fixtures above (neither mentions "components" at all) and any
-    // payload from before this field existed: it must decode to [], never throw a missing-key
-    // error, since `HavenIntegrationDetector.classify` needs a components list from every caller.
+@Test func fetchInstanceConfigYieldsNilComponentsWhenTheKeyIsAbsent() async throws {
+    // Guards both existing URL-only fixtures above (neither mentions "components" at all) and
+    // any payload from before this field existed: it must decode to `nil`, never throw a
+    // missing-key error — but also never silently become `[]`. A missing key and a genuinely
+    // empty list are different facts (see `HAInstanceConfig.components`'s documentation): only
+    // `nil` says "we don't know," which is exactly what `HavenIntegrationDetector.classify` needs
+    // to tell apart from a real, populated components list before it can trust it at all.
     let conn = FakeWebSocketConnection()
     let client = HAWebSocketClient(connection: conn)
     await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
@@ -103,7 +106,7 @@ import Foundation
     }
     let home = HomeConnection(client: client)
     let config = try await home.fetchInstanceConfig()
-    #expect(config.components == [])
+    #expect(config.components == nil)
 }
 
 @Test func fetchIntegrationInfoDecodesASuccessfulProbe() async throws {
