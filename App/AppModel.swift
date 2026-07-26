@@ -47,8 +47,9 @@ final class AppModel {
     /// What `cloud/status` last said about this instance's Nabu Casa remote access, or `nil` if
     /// we haven't asked yet (or have signed out). Purely a rendering input — the classification
     /// itself is `NabuCasaRemoteAccessDetector.classify`, in HavenCore with tests, and `App/` may
-    /// only display what it produced. Tasks 3 (offer to enable) and 6 (custom remote URL) own the
-    /// surfaces that read this; nothing renders it yet.
+    /// only display what it produced. Read by `ConnectionSettingsView`: `.remoteDisabled` drives
+    /// Task 3's offer, and the four outcomes that route to the custom-URL path render
+    /// `NabuCasaRemoteAccess.customRemoteURLGuidance` above that field.
     ///
     /// Note this is set regardless of whether the connection was local or remote: it is honest to
     /// *say* remote access exists no matter where we heard it. What must not happen over a remote
@@ -401,8 +402,20 @@ final class AppModel {
                         // indistinguishable causes, and two of them are signals we simply couldn't
                         // read (address unavailable, SSID unknown).
                         havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public), SSID match \(ssidMatch.map(String.init(describing:)) ?? "unknown", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
-                        if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
-                            rememberDiscoveredURLs(config, learnedOver: learnedOver)
+                        // `do`/`catch` rather than `try?` (review M-2): a throw here costs the URL
+                        // adoption *and* the `components` signal the onboarding probe falls back
+                        // from, and `fetchInstanceConfig`'s own comment promises the wire-shape risk
+                        // is "logged loudly at the earliest possible point". That promise only holds
+                        // for a successful decode with empty components — a transport failure
+                        // mid-`get_config`, or a payload that fails to decode at all, was swallowed
+                        // here with no log anywhere. Silent, and this project's recurring shape.
+                        do {
+                            let config = try await home.fetchInstanceConfig()
+                            if !Task.isCancelled {
+                                rememberDiscoveredURLs(config, learnedOver: learnedOver)
+                            }
+                        } catch {
+                            havenLog.error("get_config failed: \(error, privacy: .public) — no URLs learned from this connection, and the components signal is unavailable to the onboarding probe")
                         }
                         // Capture the home Wi-Fi network automatically, so the user never types an
                         // SSID for the common case — gated on `learnedOver`, which the SSID match
@@ -610,8 +623,11 @@ final class AppModel {
     /// runs after it, so `cloud/status` wins when both answer. That is the right precedence for
     /// Nabu Casa — `remote_domain` is the cloud's own authority on its tunnel, whereas
     /// `external_url` is free text the user may have set to anything. A user running *both* Nabu
-    /// Casa and their own reverse proxy loses the latter from the candidate list; giving a
-    /// user-supplied remote URL a slot of its own is Task 6's job, not something to improvise here.
+    /// Casa and their own reverse proxy keeps the latter regardless: it lives in its own slot
+    /// (`CustomRemoteURLStore`) and is a separate candidate, ordered after this one.
+    ///
+    /// It can also *clear* that slot, when `storedRemoteURLIsSuperseded` says a stored Nabu Casa URL
+    /// has outlived its subscription — see below and review finding M-4.
     private func rememberNabuCasaRemoteAccess(
         _ status: Result<HACloudStatus, WSError>,
         learnedOver: ConnectionClass
@@ -622,6 +638,17 @@ final class AppModel {
         // Task 3's offer, from the same result — never re-probed separately, so it can never
         // disagree with `outcome` above about what `cloud/status` actually said.
         remoteAccessOffer.update(NabuCasaRemoteAccessDetector.offer(from: status, over: learnedOver))
+        // The one thing that removes a stored remote URL outside sign-in/sign-out, and it removes
+        // only a *dead* one: a `*.ui.nabu.casa` address whose subscription has lapsed, established
+        // over a local connection. The predicate is HavenCore's — including the reason it must not
+        // fire on `.indeterminate` (a transport blip) or on a self-hosted `external_url` sharing the
+        // slot. Without it a lapsed tunnel stays ahead of the user's own remote address forever.
+        if NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            storedURL(DefaultsKeys.discoveredExternalURL), by: outcome, learnedOver: learnedOver
+        ) {
+            UserDefaults.standard.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
+            havenLog.info("cloud/status → \(String(describing: outcome), privacy: .public); the stored Nabu Casa remote URL no longer works and was removed")
+        }
         guard let url = NabuCasaRemoteAccessDetector.adoptableRemoteURL(
             from: outcome, learnedOver: learnedOver
         ) else {

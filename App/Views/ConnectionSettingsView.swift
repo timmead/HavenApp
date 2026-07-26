@@ -177,6 +177,18 @@ struct ConnectionSettingsView: View {
     @ViewBuilder
     private var customRemoteURLSection: some View {
         Section {
+            // Design §3's outcomes 3 and 4, which had no surface at all before (review finding
+            // I-2): the self-hosted user, the signed-out account, the lapsed subscription and the
+            // "we couldn't tell" case each get their own sentence, and each says the custom address
+            // below is the way through. The copy — including the fact that `.cloudNotLoaded` must
+            // not read as "you need Nabu Casa" — is `NabuCasaRemoteAccess.customRemoteURLGuidance`
+            // in HavenCore, with tests. `nil` for `.remoteAvailable`/`.remoteDisabled`, which have
+            // their own surfaces.
+            if let guidance = app.remoteAccess?.customRemoteURLGuidance {
+                Text(guidance)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
             TextField("https://ha.example.com", text: $customRemoteText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -227,11 +239,14 @@ struct ConnectionSettingsView: View {
         let ordering = hasNabuCasa
             ? " Your Home Assistant also has Nabu Casa remote access; Haven tries that first and this second."
             : ""
+        // The lead-in is dropped when the guidance above the field already said it — otherwise a
+        // `.cloudNotLoaded` user reads the same sentence twice on one screen.
+        let leadIn = app.remoteAccess?.customRemoteURLGuidance == nil
+            ? "If you reach Home Assistant from outside your home some other way — Tailscale, or your own reverse proxy — enter that address here and Haven will use it when you're away. "
+            : ""
         return """
-        If you reach Home Assistant from outside your home some other way — Tailscale, or your own \
-        reverse proxy — enter that address here and Haven will use it when you're away. It must be \
-        an https:// address, because it travels over the internet.\(ordering) Changes take effect \
-        the next time Haven connects.
+        \(leadIn)It must be an https:// address, because it travels over the internet.\(ordering) \
+        Changes take effect the next time Haven connects.
         """
     }
 

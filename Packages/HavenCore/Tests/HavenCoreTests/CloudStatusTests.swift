@@ -555,3 +555,100 @@ private func decodeStatus(_ json: String) throws -> HACloudStatus {
     #expect(NabuCasaRemoteAccessDetector.evaluateEnableAttempt(reprobe: failed)
             == .didNotTakeEffect(message: NabuCasaRemoteAccessDetector.remoteAccessDidNotTakeEffectMessage))
 }
+
+// MARK: - Review M-4: a lapsed Nabu Casa URL must be able to leave the slot
+//
+// Nothing ever cleared `discoveredExternalURL` except a sign-in/sign-out, so a subscription that
+// lapses leaves a dead `*.ui.nabu.casa` URL in it forever — ordered *ahead* of the user's custom
+// remote URL, so someone who then sets up their own reverse proxy pays a connect deadline against a
+// tunnel that will never answer, on every connect away from home, with no way to remove it.
+
+@Suite struct SupersededRemoteURLTests {
+    private func url(_ s: String) -> URL { URL(string: s)! }
+    private let nabuCasa = URL(string: "https://abc123.ui.nabu.casa")!
+
+    @Test func aLapsedSubscriptionSupersedesTheStoredNabuCasaURL() {
+        #expect(NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .noSubscription, learnedOver: .local))
+        #expect(NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .notLoggedIn, learnedOver: .local))
+    }
+
+    @Test func anAbsenceOfEvidenceIsNotEvidenceTheTunnelIsGone() {
+        // `.indeterminate` is what a transport blip classifies as. Deleting a working remote address
+        // because one probe failed would strand the user the next time they leave home — the exact
+        // failure this codebase keeps producing, pointed the other way.
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .indeterminate, learnedOver: .local))
+        // `.cloudNotLoaded` says the component isn't loaded *now*; it is also what a mistyped
+        // command name would produce (see `cloudStatusEmitsTheExactCommandNameHomeAssistantRegisters`).
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .cloudNotLoaded, learnedOver: .local))
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .remoteDisabled(domain: "abc123.ui.nabu.casa"), learnedOver: .local))
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .remoteAvailable(nabuCasa), learnedOver: .local))
+    }
+
+    @Test func aSelfHostedExternalURLInTheSameSlotIsNotDestroyed() {
+        // The slot's *other* occupant: `get_config`'s `external_url`, written first, belonging to a
+        // user whose HA has the cloud component loaded but no subscription — precisely the
+        // `.noSubscription` user. Their reverse proxy is not evidence about anybody's cloud account.
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            url("https://ha.example.com"), by: .noSubscription, learnedOver: .local))
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            url("https://ha.example.com"), by: .notLoggedIn, learnedOver: .local))
+    }
+
+    @Test func aRemoteConnectionStillGetsNoSayInWhatWeRemember() {
+        // This one only ever *deletes*, so it is the safe direction — but the rule stays symmetric,
+        // because one sentence is easier to keep true than two.
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .noSubscription, learnedOver: .remote))
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nabuCasa, by: .notLoggedIn, learnedOver: .remote))
+    }
+
+    @Test func nothingStoredIsNothingToSupersede() {
+        #expect(!NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
+            nil, by: .noSubscription, learnedOver: .local))
+    }
+}
+
+// MARK: - Review I-2: the four non-Nabu-Casa outcomes have copy, and it is honest
+//
+// `.cloudNotLoaded`, `.notLoggedIn`, `.noSubscription` and `.indeterminate` were classified,
+// documented and unit-tested — and rendered nowhere in the app. Design §3's outcomes 3 and 4.
+
+@Suite struct CustomRemoteURLGuidanceTests {
+    @Test func everyOutcomeThatRoutesToTheCustomURLPathHasCopy() {
+        for outcome: NabuCasaRemoteAccess in [.cloudNotLoaded, .notLoggedIn, .noSubscription, .indeterminate] {
+            #expect(outcome.customRemoteURLGuidance != nil)
+        }
+    }
+
+    @Test func theTwoNabuCasaOutcomesSayNothingHere() {
+        // `.remoteAvailable` needs no guidance; `.remoteDisabled` is Task 3's offer, which owns its
+        // own copy — a second explanation beside it would be two voices on one screen.
+        #expect(NabuCasaRemoteAccess.remoteAvailable(URL(string: "https://abc123.ui.nabu.casa")!).customRemoteURLGuidance == nil)
+        #expect(NabuCasaRemoteAccess.remoteDisabled(domain: nil).customRemoteURLGuidance == nil)
+    }
+
+    @Test func theSelfHostedUserIsNotToldTheyNeedASubscription() {
+        // `.cloudNotLoaded` is the ordinary self-hosted user, per design §3 outcome 4 — not an
+        // error, and not a sales pitch. Someone whose Tailscale setup already works must not read
+        // this as "you need Nabu Casa".
+        let copy = NabuCasaRemoteAccess.cloudNotLoaded.customRemoteURLGuidance
+        #expect(copy?.contains("normal") == true)
+        #expect(copy?.lowercased().contains("subscription") == false)
+    }
+
+    @Test func theIndeterminateCopyClaimsNothingAboutTheAccount() {
+        // The distinction Task 2's report asked for: `.indeterminate` means we failed to establish
+        // anything, so the copy must not imply the user has (or lacks) a subscription or an account.
+        let copy = NabuCasaRemoteAccess.indeterminate.customRemoteURLGuidance
+        #expect(copy?.contains("couldn't tell") == true)
+        #expect(copy?.lowercased().contains("doesn't have") == false)
+        #expect(copy?.lowercased().contains("isn't signed in") == false)
+    }
+}

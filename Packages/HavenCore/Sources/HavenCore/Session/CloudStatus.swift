@@ -461,6 +461,47 @@ public enum NabuCasaRemoteAccessDetector {
         ).externalURL
     }
 
+    /// Whether a remote URL already stored for this instance has been **superseded** by what
+    /// `cloud/status` now says, and should be forgotten.
+    ///
+    /// The case this exists for: a Nabu Casa subscription lapses. `classify` then returns
+    /// `.noSubscription` (or `.notLoggedIn` if the account was removed), `adoptableRemoteURL`
+    /// returns `nil`, and nothing writes — so the **dead** `*.ui.nabu.casa` URL sits in the slot
+    /// indefinitely. It is deliberately ordered ahead of the user's custom remote URL, so someone
+    /// who then sets up their own reverse proxy pays a connect deadline against a tunnel that will
+    /// never answer, on every connect away from home, with nothing in the UI to remove it.
+    ///
+    /// Three conditions, all required:
+    ///
+    /// - **`learnedOver == .local`.** This *deletes* a candidate rather than adding one, so it is
+    ///   the safe direction — but a remote connection still gets no say in what we remember about
+    ///   how to reach the instance, in either direction. Keeping the rule symmetric means there is
+    ///   one sentence to remember rather than two.
+    /// - **The outcome is `.noSubscription` or `.notLoggedIn`.** These are positive evidence that
+    ///   the tunnel is gone, not merely an absence of evidence. `.indeterminate` and
+    ///   `.cloudNotLoaded` are excluded deliberately: a transport blip classifies `.indeterminate`,
+    ///   and deleting a working remote address because one probe failed would strand the user next
+    ///   time they leave home.
+    /// - **The stored URL is a Nabu Casa host.** `ConnectionEndpoint.isNabuCasaHost` used for
+    ///   exactly what it is for — classification, never trust (see its documentation and the C-1
+    ///   incident). Without this the same slot's *other* occupant would be destroyed: `get_config`'s
+    ///   `external_url`, which is written to this key first and belongs to a self-hosted user whose
+    ///   HA has the cloud component loaded but no subscription — precisely the `.noSubscription`
+    ///   user. Their reverse proxy address is not evidence about anybody's cloud account.
+    public static func storedRemoteURLIsSuperseded(
+        _ storedURL: URL?,
+        by outcome: NabuCasaRemoteAccess,
+        learnedOver: ConnectionClass
+    ) -> Bool {
+        guard learnedOver == .local, let storedURL else { return false }
+        switch outcome {
+        case .noSubscription, .notLoggedIn:
+            return ConnectionEndpoint.isNabuCasaHost(storedURL)
+        case .remoteAvailable, .remoteDisabled, .cloudNotLoaded, .indeterminate:
+            return false
+        }
+    }
+
     /// Whether Home Assistant would accept `cloud/remote/connect` over a connection of this class.
     ///
     /// `PREF_REMOTE_ALLOW_REMOTE_ENABLE` (`prefs.remote_allow_remote_enable`), when `false`, makes
@@ -481,5 +522,63 @@ public enum NabuCasaRemoteAccessDetector {
     ) -> Bool {
         guard connectionClass == .remote else { return true }
         return status.prefs?.remoteAllowRemoteEnable != false
+    }
+}
+
+extension NabuCasaRemoteAccess {
+    /// What to tell the user about remote access for the outcomes that lead to the **custom remote
+    /// URL** — their own externally-reachable address (Tailscale, a reverse proxy) instead of Nabu
+    /// Casa. `nil` where there is nothing to say on that surface.
+    ///
+    /// Design §3's outcomes 3 and 4. Without this the four non-Nabu-Casa outcomes are classified,
+    /// documented and unit-tested, and rendered nowhere at all — which is review finding I-2's
+    /// second half, and is logic stranded where it cannot run. The copy lives here rather than in
+    /// `App/` for the same reason `CustomRemoteURLError.message` does: `App/` has no test target,
+    /// and the distinctions below are precisely the kind that erode into one generic sentence.
+    ///
+    /// Four genuinely different messages, and the differences are the point:
+    ///
+    /// - `.cloudNotLoaded` — the ordinary self-hosted user. **Not an error, and not a sales pitch
+    ///   for Nabu Casa.** Someone whose Tailscale setup already works must not be told they need a
+    ///   subscription.
+    /// - `.notLoggedIn` — there is a cloud component but no account. Same destination, and the
+    ///   subscription is named as *an* option rather than the fix.
+    /// - `.noSubscription` — design §3's "don't nag": state the two ways to have remote access,
+    ///   once, and stop.
+    /// - `.indeterminate` — **claims nothing about the user's account**, because that is exactly
+    ///   what we failed to establish. It says we couldn't tell, and that the custom address works
+    ///   regardless.
+    ///
+    /// `.remoteAvailable` and `.remoteDisabled` return `nil`: the first needs no guidance, and the
+    /// second is Task 3's offer, which owns its own copy.
+    public var customRemoteURLGuidance: String? {
+        switch self {
+        case .remoteAvailable, .remoteDisabled:
+            return nil
+        case .cloudNotLoaded:
+            return """
+            This Home Assistant isn't set up with Home Assistant Cloud, which is completely normal. \
+            If you reach it from outside your home another way, enter that address below and Haven \
+            will use it when you're away.
+            """
+        case .notLoggedIn:
+            return """
+            No Home Assistant Cloud account is signed in on this Home Assistant. If you reach it \
+            from outside your home another way, enter that address below — or sign in to Home \
+            Assistant Cloud on your Home Assistant and Haven will pick it up automatically.
+            """
+        case .noSubscription:
+            return """
+            This Home Assistant Cloud account doesn't have an active subscription, so its remote \
+            access isn't available. Remote access needs either that subscription or your own \
+            address from outside your home — enter one below if you have it.
+            """
+        case .indeterminate:
+            return """
+            Haven couldn't tell whether this Home Assistant has remote access through Home \
+            Assistant Cloud. If you reach it from outside your home some other way, entering that \
+            address below works regardless.
+            """
+        }
     }
 }
