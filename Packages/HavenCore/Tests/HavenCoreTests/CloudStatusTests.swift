@@ -394,3 +394,164 @@ private func decodeStatus(_ json: String) throws -> HACloudStatus {
     #expect(NabuCasaRemoteAccessDetector.classify(.success(status))
             == .remoteDisabled(domain: "abc123.ui.nabu.casa"))
 }
+
+// MARK: - Task 3: the one-tap offer
+
+@Test func cloudRemoteConnectEmitsTheExactCommandNameHomeAssistantRegisters() throws {
+    // Same discipline as `cloud/status`'s own test: a typo here answers `unknown_command`, which
+    // is indistinguishable at the wire level from "the cloud component isn't loaded" — so getting
+    // this string wrong would silently break the enable button for every subscriber.
+    let data = WSCommand.cloudRemoteConnect(id: 3)
+    let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(obj["type"] as? String == "cloud/remote/connect")
+    #expect(obj["id"] as? Int == 3)
+}
+
+@Test func enableNabuCasaRemoteAccessSendsTheCommandAndReturnsSuccess() async throws {
+    let conn = FakeWebSocketConnection()
+    let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
+    await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await conn.setOnSend { data in
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let id = obj?["id"] as? Int, obj?["type"] as? String == "cloud/remote/connect" else { return }
+        await conn.enqueueIncoming(#"{"id":\#(id),"type":"result","success":true,"result":{}}"#)
+    }
+    let home = HomeConnection(client: client)
+    let result = await home.enableNabuCasaRemoteAccess()
+    guard case .success = result else {
+        Issue.record("expected success, got \(result)"); return
+    }
+}
+
+@Test func enableNabuCasaRemoteAccessSurfacesAHomeAssistantErrorRatherThanThrowing() async throws {
+    // The failed-call path: never thrown, folded into the same `Result<Void, WSError>` shape as
+    // every other mutating call, so the caller can show HA's own message verbatim.
+    let conn = FakeWebSocketConnection()
+    let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
+    await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await conn.setOnSend { data in
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let id = obj?["id"] as? Int, obj?["type"] as? String == "cloud/remote/connect" else { return }
+        await conn.enqueueIncoming(#"{"id":\#(id),"type":"result","success":false,"error":{"code":"not_found","message":"cloud not enabled"}}"#)
+    }
+    let home = HomeConnection(client: client)
+    let result = await home.enableNabuCasaRemoteAccess()
+    guard case .failure(let error) = result else {
+        Issue.record("expected failure, got \(result)"); return
+    }
+    #expect(error == WSError(code: "not_found", message: "cloud not enabled"))
+}
+
+@Test func remoteDisabledTriggersTheOffer() {
+    // **The test this task exists for.** `.remoteDisabled` is the only classification that
+    // produces an offer at all.
+    let status = HACloudStatus(
+        loggedIn: true, activeSubscription: true,
+        remoteDomain: "abc123.ui.nabu.casa", prefs: .init(remoteEnabled: false)
+    )
+    let offer = NabuCasaRemoteAccessDetector.offer(from: .success(status), over: .local)
+    #expect(offer?.domain == "abc123.ui.nabu.casa")
+    #expect(offer?.canEnable == true)
+}
+
+@Test func remoteAvailableDoesNotTriggerTheOffer() {
+    // The mirror: a tunnel that is already switched on (regardless of `remote_connected`) must
+    // never be offered a "fix" — see `CloudStatusTests`' own distinction tests above for why.
+    let status = HACloudStatus(
+        loggedIn: true, activeSubscription: true,
+        remoteDomain: "abc123.ui.nabu.casa", remoteConnected: false, prefs: .init(remoteEnabled: true)
+    )
+    #expect(NabuCasaRemoteAccessDetector.offer(from: .success(status), over: .local) == nil)
+}
+
+@Test func noOtherOutcomeEverTriggersTheOffer() {
+    // Asserted over every other case so a future one can't quietly acquire an offer, mirroring
+    // `noOutcomeOtherThanRemoteAvailableEverYieldsAURLToAdopt` above.
+    let noSubscription = HACloudStatus(loggedIn: true, activeSubscription: false)
+    let cloudNotLoaded: Result<HACloudStatus, WSError> = .failure(WSError(code: "unknown_command", message: "x"))
+    let notLoggedIn = HACloudStatus(loggedIn: false)
+    let indeterminate = HACloudStatus(loggedIn: true, activeSubscription: nil)
+    let transportFailure: Result<HACloudStatus, WSError> = .failure(WSError(code: "probe_failed", message: "x"))
+    for result in [
+        Result<HACloudStatus, WSError>.success(noSubscription),
+        cloudNotLoaded,
+        .success(notLoggedIn),
+        .success(indeterminate),
+        transportFailure,
+    ] {
+        #expect(NabuCasaRemoteAccessDetector.offer(from: result, over: .local) == nil)
+        #expect(NabuCasaRemoteAccessDetector.offer(from: result, over: .remote) == nil)
+    }
+}
+
+@Test func theOfferConfirmationNamesExactlyWhatWillChange() {
+    let offer = NabuCasaRemoteAccessOffer(domain: "abc123.ui.nabu.casa", canEnable: true)
+    guard let confirmation = offer.confirmation else {
+        Issue.record("an enable-able offer must carry a confirmation"); return
+    }
+    #expect(confirmation.message.contains("Nabu Casa"))
+    #expect(confirmation.message.contains("abc123.ui.nabu.casa"))
+    #expect(!confirmation.confirmLabel.isEmpty)
+}
+
+@Test func aMissingDomainStillProducesAConfirmationWithNoDomainClause() {
+    // Mirrors `remoteDisabledIsStillReportedWhenNoDomainWasGiven`: the offer's trigger is the
+    // preference alone, and a missing domain must not make the confirmation say something false.
+    let offer = NabuCasaRemoteAccessOffer(domain: nil, canEnable: true)
+    let confirmation = offer.confirmation
+    #expect(confirmation != nil)
+    #expect(confirmation?.message.contains(" at ") == false)
+}
+
+@Test func remoteAllowRemoteEnableFalseIsExplainedRatherThanOpaque() {
+    // **The test this half of the task exists for.** When Home Assistant would refuse the call
+    // outright, there must be no confirmation to tap through at all — not a button that leads to
+    // an opaque failure — and the explanation must say why.
+    let status = HACloudStatus(
+        loggedIn: true, activeSubscription: true, remoteDomain: "abc123.ui.nabu.casa",
+        prefs: .init(remoteEnabled: false, remoteAllowRemoteEnable: false)
+    )
+    let offer = NabuCasaRemoteAccessDetector.offer(from: .success(status), over: .remote)
+    #expect(offer?.canEnable == false)
+    #expect(offer?.confirmation == nil)
+    #expect(offer?.explanation.isEmpty == false)
+}
+
+// The "mutation is unreachable without confirmation" invariant for this offer is asserted in
+// `HavenOnboardingFlowTests.theRemoteAccessOfferMutationIsAlsoAlwaysGatedBehindConfirmation`,
+// alongside (and as an explicit extension of) the equivalent check for `HavenOnboardingStep`.
+
+@Test func evaluateEnableAttemptSucceedsWhenTheReprobeShowsRemoteAvailable() {
+    // Success is re-probed, never assumed from the call returning.
+    let reprobe = HACloudStatus(
+        loggedIn: true, activeSubscription: true,
+        remoteDomain: "abc123.ui.nabu.casa", prefs: .init(remoteEnabled: true)
+    )
+    let outcome = NabuCasaRemoteAccessDetector.evaluateEnableAttempt(reprobe: .success(reprobe))
+    #expect(outcome == .succeeded(URL(string: "https://abc123.ui.nabu.casa")!))
+}
+
+@Test func evaluateEnableAttemptDoesNotTakeEffectWhenTheReprobeStillShowsItDisabled() {
+    let reprobe = HACloudStatus(
+        loggedIn: true, activeSubscription: true,
+        remoteDomain: "abc123.ui.nabu.casa", prefs: .init(remoteEnabled: false)
+    )
+    let outcome = NabuCasaRemoteAccessDetector.evaluateEnableAttempt(reprobe: .success(reprobe))
+    #expect(outcome == .didNotTakeEffect(message: NabuCasaRemoteAccessDetector.remoteAccessDidNotTakeEffectMessage))
+}
+
+@Test func evaluateEnableAttemptDoesNotTakeEffectWhenTheReprobeIsIndeterminateOrFails() {
+    // A dropped socket or an unreadable reply right after the mutating call is not evidence of
+    // success either — the same "didn't take effect" message covers it, rather than a confident
+    // claim we can't support.
+    let indeterminate = HACloudStatus(loggedIn: true, activeSubscription: nil)
+    #expect(NabuCasaRemoteAccessDetector.evaluateEnableAttempt(reprobe: .success(indeterminate))
+            == .didNotTakeEffect(message: NabuCasaRemoteAccessDetector.remoteAccessDidNotTakeEffectMessage))
+    let failed: Result<HACloudStatus, WSError> = .failure(WSError(code: "probe_failed", message: "x"))
+    #expect(NabuCasaRemoteAccessDetector.evaluateEnableAttempt(reprobe: failed)
+            == .didNotTakeEffect(message: NabuCasaRemoteAccessDetector.remoteAccessDidNotTakeEffectMessage))
+}

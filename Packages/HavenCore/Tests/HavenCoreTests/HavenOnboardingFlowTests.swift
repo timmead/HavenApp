@@ -325,6 +325,30 @@ import Foundation
         }
     }
 
+    /// Extends the invariant above to Task 3's mutation (`cloud/remote/connect`) rather than
+    /// writing a second, differently-shaped check for it. `NabuCasaRemoteAccessOffer` is a sibling
+    /// to `HavenOnboardingStep` — it is keyed on `NabuCasaRemoteAccessDetector.classify`, not
+    /// `HavenIntegrationDetector.classify`, so it cannot join the `allSteps` array above — but it
+    /// reuses the exact same confirmation type (`HavenOnboardingConfirmation`), and the property
+    /// being asserted is identical: the mutating call is unreachable without a confirmation naming
+    /// it, present exactly when the call would actually be allowed to run.
+    @Test func theRemoteAccessOfferMutationIsAlsoAlwaysGatedBehindConfirmation() {
+        let enableable = NabuCasaRemoteAccessOffer(domain: "abc123.ui.nabu.casa", canEnable: true)
+        guard let confirmation = enableable.confirmation else {
+            Issue.record("an enable-able offer must carry a confirmation"); return
+        }
+        #expect(!confirmation.message.isEmpty)
+        #expect(!confirmation.confirmLabel.isEmpty)
+
+        // The mirror: when Home Assistant would refuse the call outright
+        // (`remote_allow_remote_enable == false`), there must be no confirmation to tap through —
+        // the same hole `mutatingStepsAlwaysRequireConfirmationOfTheSameMutation` guards against,
+        // reached from the other direction (no confirmation ⇒ no path to the mutation at all,
+        // rather than a confirmation that lies about what will happen).
+        let refused = NabuCasaRemoteAccessOffer(domain: "abc123.ui.nabu.casa", canEnable: false)
+        #expect(refused.confirmation == nil)
+    }
+
     @Test func theRestartConfirmationWarnsThatTheHomeGoesOffline() {
         guard case .confirmMutation(_, let confirmation) = HavenOnboardingStep.restartHomeAssistant.presentation().intent else {
             Issue.record("the restart must be confirmed"); return

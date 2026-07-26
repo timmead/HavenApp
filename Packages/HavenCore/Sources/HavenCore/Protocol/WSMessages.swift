@@ -138,6 +138,15 @@ public enum WSCommand {
     /// and be indistinguishable from a genuinely cloud-less instance.
     public static func cloudStatus(id: Int) -> Data { data(["id": id, "type": "cloud/status"]) }
 
+    /// Turns on Nabu Casa remote access. **MUTATING** — see
+    /// `HomeConnection.enableNabuCasaRemoteAccess`, the only call site, and
+    /// `NabuCasaRemoteAccessOffer.confirmation`, the only way to reach it: `nil` unless the user has
+    /// explicitly confirmed exactly this change. Verified against `home-assistant/core`'s
+    /// `components/cloud/http_api.py` (`websocket_remote_connect`). Same corollary as `cloudStatus`
+    /// above: a typo here answers `unknown_command`, indistinguishable at the wire level from "the
+    /// cloud component isn't loaded", so the literal string is asserted in `CloudStatusTests`.
+    public static func cloudRemoteConnect(id: Int) -> Data { data(["id": id, "type": "cloud/remote/connect"]) }
+
     // MARK: - HACS
     //
     // The three command names below were verified against HACS's own source

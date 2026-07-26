@@ -31,6 +31,11 @@ final class AppModel {
     /// with no history.
     let onboarding = OnboardingModel()
 
+    /// Task 3's one-tap fix for a Nabu Casa subscriber who has switched remote access off. A
+    /// sibling to `onboarding`, attached/reset the same way, for the reasons documented on
+    /// `RemoteAccessOfferModel` itself.
+    let remoteAccessOffer = RemoteAccessOfferModel()
+
     /// Layers 1 and 2 of the home-detection stack. Both are **accelerators**: they only ever change
     /// the *order* `ConnectionEndpoint`'s candidates are tried in, never which ones exist, so the
     /// app stays fully correct with the SSID layer permanently unavailable (Location Services
@@ -58,6 +63,14 @@ final class AppModel {
     private let policy = ReconnectPolicy()
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
+    /// The class of the connection `remoteAccess`/`remoteAccessOffer` were last computed over.
+    /// Needed again when `remoteAccessOfferModel`'s own re-probe (after a successful enable) comes
+    /// back, so that re-probe can go through the exact same adoption path
+    /// (`rememberNabuCasaRemoteAccess`) as the original connect-time one rather than a second,
+    /// undertested copy of it. Defaults to `.remote` if somehow read before ever being set — the
+    /// same fail-closed stance `ConnectionClass.observed` takes when a signal is unavailable: worst
+    /// case a URL goes un-adopted, never the reverse.
+    private var currentConnectionClass: ConnectionClass?
     /// The active connect loop. Retrying is now unbounded, so this must be explicitly
     /// cancellable — otherwise a stale loop from a previous session could keep retrying in the
     /// background and later flip `phase` back to `.ready` after a `signOut()`.
@@ -85,6 +98,16 @@ final class AppModel {
         // `startConnecting()` already cancels/replaces any connect loop already in flight.
         store.onDisconnected = { [weak self] in
             Task { await self?.reconnectAfterConnectionLoss() }
+        }
+        // Task 3's re-probe after a successful `cloud/remote/connect`. Routed back through
+        // `rememberNabuCasaRemoteAccess` rather than letting `RemoteAccessOfferModel` write
+        // `UserDefaults` itself — see that method's documentation for why there is exactly one
+        // adoption path. `currentConnectionClass` is whatever the live connection was last
+        // classified as; nothing changes it between the original probe and this one, since both
+        // run over the same socket.
+        remoteAccessOffer.onReprobe = { [weak self] result in
+            guard let self else { return }
+            self.rememberNabuCasaRemoteAccess(result, learnedOver: self.currentConnectionClass ?? .remote)
         }
     }
 
@@ -163,6 +186,7 @@ final class AppModel {
         tokenProvider = nil
         await store.reset()
         onboarding.reset()
+        remoteAccessOffer.reset()
         phase = .loggedOut
     }
 
@@ -177,6 +201,7 @@ final class AppModel {
         tokenProvider = nil
         await store.reset()
         onboarding.reset()
+        remoteAccessOffer.reset()
         phase = .loggedOut
     }
 
@@ -350,6 +375,8 @@ final class AppModel {
                             onboarding.attach(home)
                             await onboarding.probe()
                         }
+                        // Same live connection, for Task 3's offer — see `RemoteAccessOfferModel`.
+                        remoteAccessOffer.attach(home)
                         // Nabu Casa bootstrap: ask the instance whether it has remote access and
                         // at what domain, so remote access needs zero configuration. Same
                         // best-effort footing as `get_config` above — `fetchCloudStatus` never
@@ -512,6 +539,10 @@ final class AppModel {
     ) {
         let outcome = NabuCasaRemoteAccessDetector.classify(status)
         remoteAccess = outcome
+        currentConnectionClass = learnedOver
+        // Task 3's offer, from the same result — never re-probed separately, so it can never
+        // disagree with `outcome` above about what `cloud/status` actually said.
+        remoteAccessOffer.update(NabuCasaRemoteAccessDetector.offer(from: status, over: learnedOver))
         guard let url = NabuCasaRemoteAccessDetector.adoptableRemoteURL(
             from: outcome, learnedOver: learnedOver
         ) else {
@@ -532,6 +563,8 @@ final class AppModel {
         // would render a stale (and possibly contradictory) remote-access state for a home it
         // says nothing about.
         remoteAccess = nil
+        currentConnectionClass = nil
+        remoteAccessOffer.update(nil)
         d.removeObject(forKey: DefaultsKeys.discoveredInternalURL)
         d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
         d.removeObject(forKey: DefaultsKeys.lastWorkingURL)

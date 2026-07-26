@@ -35,6 +35,16 @@ struct ConnectionSettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Shown whenever there's an offer to make *or* something to say about the last
+                // attempt — the latter matters on its own: a transport blip right after
+                // `cloud/remote/connect` reclassifies as `.indeterminate`, not `.remoteDisabled`,
+                // so `offer` can go `nil` in the same moment `failureMessage` is set. Gating this
+                // section on `offer` alone would make that failure message invisible — the exact
+                // dead end a "failed enable surfaces an actionable message" requirement exists to
+                // prevent.
+                if app.remoteAccessOffer.offer != nil || app.remoteAccessOffer.failureMessage != nil {
+                    remoteAccessSection(app.remoteAccessOffer.offer)
+                }
                 Section {
                     switch app.homeNetwork.authorization {
                     case .notDetermined:
@@ -78,6 +88,63 @@ struct ConnectionSettingsView: View {
             .task(id: app.homeNetwork.authorization) {
                 currentSSID = await app.homeNetwork.currentSSID()
             }
+            // Mirrors `OnboardingView`'s confirmation alert exactly — same confirmation type
+            // (`HavenOnboardingConfirmation`), same gating (`pendingConfirmation != nil`), because
+            // this is the same confirmation machinery, not a second one.
+            .alert(
+                app.remoteAccessOffer.pendingConfirmation?.title ?? "",
+                isPresented: Binding(
+                    get: { app.remoteAccessOffer.pendingConfirmation != nil },
+                    set: { if !$0 { app.remoteAccessOffer.cancelConfirmation() } }
+                ),
+                presenting: app.remoteAccessOffer.pendingConfirmation
+            ) { confirmation in
+                Button(confirmation.confirmLabel) {
+                    Task { await app.remoteAccessOffer.confirmPendingMutation() }
+                }
+                Button("Cancel", role: .cancel) { app.remoteAccessOffer.cancelConfirmation() }
+            } message: { confirmation in
+                Text(confirmation.message)
+            }
+        }
+    }
+
+    /// Task 3's one-tap fix. `offer` can be `nil` here even though the section is showing — see the
+    /// call site: a failed attempt's re-probe can reclassify away from `.remoteDisabled` (e.g. to
+    /// `.indeterminate` on a transport blip), clearing the offer in the very same moment
+    /// `failureMessage` is set to explain that attempt. The message must still render then, which
+    /// is why this section, and not just its button, is conditional on the offer.
+    @ViewBuilder
+    private func remoteAccessSection(_ offer: NabuCasaRemoteAccessOffer?) -> some View {
+        Section {
+            if let offer {
+                Text(offer.explanation)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            if let failure = app.remoteAccessOffer.failureMessage {
+                Label(failure, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(HavenColor.warning)
+            }
+            // No button at all when there's no current offer, or when `canEnable` is false — see
+            // `NabuCasaRemoteAccessOffer`'s documentation: there is no confirmation to reach in the
+            // latter case, and a button with nothing behind it would be a dead end rather than an
+            // explanation.
+            if let offer, offer.canEnable {
+                Button {
+                    app.remoteAccessOffer.requestConfirmation()
+                } label: {
+                    if app.remoteAccessOffer.isBusy {
+                        ProgressView()
+                    } else {
+                        Label("Turn on remote access", systemImage: "network")
+                    }
+                }
+                .disabled(app.remoteAccessOffer.isBusy)
+            }
+        } header: {
+            Text("Remote access")
         }
     }
 

@@ -124,6 +124,128 @@ public struct HACloudStatus: Sendable, Equatable, Decodable {
     }
 }
 
+/// Task 3's one-tap fix: what to show a subscriber who has switched remote access off, and whether
+/// tapping its button would actually work from here.
+///
+/// A sibling to `HavenOnboardingStep`/`HavenOnboardingMutation`, not a member of either — those are
+/// keyed on `HavenIntegrationDetector.classify`, which knows nothing about Nabu Casa, and folding an
+/// unrelated mutation into `HavenOnboardingStep`'s closed, one-to-one-with-`HavenOnboardingFlow`
+/// case set would make that state machine (and `OnboardingModel.confirmPendingMutation`'s switch)
+/// respond to something it has no way to interpret. What *is* reused, deliberately, is
+/// `HavenOnboardingConfirmation` itself — the same confirmation copy type, not a second one — per
+/// the plan's explicit instruction not to invent a parallel pattern.
+public struct NabuCasaRemoteAccessOffer: Sendable, Equatable {
+    /// The domain remote access will use once turned on, when `cloud/status` happened to report
+    /// one. Cosmetic only: `cloud/remote/connect` takes no domain argument, so its absence changes
+    /// nothing about whether the offer is shown — see `NabuCasaRemoteAccess.remoteDisabled`.
+    public let domain: String?
+
+    /// `false` only when `remote_allow_remote_enable` would make Home Assistant refuse the call
+    /// over this connection — see `NabuCasaRemoteAccessDetector.canEnableRemoteAccess`. HavenApp
+    /// only ever shows this offer from a local connection, where that preference cannot bite, so
+    /// this should never be `false` in practice. When it is, `confirmation` is `nil` and
+    /// `explanation` says why, rather than letting the user tap a button into an opaque failure.
+    public let canEnable: Bool
+
+    public init(domain: String?, canEnable: Bool) {
+        self.domain = domain
+        self.canEnable = canEnable
+    }
+
+    public var title: String { "Remote access is turned off" }
+
+    /// Plain, short, no security theatre — this confirms a configuration change to the user's own
+    /// server, not a dangerous action, so the copy says what will happen and stops there.
+    public var explanation: String {
+        guard canEnable else {
+            return """
+            Your Nabu Casa subscription is active, but remote access is switched off, and Home \
+            Assistant won't allow Haven to turn it on from outside your home network. Turn it on \
+            once you're home, or from Home Assistant's own Home Assistant Cloud settings.
+            """
+        }
+        return """
+        Your Nabu Casa subscription is active, but remote access is switched off, so Home Assistant \
+        can only be reached on your home network right now. Haven can turn it on for you.
+        """
+    }
+
+    /// `nil` exactly when there is nothing to confirm because the call would be refused — see
+    /// `canEnable`. Every other property here may render unconditionally; only this one gates the
+    /// mutating call, and its absence is what makes that call unreachable without it.
+    public var confirmation: HavenOnboardingConfirmation? {
+        guard canEnable else { return nil }
+        let domainClause = domain.map { " at \($0)" } ?? ""
+        return HavenOnboardingConfirmation(
+            title: "Turn on remote access?",
+            message: """
+            Haven will turn on remote access to your Home Assistant through Nabu Casa\(domainClause), \
+            so you can reach it when you're away from home. This changes your Home Assistant's own \
+            Home Assistant Cloud settings.
+            """,
+            confirmLabel: "Turn on"
+        )
+    }
+}
+
+/// What a `cloud/remote/connect` attempt turned out to mean, once verified. Produced only by
+/// `NabuCasaRemoteAccessDetector.evaluateEnableAttempt` — never from the call's own result, which
+/// (like `restartHomeAssistant`'s) means only that Home Assistant accepted the request.
+public enum RemoteAccessEnableOutcome: Sendable, Equatable {
+    /// A fresh `cloud/status`, re-probed and re-classified, now says `.remoteAvailable`. The fix
+    /// took effect.
+    case succeeded(URL)
+    /// The re-probe still doesn't say `.remoteAvailable` — still switched off, or anything else
+    /// (`.indeterminate`, a transport hiccup) that leaves nothing to celebrate. One plain,
+    /// actionable message covers all of those: there is nothing more specific and true to say than
+    /// "try again, or check Home Assistant directly."
+    case didNotTakeEffect(message: String)
+}
+
+extension NabuCasaRemoteAccessDetector {
+    /// Whether, and what, to offer. Built directly from the same `cloud/status` result `classify`
+    /// reads — no separate probe — so the offer and the classification can never disagree about
+    /// what `cloud/status` actually said.
+    ///
+    /// - Returns: `nil` whenever `classify` is anything other than `.remoteDisabled`: there is
+    ///   nothing to fix for an available, absent, not-signed-in, or indeterminate subscription.
+    public static func offer(
+        from result: Result<HACloudStatus, WSError>,
+        over connectionClass: ConnectionClass
+    ) -> NabuCasaRemoteAccessOffer? {
+        guard case .success(let status) = result,
+              case .remoteDisabled(let domain) = classify(result)
+        else { return nil }
+        return NabuCasaRemoteAccessOffer(
+            domain: domain,
+            canEnable: canEnableRemoteAccess(status, over: connectionClass)
+        )
+    }
+
+    /// The message shown when a re-probe after enabling still doesn't show remote access as
+    /// available. Named so both the message itself and the fact that it is always the same one are
+    /// each independently assertable in tests.
+    ///
+    /// Deliberately does **not** say "remote access is still switched off" — `evaluateEnableAttempt`
+    /// reaches this for `.indeterminate` and a transport failure just as much as for a genuine
+    /// `.remoteDisabled`, and a socket blip immediately after `cloud/remote/connect` is a realistic
+    /// way to land here. Claiming a specific, confident cause we don't have evidence for is exactly
+    /// this project's recurring mistake (see this file's own top-of-file documentation) — "Haven
+    /// couldn't confirm it" is the only claim every one of those cases actually supports.
+    public static let remoteAccessDidNotTakeEffectMessage =
+        "Haven couldn't confirm that remote access turned on. Wait a moment and try again, or check Settings › Home Assistant Cloud directly on your Home Assistant."
+
+    /// Verifies a `cloud/remote/connect` attempt rather than trusting the call's own success —
+    /// exactly the discipline `HavenOnboardingFlow` applies to the restart step, where a `.success`
+    /// result is HA merely *accepting* the request, never proof it happened.
+    public static func evaluateEnableAttempt(reprobe: Result<HACloudStatus, WSError>) -> RemoteAccessEnableOutcome {
+        if case .remoteAvailable(let url) = classify(reprobe) {
+            return .succeeded(url)
+        }
+        return .didNotTakeEffect(message: remoteAccessDidNotTakeEffectMessage)
+    }
+}
+
 extension HomeConnection {
     /// Asks the instance whether it has Nabu Casa remote access, and at what domain.
     ///
@@ -142,6 +264,25 @@ extension HomeConnection {
             let data = try JSONEncoder().encode(v)
             let status = try JSONDecoder().decode(HACloudStatus.self, from: data)
             return .success(status)
+        } catch {
+            return .failure(Self.normalize(error))
+        }
+    }
+
+    /// MUTATING. Turns on Nabu Casa remote access on this instance. The only path to this is
+    /// `NabuCasaRemoteAccessOffer.confirmation` — `nil` unless the user has confirmed exactly this
+    /// change, and unreachable at all when Home Assistant would refuse it outright (see
+    /// `NabuCasaRemoteAccessOffer.canEnable`).
+    ///
+    /// A `.success` here means only that Home Assistant accepted the request — the same caveat
+    /// `restartHomeAssistant` carries, and for the same reason: HA schedules the actual work and
+    /// returns, so this is not evidence the tunnel came up. The caller must re-probe
+    /// `fetchCloudStatus()` and pass the result to `NabuCasaRemoteAccessDetector.evaluateEnableAttempt`
+    /// to find out what really happened.
+    public func enableNabuCasaRemoteAccess() async -> Result<Void, WSError> {
+        do {
+            _ = try await client.request { WSCommand.cloudRemoteConnect(id: $0) }
+            return .success(())
         } catch {
             return .failure(Self.normalize(error))
         }
