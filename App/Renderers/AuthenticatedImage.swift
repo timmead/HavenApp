@@ -34,17 +34,45 @@ enum AuthenticatedImagePhase {
     case failed
 }
 
+/// How (and whether) an `AuthenticatedImage` keeps re-fetching.
+///
+/// Declared at file scope for the same reason `AuthenticatedImagePhase` is: a type nested inside a
+/// generic view is generic over that view's parameters too, so `AuthenticatedImage<A>.RefreshPolicy`
+/// and `AuthenticatedImage<B>.RefreshPolicy` would be different types — and every caller building
+/// one outside a call site would have to name a `Content` it has no business knowing.
+struct AuthenticatedImageRefresh: Equatable, Hashable {
+    /// Target seconds from the *start* of one fetch to the start of the next. The actual wait is
+    /// `SnapshotRefresh.delay`, in HavenCore under test, which is what keeps a fetch slower than
+    /// this from collapsing the cycle.
+    let interval: TimeInterval
+    /// `false` suspends the cycle entirely — the app backgrounded, or the surface decided this
+    /// image is not worth keeping current. It is part of `.task`'s id, so flipping it stops the
+    /// loop structurally rather than through a flag the loop has to remember to check.
+    var isActive: Bool = true
+}
+
 struct AuthenticatedImage<Content: View>: View {
     /// The `entity_picture`-style reference to load: relative to the current base URL, or already
     /// absolute (third-party artwork). `nil` or blank means the entity has no picture, and gives
     /// `.empty` — never `.failed`.
     let path: String?
 
-    /// Bump to fetch a fresh copy, for the camera tiles' periodic snapshot refresh: the snapshot
-    /// URL is stable and its *contents* are the thing that changes, so a cached copy would freeze
-    /// the view on the first frame ever fetched. Any non-zero value bypasses the cache; the
-    /// default (`0`) is an ordinary cached load, which is what artwork wants.
-    var refreshTick: Int = 0
+    /// Keeps the image fresh, for the camera surfaces. `nil` — the default, and what artwork wants
+    /// — is a single cached load.
+    ///
+    /// **The cycle is owned by this view's own `.task`, and each fetch is started by the previous
+    /// one finishing.** That is the fix for a real defect, not a refactor. The first version drove
+    /// refreshes from an external counter that a *sibling* task bumped on a fixed clock; because
+    /// the counter was part of `.task`'s id, every tick cancelled whatever fetch was in flight.
+    /// Wherever a round trip reliably exceeded the interval — a Nabu Casa relay, a 4K still, a slow
+    /// `camera_proxy` — no fetch ever completed, `.cancelled` maps to "change nothing" so `phase`
+    /// stayed `.loading` forever, and the user got a permanent placeholder while the app spent one
+    /// cancelled full-resolution JPEG request per second achieving it. Nothing failed, so there was
+    /// nothing to show and nothing to log.
+    ///
+    /// With the loop and the load in the same task there is no tick to cancel anything: a slow link
+    /// degrades to a lower frame rate, which is what `SnapshotRefresh` computes and tests.
+    var refresh: AuthenticatedImageRefresh? = nil
 
     /// Called with the moment a frame finished decoding, and **only** on success.
     ///
@@ -69,16 +97,37 @@ struct AuthenticatedImage<Content: View>: View {
 
     var body: some View {
         content(phase)
-            .task(id: Request(path: path, tick: refreshTick)) { await load() }
+            .task(id: Request(path: path, refresh: refresh)) { await run() }
     }
 
-    /// `.task`'s id: both fields, so a path change and a refresh tick each restart the load.
+    /// `.task`'s id: a path change or a change to the refresh policy each restart the cycle.
     private struct Request: Equatable, Hashable {
         let path: String?
-        let tick: Int
+        let refresh: AuthenticatedImageRefresh?
     }
 
-    private func load() async {
+    /// One load, or a self-paced cycle of them.
+    ///
+    /// The cycle stops when the task is cancelled, which `.task` does on disappear — the same
+    /// structural guarantee the single-load case has always had, now covering the repeating one
+    /// too.
+    private func run() async {
+        guard let refresh else {
+            await load(policy: .useCache)
+            return
+        }
+        guard refresh.isActive else { return }
+        while !Task.isCancelled {
+            let started = Date()
+            await load(policy: .reload)
+            if Task.isCancelled { return }
+            let delay = SnapshotRefresh.delay(interval: refresh.interval,
+                                              duration: Date().timeIntervalSince(started))
+            try? await Task.sleep(for: .seconds(delay))
+        }
+    }
+
+    private func load(policy: AuthenticatedImageLoader.CachePolicy) async {
         if displayedPath != path {
             phase = .loading
             displayedPath = path
@@ -90,19 +139,37 @@ struct AuthenticatedImage<Content: View>: View {
             phase = path == nil ? .empty : .failed
             return
         }
-        let outcome = await loader.image(at: path, policy: refreshTick == 0 ? .useCache : .reload)
+        let outcome = await loader.image(at: path, policy: policy)
         // `nil` is cancellation: leave whatever is on screen exactly as it is.
         guard let state = outcome.displayState else { return }
         switch state {
         case .image(let data):
             // A `Data` that isn't a decodable image is a failure, not a blank — the loader can only
             // vouch for the bytes arriving, not for what they are.
-            guard let decoded = await Self.decode(data) else { phase = .failed; return }
+            guard let decoded = await Self.decode(data) else { fail(); return }
             phase = .image(Image(uiImage: decoded))
             onLoad?(Date())
         case .empty: phase = .empty
-        case .failure: phase = .failed
+        case .failure: fail()
         }
+    }
+
+    /// A failure, applied only where there is nothing better on screen already.
+    ///
+    /// **A failed *refresh* keeps the frame it has.** One 500 from Home Assistant used to blank a
+    /// working camera tile to a "No picture" placeholder — while the caption strip beside it went
+    /// on stamping an age for the frame that had just been removed, because `onLoad` (correctly)
+    /// hadn't fired. That is two things on screen contradicting each other, and it contradicted
+    /// `onLoad`'s own documented promise that the tile "keeps saying 3m ago over the last real
+    /// frame".
+    ///
+    /// The last good frame plus an age that keeps climbing is both honest and more useful than a
+    /// placeholder: the picture is real, it is exactly as old as the stamp says, and a camera that
+    /// has genuinely stopped answering announces itself as the stamp grows. A first load with
+    /// nothing behind it still fails visibly, which is the case the error state exists for.
+    private func fail() {
+        if case .image = phase { return }
+        phase = .failed
     }
 
     /// Decodes off the main actor.

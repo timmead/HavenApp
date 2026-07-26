@@ -41,6 +41,52 @@ private final class FakeImageFetcher: HAImageFetching, @unchecked Sendable {
     }
 }
 
+/// A fetcher that parks inside the request until the test lets it go.
+///
+/// Exists so "cancellation landed *during* a fetch that then completed" can be arranged exactly
+/// rather than raced — `Task.cancel()` before an unrestricted fake would just as likely be observed
+/// by the loader's *first* cancellation check, which tests nothing. The continuation is
+/// non-throwing on purpose: cancellation must not resume it, or the fetch could never reach the
+/// point of producing usable bytes.
+private final class GatedFetcher: HAImageFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var released = false
+    private var calls = 0
+
+    var callCount: Int { lock.lock(); defer { lock.unlock() }; return calls }
+
+    // Non-async, so the lock is never held across a suspension point — `NSLock.lock()` is
+    // unavailable from an async context precisely to stop that.
+    private func recordCall() { lock.lock(); calls += 1; lock.unlock() }
+
+    private func park(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if released {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            waiter = continuation
+            lock.unlock()
+        }
+    }
+
+    func fetch(_ url: URL, bearerToken: String?) async throws -> (Data, Int) {
+        recordCall()
+        await withCheckedContinuation { park($0) }
+        return (Data("png-bytes".utf8), 200)
+    }
+
+    func release() {
+        lock.lock()
+        released = true
+        let continuation = waiter
+        waiter = nil
+        lock.unlock()
+        continuation?.resume()
+    }
+}
+
 /// Records the `Authorization` header seen at each hop of a request. Lock-protected because
 /// `URLProtocol` hands its callbacks to us on URLSession's own queue.
 private final class HopRecorder: @unchecked Sendable {
@@ -301,18 +347,49 @@ private final class RedirectingStubProtocol: URLProtocol {
         #expect(fetcher.calls.count == 2)
     }
 
-    @Test func reloadPolicyBypassesAndReplacesTheCachedCopy() async {
-        // What the camera tiles' periodic refresh needs: the snapshot URL is stable and its
-        // contents are the thing that changes.
+    @Test func reloadPolicyBypassesTheCacheAndEvictsWhatItHeld() async {
+        // What the camera surfaces' periodic refresh needs: the snapshot URL is stable and its
+        // contents are the thing that changes, so the cache must never answer for it.
         let fetcher = FakeImageFetcher()
         let loader = AuthenticatedImageLoader(credentials: FakeImageCredentials(baseURL: local), fetcher: fetcher)
 
         _ = await loader.image(at: snapshotPath)
         fetcher.body = Data("newer-frame".utf8)
         #expect(await loader.image(at: snapshotPath, policy: .reload) == .loaded(Data("newer-frame".utf8)))
-        // The refreshed frame replaced the old one rather than sitting beside it.
-        #expect(await loader.image(at: snapshotPath) == .loaded(Data("newer-frame".utf8)))
         #expect(fetcher.calls.count == 2)
+
+        // The refreshed frame is *not* banked. Every read of a camera path uses `.reload`, so a
+        // stored frame would be an entry nothing ever reads — and with the cache shared across the
+        // whole app, a handful of cameras would quietly evict the artwork that would have been.
+        // What the old frame must not do is survive: `.reload` just proved it stale, so a later
+        // `useCache` read re-fetches instead of being served it.
+        fetcher.body = Data("newest-frame".utf8)
+        #expect(await loader.image(at: snapshotPath) == .loaded(Data("newest-frame".utf8)))
+        #expect(fetcher.calls.count == 3)
+    }
+
+    @Test func aFetchThatCompletedIsBankedEvenWhenCancellationLandedDuringIt() async {
+        // The ratchet that made a too-fast refresh loop unrecoverable: the post-fetch cancellation
+        // check used to run *before* the bytes were stored, so a caller cancelling on a cadence
+        // faster than the round trip could loop indefinitely with every completed fetch discarded,
+        // each cycle starting exactly where the last one did — a permanent loading placeholder with
+        // a full-resolution request behind every tick of it. The caller is still told `.cancelled`
+        // (nothing may be drawn for a view that is already gone); the work is no longer thrown away.
+        //
+        // `GatedFetcher` makes the ordering exact rather than raced: the request is suspended
+        // mid-flight, cancelled there, and only then allowed to complete.
+        let fetcher = GatedFetcher()
+        let loader = AuthenticatedImageLoader(credentials: FakeImageCredentials(baseURL: local), fetcher: fetcher)
+
+        let task = Task { await loader.image(at: snapshotPath) }
+        while fetcher.callCount == 0 { await Task.yield() }
+        task.cancel()
+        fetcher.release()
+
+        #expect(await task.value == .cancelled)
+        // A fresh caller is served the banked bytes without a second trip to the server.
+        #expect(await loader.image(at: snapshotPath) == .loaded(Data("png-bytes".utf8)))
+        #expect(fetcher.callCount == 1)
     }
 
     @Test func failuresAreNeverCached() async {

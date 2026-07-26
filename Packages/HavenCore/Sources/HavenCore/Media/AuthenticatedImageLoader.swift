@@ -144,9 +144,17 @@ public actor AuthenticatedImageLoader {
     /// Whether a cached copy may satisfy this request.
     public enum CachePolicy: Sendable {
         case useCache
-        /// Skip the cache and replace what it holds. For the camera tiles' periodic refresh: the
-        /// snapshot URL is stable but its *contents* are exactly what changes, so `useCache` would
-        /// freeze the view on the first frame ever fetched.
+        /// Skip the cache on the way in, and **evict** rather than repopulate on the way out.
+        ///
+        /// For the camera surfaces' periodic refresh. The snapshot URL is stable while its
+        /// *contents* are exactly what changes, so reading the cache would freeze the view on the
+        /// first frame ever fetched — that much is why this case exists. What it deliberately does
+        /// *not* do is store the frame it just fetched: every read of a camera path goes through
+        /// this policy, so a stored frame is an entry nothing will ever read, and with `cacheLimit`
+        /// entries shared across the whole app a handful of cameras would quietly evict the media
+        /// artwork that would have been. Evicting instead of skipping the write matters too — a key
+        /// that was once populated by a `useCache` read must not be left holding a frame this
+        /// request has just proven stale.
         case reload
     }
 
@@ -218,18 +226,30 @@ public actor AuthenticatedImageLoader {
         } catch {
             return .failed(.transport(Self.transportIdentifier(error)))
         }
-        // Checked again after the await: a fetcher that ignores cooperative cancellation would
-        // otherwise have its result cached and rendered for a view that is already gone.
-        if Task.isCancelled { return .cancelled }
-
         guard (200..<300).contains(status) else {
             return .failed(status == 401 || status == 403 ? .unauthorized : .httpStatus(status))
         }
         guard !body.isEmpty else { return .failed(.emptyResponse) }
 
-        // Only successes are cached, so a transient failure never blocks a later retry — the same
-        // rule `HomeStore.loadHistory` follows for history series.
-        store(body, forKey: key)
+        // Only successes reach the cache, so a transient failure never blocks a later retry — the
+        // same rule `HomeStore.loadHistory` follows for history series.
+        switch policy {
+        case .useCache:
+            store(body, forKey: key)
+        case .reload:
+            // See `CachePolicy.reload`: the frame is not stored, and any older one for this key is
+            // dropped rather than left to be served as current by some other caller.
+            evict(key)
+        }
+
+        // **Checked after the bytes are banked, not before.** A view that scrolled away must still
+        // get `.cancelled` so nothing is drawn for it — but the request it started already
+        // completed, was paid for on the user's own server, and is perfectly good. Discarding it
+        // here (as this did) meant a caller cancelling on a cadence faster than the round trip
+        // could loop forever without a single fetch ever being kept, each cycle starting from
+        // exactly where the last one did. `SnapshotRefresh` removes the cadence that caused it;
+        // this removes the ratchet that made it unrecoverable.
+        if Task.isCancelled { return .cancelled }
         return .loaded(body)
     }
 
@@ -238,6 +258,11 @@ public actor AuthenticatedImageLoader {
     public func clearCache() {
         cache.removeAll()
         insertionOrder.removeAll()
+    }
+
+    private func evict(_ key: String) {
+        guard cache.removeValue(forKey: key) != nil else { return }
+        insertionOrder.removeAll { $0 == key }
     }
 
     private func store(_ data: Data, forKey key: String) {

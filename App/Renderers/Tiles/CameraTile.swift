@@ -24,21 +24,23 @@ enum CameraTileSize {
 /// Four live feeds on a dashboard is a battery, bandwidth and Home-Assistant-server cost paid
 /// continuously for a view that is glanced at for two seconds. So the tile fetches one frame every
 /// ten seconds, and stops entirely when the app backgrounds or the tile leaves the screen. Both of
-/// those are structural rather than remembered — see `refreshTick`.
+/// those are structural rather than remembered — see `refreshPolicy`.
 struct CameraTile: View {
     let entityId: String
     var size: CameraTileSize = .square
     @Environment(HomeStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Bumped every refresh interval, and fed to `AuthenticatedImage.refreshTick`.
+    /// Seconds between snapshots. The cycle itself belongs to `AuthenticatedImage`, which starts
+    /// each fetch only once the previous one has finished — see `AuthenticatedImage.RefreshPolicy`
+    /// for the defect that arrangement exists to make impossible.
     ///
-    /// It starts at **1**, not 0, so the very first load bypasses the image cache. That matters
-    /// here and nowhere else: the snapshot URL is stable while its *contents* are the only thing
-    /// that changes, so a cached copy is a picture of an arbitrary earlier moment — and the
-    /// staleness stamp beneath it would be measured from when that copy was served, not from when
-    /// the picture was taken. An honest stamp is only possible over a frame we actually fetched.
-    @State private var refreshTick = 1
+    /// Every load bypasses the image cache, and that matters here and nowhere else: the snapshot
+    /// URL is stable while its *contents* are the only thing that changes, so a cached copy is a
+    /// picture of an arbitrary earlier moment — and the staleness stamp beneath it would be
+    /// measured from when that copy was served, not from when the picture was taken. An honest
+    /// stamp is only possible over a frame we actually fetched.
+    private let refreshInterval: TimeInterval = 10
     /// When the frame currently on screen finished decoding — set by `AuthenticatedImage.onLoad`,
     /// which fires only on success, so a failed refresh leaves the stamp reading the true age of
     /// the last real frame rather than resetting to "just now" over a stale one.
@@ -70,23 +72,19 @@ struct CameraTile: View {
         // is a tile a VoiceOver user can hear described but not open. `MediaPlayerTile` solves it
         // the same way.
         .accessibilityAction { store.presented = entityId }
-        // **The refresh loop, and where it stops.**
-        //
-        // Keyed on `scenePhase`, so backgrounding the app cancels this task and the guard makes the
-        // replacement return immediately — the loop cannot run while the app is not on screen.
-        // `.task` itself cancels on disappear, which covers the tile scrolling out of the grid.
-        // Both are properties of the structure rather than of remembering to tear something down,
-        // which is what "stop when the app backgrounds or the tile leaves the screen" has to be:
-        // the failure mode is invisible from inside the app and shows up as battery drain and load
-        // on the user's own server.
-        .task(id: scenePhase) {
-            guard scenePhase == .active else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
-                if Task.isCancelled { return }
-                refreshTick &+= 1
-            }
-        }
+    }
+
+    /// **Where the refresh stops.**
+    ///
+    /// `isActive` is part of `AuthenticatedImage`'s `.task` id, so backgrounding the app cancels
+    /// the cycle and the replacement task returns immediately — it cannot run while the app is off
+    /// screen. `.task` itself cancels on disappear, which covers the tile scrolling out of the
+    /// grid. Both are properties of the structure rather than of remembering to tear something
+    /// down, which is what "stop when the app backgrounds or the tile leaves the screen" has to be:
+    /// the failure mode is invisible from inside the app and shows up as battery drain and load on
+    /// the user's own server.
+    private var refreshPolicy: AuthenticatedImageRefresh {
+        AuthenticatedImageRefresh(interval: refreshInterval, isActive: scenePhase == .active)
     }
 
     // MARK: - 2×2
@@ -225,7 +223,7 @@ struct CameraTile: View {
         if let s, s.isAvailable {
             AuthenticatedImage(
                 path: CameraState.snapshotPath(for: entityId),
-                refreshTick: refreshTick,
+                refresh: refreshPolicy,
                 onLoad: { capturedAt = $0 }
             ) { phase in
                 switch phase {

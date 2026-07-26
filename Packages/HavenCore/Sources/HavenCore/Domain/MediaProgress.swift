@@ -15,6 +15,14 @@ import Foundation
 /// - **It never runs backwards or past the end.** Clock skew between the phone and the instance
 ///   can put `now` *before* `updatedAt`, and a long-running interpolation will overshoot a
 ///   `media_duration` that stopped being updated; both clamp.
+///
+/// One asymmetry worth stating rather than leaving to be discovered: only *negative* skew is
+/// corrected. A phone whose clock runs ahead of the instance adds that offset to every position and
+/// the result is then clamped to `media_duration` — so a phone five minutes fast shows a three
+/// minute track pinned at "3:00 of 3:00" from the first second, which is a plausible wrong answer
+/// rather than a visible one. Detecting it would need a clock offset this app doesn't measure, and
+/// on an NTP-synced phone the case doesn't arise; it is documented here so the clamp above isn't
+/// read as covering both directions.
 public enum MediaProgress {
     /// Seconds into the track at `now`, or `nil` when the device reports no position at all.
     ///

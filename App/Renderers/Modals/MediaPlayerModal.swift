@@ -294,9 +294,17 @@ struct MediaPlayerModal: View {
     private func source(_ s: MediaPlayerState?, accent: Color) -> some View {
         if let s, s.features.contains(.selectSource), s.sourceList.count > 1 {
             FacetCard(title: "Source") {
-                if s.sourceList.count <= 4 {
+                // The `source != nil` half of the condition is not a size question. A receiver that
+                // declares `SELECT_SOURCE` and a `source_list` but reports no current source —
+                // nothing selected yet, or an integration that simply doesn't echo it — used to
+                // fall through to `sourceList[0]`, drawing the first entry as *selected*. The user
+                // reads "HDMI1 is the current input" off a control that knows nothing of the kind.
+                // The menu branch below already handled this correctly ("Select a source", and an
+                // `accessibilityValue` of "None selected"), which is what marks the segmented one
+                // as an oversight rather than a decision; unknown now takes that branch too.
+                if s.sourceList.count <= 4, let current = s.source {
                     HavenSegmented(options: s.sourceList,
-                                   selection: Binding(get: { s.source ?? s.sourceList[0] },
+                                   selection: Binding(get: { current },
                                                       set: { store.selectMediaSource(entityId, source: $0) }),
                                    label: { $0 }, accent: accent)
                 } else {

@@ -90,8 +90,17 @@ public enum CameraEvents {
     /// `sound` and `tamper` are in because both are things a camera detected. `battery`,
     /// `connectivity`, `update` and the rest are deliberately out: they describe the device, not
     /// the scene.
-    static let eventDeviceClasses: Set<String> = [
-        "motion", "occupancy", "presence", "sound", "tamper",
+    ///
+    /// **`sensor(_:)` is generated from this table**, rather than the table sitting beside a
+    /// hand-written `switch` that has to agree with it. It used to be the latter, and nothing read
+    /// this set at all: adding a class here changed no behaviour, while anyone auditing "which
+    /// device classes qualify" would read this and get the wrong answer. One table, one reader.
+    static let eventDeviceClasses: [String: CameraEventSensor.Kind] = [
+        "motion": .motion,
+        "occupancy": .motion,
+        "presence": .person,
+        "sound": .sound,
+        "tamper": .tamper,
     ]
 
     /// Object-id fragments that name an event no `device_class` covers. A Protect doorbell is
@@ -134,20 +143,13 @@ public enum CameraEvents {
     /// would be the more confident of the two available wrong answers.
     static func sensor(_ candidate: CameraEventCandidate) -> CameraEventSensor? {
         let object = objectId(candidate.entityId)
-        let deviceClass = candidate.deviceClass?.lowercased()
         let kind: CameraEventSensor.Kind?
         if doorbellFragments.contains(where: object.contains) {
             kind = .doorbell
         } else if personFragments.contains(where: object.contains) {
             kind = .person
         } else {
-            switch deviceClass {
-            case "motion", "occupancy": kind = .motion
-            case "presence": kind = .person
-            case "sound": kind = .sound
-            case "tamper": kind = .tamper
-            default: kind = nil
-            }
+            kind = candidate.deviceClass.map { $0.lowercased() }.flatMap { eventDeviceClasses[$0] }
         }
         // A device-class-less sensor whose id said nothing either is dropped rather than guessed
         // at. An "Events" card is only worth having if everything on it is really an event — a

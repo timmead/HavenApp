@@ -27,10 +27,7 @@ struct CameraModal: View {
     /// someone who did not open the app. Deliberately not persisted: "for that viewing" means
     /// exactly that, and a remembered preference would make the *next* opening the startling one.
     @State private var isMuted = true
-    /// Drives the still-refresh fallback. Starts at 1 so the first frame is fetched rather than
-    /// served from the tile's cache — see `CameraTile.refreshTick` for why a cached frame is a
-    /// picture of an arbitrary earlier moment.
-    @State private var refreshTick = 1
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         let e = store.state(entityId)
@@ -47,13 +44,34 @@ struct CameraModal: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        .task(id: entityId) { await start(s) }
+        // Re-keyed on availability, not just on the entity id. A camera that was unavailable when
+        // the modal opened (an NVR reboot, a Wi-Fi blip) used to stay showing "Unavailable" until
+        // the user closed and reopened the sheet — while the header subtitle a few points above it
+        // updated to "Idle" off the same state push. Two parts of one modal disagreeing on screen
+        // about whether the camera is working.
+        .task(id: TaskKey(entityId: entityId, isAvailable: s?.isAvailable ?? false)) { await start(s) }
         // **Teardown, and why it is here rather than only in `.task`'s cancellation.** Cancelling
         // the task stops us *asking* for things; it does nothing to an `AVPlayer` that is already
         // running, which would go on pulling segments from the user's Home Assistant — and go on
         // holding an open video connection to a camera in their home — for as long as the object
         // lived. A lingering stream is a battery drain and a privacy problem in the same breath.
         .onDisappear { teardown() }
+        // The tiles were given a structural guarantee that they stop on background; the component
+        // actually holding a live stream needs it more. `.task` cancels on *disappear*, and
+        // backgrounding is not a disappear — so without this the player keeps pulling HLS segments
+        // from the user's home while the app is off screen. iOS suspends us soon enough (there is
+        // no `UIBackgroundModes` entry), but "soon enough, by someone else's decision" is not the
+        // same as stopped.
+        .onChange(of: scenePhase) { _, phase in
+            guard let player else { return }
+            phase == .active ? player.play() : player.pause()
+        }
+    }
+
+    /// `.task`'s id. A struct rather than a tuple so the intent of each field survives.
+    private struct TaskKey: Equatable {
+        let entityId: String
+        let isAvailable: Bool
     }
 
     // MARK: - Header
@@ -181,23 +199,23 @@ struct CameraModal: View {
     /// the modal is open. Not a video, and it does not pretend to be one — there is no live dot
     /// over it and no speaker control beside it, because there is no live audio to control.
     private func snapshotFallback(accent: Color) -> some View {
-        AuthenticatedImage(path: CameraState.snapshotPath(for: entityId), refreshTick: refreshTick) { phase in
+        // Self-paced: the next fetch starts when the last one finishes, so a link on which a
+        // snapshot takes longer than a second degrades to a lower frame rate instead of to a
+        // permanently empty rectangle. This is the branch that gets taken whenever `camera/stream`
+        // yields nothing — including for every camera whose response shape this branch documents as
+        // unverified — so it is the one that must not be the broken one.
+        AuthenticatedImage(
+            path: CameraState.snapshotPath(for: entityId),
+            refresh: AuthenticatedImageRefresh(interval: CameraStream.snapshotRefreshInterval,
+                                               isActive: scenePhase == .active)
+        ) { phase in
             switch phase {
             case .image(let image): image.resizable().aspectRatio(contentMode: .fit)
-            case .loading: feedPlaceholder(symbol: "video.fill", caption: nil, accent: accent)
+            case .loading: feedPlaceholder(symbol: "video.fill", caption: "Connecting…", accent: accent)
             case .empty, .failed: feedPlaceholder(symbol: "video.slash.fill", caption: "No picture", accent: accent)
             }
         }
         .accessibilityLabel("Live view, still images")
-        // Stops with the modal: `.task` is cancelled on disappear, so the refresh loop cannot
-        // outlive the view that asked for it — the same structural guarantee the tiles' loop has.
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(CameraStream.snapshotRefreshInterval))
-                if Task.isCancelled { return }
-                refreshTick &+= 1
-            }
-        }
     }
 
     private func feedPlaceholder(symbol: String, caption: String?, accent: Color) -> some View {
@@ -254,13 +272,32 @@ struct CameraModal: View {
     /// The base URL is read here — at the moment the player is built — rather than captured
     /// earlier, because the app fails over between its local and remote addresses mid-session and a
     /// playlist resolved against the wrong host plays as a black rectangle with no error anywhere.
+    /// **A cancellation check follows every `await`, before anything observable is touched.** This
+    /// is the invariant `AppModel.connect()` already holds, and it is load-bearing here for a
+    /// specific reason: `HAWebSocketClient.request` is a bare continuation with no cancellation
+    /// handling, so cancelling this task does *not* cancel the in-flight `camera/stream` command —
+    /// Home Assistant answers whenever its stream worker is ready, which for a Protect camera can
+    /// be a second or more, and this function then resumes.
+    ///
+    /// Without the guards, a user who opened a camera and swiped the sheet away before it resolved
+    /// got an `AVPlayer` **created and started after `onDisappear` had already run**. `teardown()`
+    /// fires exactly once, on disappear; a player built after it has no owner and no path to being
+    /// stopped, and it starts pulling HLS segments from a camera inside the user's home
+    /// immediately. That is a direct hole in "tear the stream down on dismiss", in the one place
+    /// the plan calls out as both a battery drain and a privacy problem.
     private func start(_ s: CameraState?) async {
+        // This can now run more than once — the task is re-keyed when the camera becomes available
+        // — so a previous player must be stopped before a second one is built beside it.
+        // `teardown` is written to be safe to call with nothing to tear down.
+        teardown()
         guard let s else { source = .unavailable; return }
         // `nil` is every way this can fail to produce a URL — never asked, command errored, socket
         // dropped — and `CameraStream.source` turns all of them into the still fallback rather than
         // into an error, because the still is a working live view, just a slower one.
         let path = CameraStream.shouldRequestStream(s) ? await store.cameraStreamPath(entityId) : nil
+        if Task.isCancelled { return }
         guard let baseURL = await app.currentBaseURL() else { source = .unavailable; return }
+        if Task.isCancelled { return }
         let resolved = CameraStream.source(hlsPath: path, state: s, baseURL: baseURL)
         source = resolved
         guard case .hls(let url) = resolved else { return }
