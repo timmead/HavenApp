@@ -18,12 +18,11 @@ private enum DefaultsKeys {
     /// an attacker-supplied value on an upgrading device; kept only so `purgeDiscoveredURLs()` can
     /// find and remove it.
     static let discoveredExternalURL = "discoveredExternalURL"
-    /// The candidate URL that last completed a full connect (auth + bootstrap). Still written and
-    /// read: unlike the two keys above, this can only ever hold a URL this app actually,
-    /// successfully authenticated a real session against — either `userEntered` (the user's own
-    /// typed/restored address, trusted because they're the one who typed it) or, if that happens
-    /// to be a Nabu Casa host, one they entered themselves. `get_config` no longer feeds this key
-    /// either.
+    /// Legacy. No longer written or read — it fed the `preferredFirst` candidate hoist, which is
+    /// vestigial now that `userEntered` is the only candidate source (see `connect()`). Kept only
+    /// so the reset path can find and remove it: on a device that ran an earlier build tonight it
+    /// may hold a URL that *was* discovered from `get_config` at the time it was written, back
+    /// when discovery still fed candidates.
     static let lastWorkingURL = "lastWorkingURL"
 }
 
@@ -181,17 +180,23 @@ final class AppModel {
     /// rules (local before remote, `*.ui.nabu.casa` always remote, remote always `https`/`wss`,
     /// no duplicates).
     ///
-    /// Re-probe policy (the exact cadence was left to my judgement — see
-    /// `.superpowers/overnight/c2-remote-failover-report.md` for the reasoning, including a
-    /// fix-round-1 correction to what's described here): `lastWorkingURL` is passed as
-    /// `preferredFirst` on *every* round, including round 0 — i.e. every fresh app launch
-    /// (`restoreIfPossible`) and every explicit sign-in, the only two callers. `preferredFirst`
-    /// only *hoists* a candidate that's already in the list; it never removes any other
-    /// candidate. So on a cold launch away from home with a remembered remote winner, the order
-    /// becomes `[remote, local, …]` — remote is tried (and normally succeeds) first, but local is
-    /// still probed immediately afterwards in that same round with no backoff in between, so
-    /// "returning home returns to the fast path" is preserved without needing a separate
-    /// staleness/timestamp mechanism.
+    /// Re-probe policy: there is nothing left to re-probe. Since `get_config`'s URLs are no
+    /// longer adopted (see below), `userEntered` is the *only* source of candidates, so a round
+    /// contains exactly one candidate and there is no ordering left to optimise. The
+    /// `lastWorkingURL` / `preferredFirst` machinery that earlier rounds of this file built —
+    /// to avoid paying a local connection timeout on every retry while away from home — is
+    /// therefore vestigial here, and is deliberately not used: `preferredFirst` can only *hoist*
+    /// a candidate already in the list, never introduce one, so with a single candidate it is a
+    /// no-op by construction.
+    ///
+    /// It is removed rather than left in place because its read-side gate had become actively
+    /// misleading: it admitted a stored URL only when `isNabuCasaHost` passed — i.e. exactly the
+    /// class the C-1 finding showed cannot be trusted as proof of *whose* instance it is — while
+    /// rejecting the user's own (typically local, non-Nabu-Casa) address. Harmless while the
+    /// hoist is a no-op, but it would silently become a real hole the moment anyone adds a second
+    /// candidate source. `ConnectionEndpoint.candidates` keeps its `preferredFirst` parameter and
+    /// tests: the ordering logic is correct and worth keeping for when there is again more than
+    /// one candidate to order.
     private func connect() async {
         guard let base = baseURL, let tokenProvider else { return }
         phase = .connecting
@@ -220,7 +225,8 @@ final class AppModel {
                 // connection candidates at all, from either the wire or persisted storage.
                 discoveredInternal: nil,
                 discoveredExternal: nil,
-                preferredFirst: lastWorkingURL()
+                // Vestigial with a single candidate source — see this method's documentation.
+                preferredFirst: nil
             )
             // Only escalate to `requireReauthentication()` once *every* candidate this round has
             // hit the "already spent this call's one forced refresh, still auth_invalid" wall —
@@ -265,7 +271,6 @@ final class AppModel {
                         try await store.bootstrap()
                         if Task.isCancelled { await c.disconnect(); return }
                         havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
-                        rememberWorkingURL(candidate.url)
                         phase = .ready
                         // Read-only: `probeHavenIntegration` only ever asks questions. Nothing
                         // that changes the user's Home Assistant can happen without them
@@ -367,34 +372,15 @@ final class AppModel {
         if d.object(forKey: DefaultsKeys.discoveredExternalURL) != nil {
             d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
         }
+        // Same reasoning: on a device that ran an earlier build tonight this could hold a URL that
+        // *was* a discovered candidate when it was written. Nothing reads it any more, so this is
+        // belt-and-braces rather than load-bearing — but leaving a known-untrustworthy value on
+        // disk purely because today's code happens not to read it is how it comes back.
+        if d.object(forKey: DefaultsKeys.lastWorkingURL) != nil {
+            d.removeObject(forKey: DefaultsKeys.lastWorkingURL)
+        }
     }
 
-    /// SECURITY: also re-validated on read. `lastWorkingURL` can only ever be set to a candidate
-    /// this app actually, successfully authenticated a session against (`rememberWorkingURL`,
-    /// called only after a real `bootstrap()` succeeds) — never to anything merely *discovered*,
-    /// since discovery no longer feeds candidates at all. So a non-Nabu-Casa value here is simply
-    /// a legitimate local address, and requiring `isNabuCasaHost` costs nothing: a local candidate
-    /// is already tried first by `ConnectionEndpoint`'s default ordering regardless of any
-    /// `preferredFirst` hoist, so dropping a non-Nabu-Casa `lastWorkingURL` here never changes
-    /// which candidate is actually tried — only (at most) a minor ordering nuance between two
-    /// local candidates. Kept anyway as defense-in-depth against a value an even earlier,
-    /// vulnerable build might have set here (this key predates every fix round above).
-    private func lastWorkingURL() -> URL? {
-        guard let url = UserDefaults.standard.string(forKey: DefaultsKeys.lastWorkingURL).flatMap(URL.init(string:)) else {
-            return nil
-        }
-        guard ConnectionEndpoint.isNabuCasaHost(url) else {
-            // Not necessarily hostile — most of the time this is simply a perfectly legitimate
-            // local address, which just doesn't need to be (and after this fix, never needs to
-            // be) trusted here to still work correctly. Not logged as an error for that reason.
-            return nil
-        }
-        return url
-    }
-
-    private func rememberWorkingURL(_ url: URL) {
-        UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
-    }
 
     private func forgetDiscoveredURLs() {
         let d = UserDefaults.standard
