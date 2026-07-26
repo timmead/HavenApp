@@ -264,6 +264,14 @@ struct CameraModal: View {
         let resolved = CameraStream.source(hlsPath: path, state: s, baseURL: baseURL)
         source = resolved
         guard case .hls(let url) = resolved else { return }
+        // **Before `play()`, and it matters even though we start muted.** Starting an HLS asset
+        // with an audio track activates the shared `AVAudioSession`, and the app's default
+        // category (`.soloAmbient`) does not mix — so opening a camera would interrupt whatever
+        // the user was listening to. `isMuted` silences *our* output; it does not stop that
+        // activation. `.ambient` mixes and is silenced by the ring switch, which is the right
+        // default for a feed nobody has asked to hear. Unmuting escalates to `.playback`, which is
+        // what makes the sound actually audible on a phone set to silent.
+        try? AVAudioSession.sharedInstance().setCategory(.ambient)
         let player = AVPlayer(url: url)
         player.isMuted = isMuted
         // No `automaticallyWaitsToMinimizeStalling` fiddling and no seek-to-live: HA's HLS playlist
@@ -280,8 +288,13 @@ struct CameraModal: View {
         player?.replaceCurrentItem(with: nil)
         player = nil
         source = nil
-        // Hand the audio route back. Only meaningful if the user unmuted; harmless otherwise.
-        configureAudioSession(muted: true)
+        // Hand the audio route back only if we ever took it. Deactivating a session this view
+        // never activated would send `.notifyOthersOnDeactivation` to whatever *else* is playing,
+        // on behalf of a camera the user opened and closed without ever asking for sound.
+        if !isMuted {
+            isMuted = true
+            configureAudioSession(muted: true)
+        }
     }
 
     /// Takes the audio route only while the user has actually asked for sound.

@@ -64,6 +64,12 @@ struct CameraTile: View {
         .accessibilityLabel(s.map { AccessibilitySummary.camera(name, $0, capturedAt: capturedAt, now: Date()) } ?? name)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the live view")
+        // The trait above makes VoiceOver *say* "button"; it does not wire its activate gesture to
+        // a bare `.onTapGesture`. This repo has already shipped that exact regression once — see
+        // `SegmentedControl.swift`'s "a real Button, not `.onTapGesture`" comment — and the result
+        // is a tile a VoiceOver user can hear described but not open. `MediaPlayerTile` solves it
+        // the same way.
+        .accessibilityAction { store.presented = entityId }
         // **The refresh loop, and where it stops.**
         //
         // Keyed on `scenePhase`, so backgrounding the app cancels this task and the guard makes the
@@ -126,13 +132,22 @@ struct CameraTile: View {
             Text(name)
                 .font(.system(size: 11.5, weight: .semibold))
                 .lineLimit(1)
-            if let s, s.isAvailable {
+            if let s, s.isAvailable, capturedAt != nil {
                 TimelineView(.periodic(from: .now, by: 5)) { context in
                     Text("\(s.status.label) · \(CameraSnapshotAge.describe(capturedAt: capturedAt, now: context.date))")
                         .font(.system(size: 9.5, weight: .medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+            } else if let s, s.isAvailable {
+                // No frame has arrived yet. State only, and deliberately *no* stamp: `describe`
+                // reads a nil capture time as "just now", which under a loading placeholder would
+                // be a freshness claim about a picture that does not exist — and it would disagree
+                // with the accessibility label, which omits the age in exactly this case.
+                Text(s.status.label)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             } else {
                 // No stamp at all when there is no live picture: an age would be describing a frame
                 // nothing is updating, which is the plausible-blank failure wearing a timestamp.
