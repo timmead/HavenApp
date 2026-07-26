@@ -177,7 +177,9 @@ Each unit has one clear job: `store.py` is pure storage logic (scopes, versionin
 
 Built and pushed to `hacs-havenapp` (commit `d424598`): the integration skeleton, all four commands, scoped storage with ownership binding, and **10 tests against a real in-process Home Assistant 2026.7.4**. Naming settled as repo `hacs-havenapp`, HA domain `havenapp`, commands `havenapp/*`.
 
-Still outstanding: the **manual HACS install** into a real Home Assistant (§8) — the one thing tests cannot prove.
+**Manual HACS install verified (2026-07-25)** against the live Home Assistant: added as a HACS custom repository, installed, HA restarted, config entry added via Settings → Devices & Services, and `havenapp/info` returned the expected version/capabilities/admin payload over the authenticated frontend connection. §9's success criteria for install and handshake are met.
+
+**Install gotcha worth remembering:** installing via HACS is *not* sufficient on its own — the WebSocket commands only register in `async_setup_entry`, so a config entry must exist. A user who installs and restarts but never adds the integration sees `unknown command`. Client onboarding must therefore check `havenapp/info` rather than assuming HACS install implies availability.
 
 ## 10. Open questions / follow-ups
 
