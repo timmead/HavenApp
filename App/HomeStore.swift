@@ -111,6 +111,15 @@ final class HomeStore {
         Task { try? await connection.setBrightness(id, percent: percent) }
     }
 
+    /// Fire-and-forget, matching `setBrightness` exactly: no optimistic write into `states`,
+    /// since the light modal's own `dragKelvin` local state already covers the in-flight
+    /// preview and committing an unconfirmed kelvin value here would need the same
+    /// isOn-consistent rollback brightness deliberately doesn't do either.
+    func setColorTemp(_ id: String, kelvin: Int) {
+        guard let connection else { return }
+        Task { try? await connection.setColorTemp(id, kelvin: kelvin) }
+    }
+
     func setClimateMode(_ id: String, mode: String) {
         guard let connection else { return }
         Task { try? await connection.setClimateMode(id, mode: mode) }

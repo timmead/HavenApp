@@ -11,6 +11,22 @@ private func e(_ id: String, _ st: String, _ a: [String: JSONValue] = [:]) -> En
     #expect(s.supportsBrightness); #expect(s.supportsColorTemp)
     #expect(!LightState(e("light.k", "off")).isOn)
 }
+@Test func lightColorTempRange() {
+    let withBounds = LightState(e("light.k", "on", [
+        "supported_color_modes": .array([.string("color_temp")]),
+        "color_temp_kelvin": .int(3200), "min_color_temp_kelvin": .int(2000), "max_color_temp_kelvin": .int(6500),
+    ]))
+    #expect(withBounds.colorTempKelvin == 3200)
+    #expect(withBounds.colorTempRange == 2000...6500)
+
+    // No hardcoded fallback range: missing bounds must yield `nil`, not a guessed default —
+    // a wrong guess would send an out-of-range command HA clamps silently rather than rejects.
+    #expect(LightState(e("light.k", "on", ["supported_color_modes": .array([.string("color_temp")])])).colorTempRange == nil)
+
+    // Degenerate/inverted bounds are equally untrustworthy.
+    let inverted = LightState(e("light.k", "on", ["min_color_temp_kelvin": .int(6500), "max_color_temp_kelvin": .int(2000)]))
+    #expect(inverted.colorTempRange == nil)
+}
 @Test func coverState() {
     let s = CoverState(e("cover.b", "open", ["current_position": .int(60)]))
     #expect(s.isOpen); #expect(s.positionPercent == 60); #expect(s.supportsPosition)
