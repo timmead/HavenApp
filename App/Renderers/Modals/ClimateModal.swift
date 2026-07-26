@@ -14,11 +14,15 @@ struct ClimateModal: View {
             FacetCard {
                 HStack {
                     Button { if let t = s?.targetTemp { store.setClimateTemp(entityId, temp: t - 1) } } label: { Image(systemName: "minus.circle.fill").font(.title) }
+                        .accessibilityLabel("Decrease target temperature")
                     Spacer()
                     VStack { Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—").font(.system(size: 40, weight: .bold))
                         Text(s?.currentTemp.map { "Now \(Int($0))°" } ?? "").font(.caption).foregroundStyle(.secondary) }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(climateReadout(s))
                     Spacer()
                     Button { if let t = s?.targetTemp { store.setClimateTemp(entityId, temp: t + 1) } } label: { Image(systemName: "plus.circle.fill").font(.title) }
+                        .accessibilityLabel("Increase target temperature")
                 }.tint(accent)
             }
             if let modes = s?.modes.filter({ $0 != "off" }), modes.count > 1 {
@@ -32,5 +36,13 @@ struct ClimateModal: View {
             }
             Spacer()
         }
+    }
+
+    /// Combined VoiceOver label for the target/current readout — mirrors the two
+    /// separately-styled `Text` lines it replaces without losing either value.
+    private func climateReadout(_ s: ClimateState?) -> String {
+        let target = s?.targetTemp.map { "Target \(Int($0))°" } ?? "No target set"
+        guard let current = s?.currentTemp else { return target }
+        return "\(target), currently \(Int(current))°"
     }
 }

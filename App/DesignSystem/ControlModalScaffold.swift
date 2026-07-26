@@ -8,11 +8,19 @@ struct ModalHeader: View {
     var onClose: () -> Void
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: systemImage).font(.system(size: 20)).foregroundStyle(accent).frame(width: 38, height: 38).background(accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 1) { Text(title).font(.system(size: 16, weight: .bold)); Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary) }
+            // Grouped as one VoiceOver element ("name, state") — the icon carries no
+            // information a sighted user gets that isn't already in the text, so exposing
+            // it separately would just be a second, redundant stop while swiping.
+            Group {
+                Image(systemName: systemImage).font(.system(size: 20)).foregroundStyle(accent).frame(width: 38, height: 38).background(accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 1) { Text(title).font(.system(size: 16, weight: .bold)); Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(subtitle.isEmpty ? title : "\(title), \(subtitle)")
             Spacer()
-            if let toggle { Toggle("", isOn: toggle).labelsHidden().tint(accent) }
+            if let toggle { Toggle("", isOn: toggle).labelsHidden().tint(accent).accessibilityLabel(title) }
             Button { onClose() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary).frame(width: 28, height: 28).background(.gray.opacity(0.15), in: Circle()) }
+                .accessibilityLabel("Close")
         }
     }
 }

@@ -17,5 +17,8 @@ struct ClimateTile: View {
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.presented = entityId }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(s.map { AccessibilitySummary.climate(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityAddTraits(.isButton)
     }
 }

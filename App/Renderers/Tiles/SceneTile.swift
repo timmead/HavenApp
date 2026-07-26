@@ -12,5 +12,9 @@ struct SceneTile: View {
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(AccessibilitySummary.scene(TileName.of(entityId, e)))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open controls") { store.presented = entityId }
     }
 }

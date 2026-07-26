@@ -47,6 +47,8 @@ struct SensorModal: View {
                             .padding(.leading, 2)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(sensorReadoutLabel(current: s, selected: selected, unit: unit))
 
                 if let series, !series.points.isEmpty {
                     Chart {
@@ -124,5 +126,17 @@ struct SensorModal: View {
             Text(l).font(.caption2).foregroundStyle(.secondary)
             Text(v.map { String(format: "%.1f", $0) } ?? "—").font(.system(size: 14, weight: .semibold))
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(l), \(v.map { String(format: "%.1f", $0) } ?? "no data")")
+    }
+
+    /// Combined label for the current-value row: the live reading, plus the scrubbed
+    /// point's value/time when the chart is being scrubbed — otherwise just the former.
+    private func sensorReadoutLabel(current: SensorState?, selected: HistoryPoint?, unit: String) -> String {
+        let unitSuffix = unit.isEmpty ? "" : " \(unit)"
+        let live = "\(current?.value ?? "—")\(unitSuffix)"
+        guard let selected else { return live }
+        let time = selected.time.formatted(scrubTimestampFormat)
+        return "\(live), at \(time): \(String(format: "%.1f", selected.value))\(unitSuffix)"
     }
 }

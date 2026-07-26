@@ -26,6 +26,15 @@ struct CoverModal: View {
                                }
                            })
                     .tint(accent)
+                    .accessibilityLabel("Position")
+                    .accessibilityValue("\(Int((dragPercent ?? live).rounded()))% open")
+                    .accessibilityAdjustableAction { direction in
+                        let current = dragPercent ?? live
+                        let step = 5.0
+                        let next = direction == .increment ? min(100, current + step) : max(0, current - step)
+                        dragPercent = nil
+                        store.setCoverPosition(entityId, percent: Int(next.rounded()))
+                    }
                 }
             }
             FacetCard { HStack(spacing: 10) {

@@ -14,5 +14,8 @@ struct SensorTile: View {
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(s.map { AccessibilitySummary.sensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityAddTraits(.isButton)
     }
 }
