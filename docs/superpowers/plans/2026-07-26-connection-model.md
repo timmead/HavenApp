@@ -87,17 +87,37 @@ from present-and-false (use optionals; do **not** default to `false`, that is th
 1. `HACloudStatus: Decodable` with the fields above.
 2. `WSCommand.cloudStatus(id:)` and `HomeConnection.fetchCloudStatus()` returning
    `Result<HACloudStatus, WSError>`.
-3. A **pure** classifier returning a four-case enum:
-   - `.remoteAvailable(URL)` — `active_subscription` && `remote_connected` && domain present
-   - `.remoteDisabled(domain: String)` — subscription active, remote off → Task 3 offers the fix
-   - `.noSubscription` — logged in, no active subscription
+3. A **pure** classifier. **Intent and state are different fields — do not conflate
+   them.** Verified from `components/cloud/const.py`: `prefs.remote_enabled`
+   (`PREF_ENABLE_REMOTE`) is *intent*; `remote_connected` is *current state*. So
+   `remote_connected: false` does **not** mean remote is switched off — it is also
+   the transient value while the tunnel is establishing or has dropped. Offering to
+   "enable" an already-enabled tunnel would be wrong and confusing.
+
+   Five cases:
+   - `.remoteAvailable(URL)` — `active_subscription` && `prefs.remote_enabled` &&
+     domain present. Adopt the URL **regardless of `remote_connected`** — a tunnel
+     that is merely down right now may well be up by the time we need it.
+   - `.remoteDisabled(domain: String)` — `active_subscription` &&
+     **`prefs.remote_enabled == false`**. This, and only this, is Task 3's offer.
+   - `.noSubscription` — logged in, no active subscription.
    - `.cloudNotLoaded` — `cloud/status` returned HA's `unknown_command`. **This is the
      self-hosted user, NOT an error** — it routes to the custom-URL path (Task 6).
      Getting this branch wrong sends a Tailscale user into a Nabu Casa dead end.
+   - `.notLoggedIn` — `logged_in == false`. No cloud account at all; also Task 6.
 
-**Tests:** all four outcomes; `unknown_command` maps to `.cloudNotLoaded` and never to
+   Also decode `prefs.remote_allow_remote_enable`
+   (`PREF_REMOTE_ALLOW_REMOTE_ENABLE`): when false, HA refuses to enable remote
+   access *from a remote connection*. We only ever offer it from a local one, so it
+   should not bite — but decode and respect it rather than discovering it as an
+   opaque failure.
+
+**Tests:** all five outcomes; `unknown_command` maps to `.cloudNotLoaded` and never to
 an error state; URL derivation prepends `https://` exactly once; missing `remote_domain`
-with `active_subscription` true does not crash or produce a bogus URL.
+with `active_subscription` true does not crash or produce a bogus URL; and specifically
+**`remote_enabled: true` + `remote_connected: false` yields `.remoteAvailable`, not
+`.remoteDisabled`** — the distinction that decides whether we offer to change the
+user's Home Assistant configuration.
 
 ---
 
