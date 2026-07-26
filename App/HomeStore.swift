@@ -90,4 +90,10 @@ final class HomeStore {
             catch { self.states[id] = previous }
         }
     }
+
+    /// Fire-and-forget scene/script/button activation. No optimistic local state to update.
+    func run(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.activate(sceneOrScript: id) }
+    }
 }
