@@ -27,12 +27,16 @@ final class HomeStore {
         }
     }
 
-    /// Tear down the live session (used on sign-out).
+    /// Tear down the live session (used on sign-out). Clears history and any open modal
+    /// too — otherwise signing into a different HA instance can show the previous
+    /// account's chart data for a same-named sensor, or leave a stale modal presented.
     func reset() {
         subscriptionTask?.cancel(); subscriptionTask = nil
         connection = nil
         home = ResolvedHome(floors: [])
         states = [:]
+        historyByKey = [:]
+        presented = nil
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }

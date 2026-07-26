@@ -1,8 +1,8 @@
 import Testing
 @testable import HavenCore
 
-private func ent(_ id: String, area: String? = nil, device: String? = nil) -> EntityRegistryEntry {
-    .init(entityId: id, areaId: area, deviceId: device, name: nil)
+private func ent(_ id: String, area: String? = nil, device: String? = nil, disabledBy: String? = nil) -> EntityRegistryEntry {
+    .init(entityId: id, areaId: area, deviceId: device, name: nil, disabledBy: disabledBy)
 }
 
 @Test func entityInheritsAreaFromDevice() {
@@ -53,6 +53,17 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil) -> En
     let allEntities = home.floors.flatMap(\.areas).flatMap(\.entityIds)
     #expect(allEntities.contains("light.ghost"))
     #expect(home.floors.contains { $0.name == "Home" && $0.areas.contains { $0.id == "a" } })
+}
+
+@Test func disabledEntitiesExcludedFromEveryArea() {
+    let areas = [AreaRegistryEntry(areaId: "a1", name: "Kitchen", floorId: nil, icon: nil,
+                                   temperatureEntityId: nil, humidityEntityId: nil)]
+    let entities = [ent("light.disabled", area: "a1", disabledBy: "user"),
+                    ent("light.enabled", area: "a1")]
+    let home = RegistryResolver.resolve(floors: [], areas: areas, devices: [], entities: entities)
+    let allEntities = home.floors.flatMap(\.areas).flatMap(\.entityIds)
+    #expect(!allEntities.contains("light.disabled"))
+    #expect(allEntities.contains("light.enabled"))
 }
 
 @Test func areaCarriesClimateEntities() {

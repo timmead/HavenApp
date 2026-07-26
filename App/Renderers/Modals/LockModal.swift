@@ -14,7 +14,7 @@ struct LockModal: View {
         let toggleBinding: Binding<Bool>? = jammed ? nil : Binding(get: { locked }, set: { _ in store.toggleLock(entityId) })
         VStack {
             ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle,
-                        accent: jammed ? HavenColor.domain(.light) : HavenColor.domain(.lock),
+                        accent: jammed ? HavenColor.warning : HavenColor.domain(.lock),
                         toggle: toggleBinding) { dismiss() }
             Spacer()
         }

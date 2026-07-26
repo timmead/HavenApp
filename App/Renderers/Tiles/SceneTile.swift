@@ -11,6 +11,6 @@ struct SceneTile: View {
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }
+        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
     }
 }

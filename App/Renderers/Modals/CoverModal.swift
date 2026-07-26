@@ -11,7 +11,7 @@ struct CoverModal: View {
         let accent = HavenColor.domain(.cover)
         let live = Double(s?.positionPercent ?? 0)
         VStack(spacing: 12) {
-            ModalHeader(systemImage: "blinds.horizontal.closed", title: TileName.of(entityId, e), subtitle: (s?.isOpen ?? false) ? "Open" : "Closed", accent: accent,
+            ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: (s?.isOpen ?? false) ? "Open" : "Closed", accent: accent,
                         toggle: Binding(get: { s?.isOpen ?? false },
                                         set: { _ in store.openCloseCover(entityId) })) { dismiss() }
             if s?.supportsPosition ?? false {

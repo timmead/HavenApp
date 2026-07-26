@@ -12,7 +12,7 @@ struct ClimateTile: View {
                 Spacer(minLength: 2)
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—").font(.system(size: 24, weight: .bold)).foregroundStyle(accent)
-                    Text(s.map { "\($0.hvacMode.capitalized)\($0.fanMode.map { " · fan \($0)" } ?? "")" } ?? "").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(s.map { "\(TileName.words($0.hvacMode))\($0.fanMode.map { " · fan \($0)" } ?? "")" } ?? "").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }

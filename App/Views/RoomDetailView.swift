@@ -9,6 +9,10 @@ struct RoomDetailView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
+    // The Climate group renders in its own 2-column grid — a half-width tile is exactly a
+    // 2-of-4 span, matching the approved mockups. (`.gridCellColumns(2)` is inert inside a
+    // `LazyVGrid`; a real 2-column `[GridItem]` is the only way to get an actual span.)
+    private let climateColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
 
     /// Domain buckets for this room's `.entity` refs, in display order. `Domain.of(_:)`
     /// is switched exhaustively (every `Domain` case appears in exactly one branch), so
@@ -42,7 +46,7 @@ struct RoomDetailView: View {
         let rollups = store.rollups(room)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                group("Climate", g.climate)
+                group("Climate", g.climate, columns: climateColumns)
                 group("Lights", g.lights, rollup: rollups.first { $0.kind == .lights })
                 group("Shades", g.covers, rollup: rollups.first { $0.kind == .covers })
                 group("Scenes & more", g.other)
@@ -69,10 +73,11 @@ struct RoomDetailView: View {
         }
     }
 
-    /// One group: heading (+ optional roll-up count/action) then a 4-col grid of tiles.
+    /// One group: heading (+ optional roll-up count/action) then a grid of tiles (4 columns
+    /// by default; pass `columns:` to override, e.g. Climate's 2-column half-width span).
     /// Renders nothing when `ids` is empty so an unused domain never leaves a gap.
     @ViewBuilder
-    private func group(_ title: String, _ ids: [String], rollup: Rollup? = nil) -> some View {
+    private func group(_ title: String, _ ids: [String], rollup: Rollup? = nil, columns: [GridItem]? = nil) -> some View {
         if !ids.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -94,10 +99,9 @@ struct RoomDetailView: View {
                         Spacer()
                     }
                 }
-                LazyVGrid(columns: columns, spacing: 9) {
+                LazyVGrid(columns: columns ?? self.columns, spacing: 9) {
                     ForEach(ids, id: \.self) { id in
                         DeviceTileView(entityId: id)
-                            .gridCellColumns(Domain.of(id) == .climate ? 2 : 1)
                     }
                 }
             }

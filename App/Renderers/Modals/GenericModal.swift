@@ -7,7 +7,7 @@ struct GenericModal: View {
     var body: some View {
         let e = store.state(entityId)
         VStack(spacing: 12) {
-            ModalHeader(systemImage: "square.dashed", title: TileName.of(entityId, e), subtitle: e?.state ?? "—", accent: .gray) { dismiss() }
+            ModalHeader(systemImage: IconMap.symbol(domain: .unknown, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: e?.state ?? "—", accent: .gray) { dismiss() }
             FacetCard(title: "Attributes") {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach((e?.attributes.keys.sorted() ?? []), id: \.self) { k in

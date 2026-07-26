@@ -16,4 +16,10 @@ enum HavenColor {
     static let glassFill = Color.primary.opacity(0.06)
     /// Hairline edge for glass surfaces — adapts to light/dark.
     static let glassStroke = Color.primary.opacity(0.12)
+    /// Track fill behind a `LevelBar`'s filled portion — adapts to light/dark (a hardcoded
+    /// black track is invisible against a dark background).
+    static let levelTrack = Color.primary.opacity(0.09)
+    /// Shared "warning/attention" semantic (jammed lock, active binary-sensor alert, etc.) —
+    /// one amber token instead of each call site inventing its own.
+    static let warning = Color(red: 0.85, green: 0.40, blue: 0.05)
 }

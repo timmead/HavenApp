@@ -6,7 +6,7 @@ struct BinarySensorTile: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(BinarySensorState.init)
         let active = s?.isActive ?? false
-        let accent = Color(red: 0.85, green: 0.35, blue: 0.1)
+        let accent = HavenColor.warning
         GlassTile(active: active, accent: accent) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(active ? accent : .secondary).symbolRenderingMode(.hierarchical)

@@ -7,7 +7,7 @@ struct SwitchModal: View {
     var body: some View {
         let e = store.state(entityId); let on = e?.state == "on"
         VStack {
-            ModalHeader(systemImage: "poweroutlet.type.b.fill", title: TileName.of(entityId, e), subtitle: on ? "On" : "Off", accent: HavenColor.domain(.switchOutlet),
+            ModalHeader(systemImage: IconMap.symbol(domain: .switchOutlet, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: on ? "On" : "Off", accent: HavenColor.domain(.switchOutlet),
                         toggle: Binding(get: { on }, set: { store.setSwitch(entityId, on: $0) })) { dismiss() }
             Spacer()
         }

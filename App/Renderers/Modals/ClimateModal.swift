@@ -8,8 +8,8 @@ struct ClimateModal: View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let accent = HavenColor.domain(.climate)
         VStack(spacing: 12) {
-            ModalHeader(systemImage: "thermometer.medium", title: TileName.of(entityId, e),
-                        subtitle: s.map { $0.isOn ? "\($0.hvacMode.capitalized)" : "Off" } ?? "", accent: accent,
+            ModalHeader(systemImage: IconMap.symbol(domain: .climate, deviceClass: e?.deviceClass), title: TileName.of(entityId, e),
+                        subtitle: s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "", accent: accent,
                         toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") })) { dismiss() }
             FacetCard {
                 HStack {
@@ -25,10 +25,10 @@ struct ClimateModal: View {
                 // When the unit is off, "off" isn't among the selectable modes — show the
                 // first real mode as the selection rather than leaving the control blank.
                 let currentMode = modes.contains(s?.hvacMode ?? "") ? (s?.hvacMode ?? "") : (modes.first ?? "")
-                FacetCard(title: "Mode") { HavenSegmented(options: modes, selection: Binding(get: { currentMode }, set: { store.setClimateMode(entityId, mode: $0) }), label: { $0.capitalized }, accent: accent) }
+                FacetCard(title: "Mode") { HavenSegmented(options: modes, selection: Binding(get: { currentMode }, set: { store.setClimateMode(entityId, mode: $0) }), label: TileName.words, accent: accent) }
             }
             if let fans = s?.fanModes, fans.count > 1 {
-                FacetCard(title: "Fan") { HavenSegmented(options: fans, selection: Binding(get: { s?.fanMode ?? fans[0] }, set: { store.setFanMode(entityId, mode: $0) }), label: { $0.capitalized }, accent: accent) }
+                FacetCard(title: "Fan") { HavenSegmented(options: fans, selection: Binding(get: { s?.fanMode ?? fans[0] }, set: { store.setFanMode(entityId, mode: $0) }), label: TileName.words, accent: accent) }
             }
             Spacer()
         }

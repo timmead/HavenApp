@@ -5,6 +5,9 @@ struct RoomSectionView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
+    // Climate tiles render in their own 2-column grid (see body) — a genuine `Grid`/`GridRow`
+    // span, not `.gridCellColumns(2)`, which is inert inside a `LazyVGrid`.
+    private let climateColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -40,11 +43,30 @@ struct RoomSectionView: View {
                 }
             }
 
-            LazyVGrid(columns: columns, spacing: 9) {
-                ForEach(room.deviceRefs) { ref in
-                    if case .entity(let id) = ref {
-                        DeviceTileView(entityId: id)
-                            .gridCellColumns(Domain.of(id) == .climate ? 2 : 1)
+            // Climate sits prominently at the top of the room, at half width (2-of-4 columns),
+            // matching the approved mockups. Hoisted into its own grid because `.gridCellColumns`
+            // is inert inside `LazyVGrid` — a real 2-column `[GridItem]` is the only way to get
+            // an actual 2-column span here.
+            let climateIds = room.deviceRefs.compactMap { ref -> String? in
+                guard case .entity(let id) = ref, Domain.of(id) == .climate else { return nil }
+                return id
+            }
+            if !climateIds.isEmpty {
+                LazyVGrid(columns: climateColumns, spacing: 9) {
+                    ForEach(climateIds, id: \.self) { id in DeviceTileView(entityId: id) }
+                }
+            }
+
+            let otherRefs = room.deviceRefs.filter { ref in
+                guard case .entity(let id) = ref else { return true }
+                return Domain.of(id) != .climate
+            }
+            if !otherRefs.isEmpty {
+                LazyVGrid(columns: columns, spacing: 9) {
+                    ForEach(otherRefs) { ref in
+                        if case .entity(let id) = ref {
+                            DeviceTileView(entityId: id)
+                        }
                     }
                 }
             }

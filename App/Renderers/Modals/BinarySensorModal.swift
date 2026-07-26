@@ -13,7 +13,7 @@ struct BinarySensorModal: View {
             ModalHeader(systemImage: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
                         subtitle: (s?.isActive ?? false) ? "Active" : "Clear",
-                        accent: (s?.isActive ?? false) ? .orange : .gray) { dismiss() }
+                        accent: (s?.isActive ?? false) ? HavenColor.warning : .gray) { dismiss() }
             Spacer()
         }
     }

@@ -13,7 +13,7 @@ struct LightModal: View {
         // An off light has no brightness — don't show a stale percentage.
         let live = Double((s?.isOn ?? false) ? (s?.brightnessPercent ?? 0) : 0)
         VStack(spacing: 12) {
-            ModalHeader(systemImage: "lightbulb.fill", title: TileName.of(entityId, e),
+            ModalHeader(systemImage: IconMap.symbol(domain: .light, deviceClass: e?.deviceClass), title: TileName.of(entityId, e),
                         subtitle: (s?.isOn ?? false) ? "On" : "Off", accent: accent,
                         toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) })) { dismiss() }
             if s?.supportsBrightness ?? false {

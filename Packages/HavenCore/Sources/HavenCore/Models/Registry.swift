@@ -23,7 +23,12 @@ public struct DeviceRegistryEntry: Codable, Sendable {
 }
 public struct EntityRegistryEntry: Codable, Sendable {
     public let entityId: String; public let areaId: String?; public let deviceId: String?; public let name: String?
-    public init(entityId: String, areaId: String?, deviceId: String?, name: String?) {
+    /// HA's `disabled_by` (e.g. "user", "integration") — non-nil means the entity is disabled
+    /// and never enters HA's state machine (absent from `get_states`/`state_changed`).
+    /// `RegistryResolver.resolve` filters these out before they reach any area.
+    public let disabledBy: String?
+    public init(entityId: String, areaId: String?, deviceId: String?, name: String?, disabledBy: String? = nil) {
         self.entityId = entityId; self.areaId = areaId; self.deviceId = deviceId; self.name = name
+        self.disabledBy = disabledBy
     }
 }

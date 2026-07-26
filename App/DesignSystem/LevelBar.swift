@@ -6,7 +6,7 @@ struct LevelBar: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
-                Capsule().fill(Color.black.opacity(0.09))
+                Capsule().fill(HavenColor.levelTrack)
                 Capsule().fill(color).frame(height: geo.size.height * CGFloat(max(0, min(100, percent))) / 100)
             }
         }

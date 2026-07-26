@@ -8,9 +8,12 @@ public enum RegistryResolver {
                                devices: [DeviceRegistryEntry], entities: [EntityRegistryEntry]) -> ResolvedHome {
         let deviceArea = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.areaId) })
 
-        // area_id -> [entity_id], applying entity.areaId ?? device.areaId
+        // area_id -> [entity_id], applying entity.areaId ?? device.areaId.
+        // Disabled entities (disabled_by != nil) never enter HA's state machine — they're
+        // absent from get_states/state_changed — so they'd render as permanently-inert
+        // tiles. Drop them here, before they reach any area.
         var entitiesByArea: [String: [String]] = [:]
-        for e in entities {
+        for e in entities where e.disabledBy == nil {
             let resolvedArea = e.areaId ?? e.deviceId.flatMap { deviceArea[$0] ?? nil } ?? unassignedAreaId
             entitiesByArea[resolvedArea, default: []].append(e.entityId)
         }

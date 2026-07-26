@@ -5,11 +5,12 @@ struct LockTile: View {
     @Environment(HomeStore.self) private var store
     var body: some View {
         let e = store.state(entityId); let s = e.map(LockState.init)
-        let locked = s?.isLocked ?? false
-        let accent = locked ? HavenColor.domain(.lock) : Color(red: 0.85, green: 0.45, blue: 0.1)
+        let locked = s?.isLocked ?? false; let jammed = s?.isJammed ?? false
+        let accent = jammed ? HavenColor.warning : (locked ? HavenColor.domain(.lock) : HavenColor.warning)
+        let symbol = jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill")
         GlassTile(active: false, accent: accent) {
             VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: locked ? "lock.fill" : "lock.open.fill").font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
+                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
         }
