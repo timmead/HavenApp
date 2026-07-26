@@ -2,6 +2,16 @@
 
 Branch: `feat/overnight-c-onboarding-d2` (not merged — waiting on your review)
 
+> **SUPERSEDED IN PART (2026-07-26, by user decision after reading this report).**
+> §1's conclusion — "no URL from `get_config` is ever auto-adopted" — is **no longer
+> the design.** The user has set the trust boundary at the network edge: the local
+> network is trusted, remote-URL discovery happens there, and `get_config` /
+> `cloud/status` responses learned over a local connection are treated as genuine.
+> The threat this report hardened against (a LAN attacker injecting a remote URL)
+> is accepted as out of scope. Read §1 as an incident history, not as current
+> architecture. Anything implementing "adopt nothing" is implementing the old
+> posture.
+
 **All four tracks are complete, and the branch has been through an adversarial
 whole-branch review with every finding either fixed or escalated to you.**
 210 tests passing, app builds clean. Every test count and build result below I ran
