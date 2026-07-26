@@ -56,11 +56,22 @@ final class AppModel {
     /// not here.
     private(set) var remoteAccess: NabuCasaRemoteAccess?
 
+    /// The user's own externally-reachable URL — Tailscale, a reverse proxy — or `nil` if they
+    /// haven't set one. The second of the two supported remote paths, alongside Nabu Casa, and
+    /// **independent of it**: it has its own storage slot precisely so that someone running both
+    /// doesn't lose this one the next time `cloud/status` answers. See `CustomRemoteURLStore`.
+    ///
+    /// Mirrored here rather than read from the store on every access so the settings screen redraws
+    /// when it changes; `customRemoteURLStore` remains the single writer, and this is only ever
+    /// assigned from what the store returned.
+    private(set) var customRemoteURL: URL?
+
     private let tokens: TokenStore = KeychainTokenStore()
     private let oauth = OAuthClient()
     private let http = URLSessionHTTP()
     private let web = WebAuthPresenter()
     private let policy = ReconnectPolicy()
+    private let customRemoteURLStore = CustomRemoteURLStore()
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
     /// The class of the connection `remoteAccess`/`remoteAccessOffer` were last computed over.
@@ -83,6 +94,10 @@ final class AppModel {
         // would delete the URL learned at the end of one round before the next round reads it:
         // "remote access never works", no error anywhere. See `DiscoveredURLMigration`.
         DiscoveredURLMigration.runIfNeeded(in: .standard)
+        // Read once here rather than on every candidate round: the store is the only writer and
+        // `saveCustomRemoteURL`/`clearCustomRemoteURL` keep this in step with it. Note the
+        // migration above deliberately does not touch this key — see `CustomRemoteURLStore`.
+        customRemoteURL = customRemoteURLStore.url
         // The onboarding flow can deliberately take Home Assistant down (its restart step), and
         // `connect()` returns for good once it reaches `.ready` — nothing else in the app watches
         // for a socket drop afterwards. So the restart has to be able to ask for a reconnect, or
@@ -182,6 +197,13 @@ final class AppModel {
         tokens.clear()
         UserDefaults.standard.removeObject(forKey: DefaultsKeys.baseURL)
         forgetDiscoveredURLs()
+        // Cleared here and **not** in `forgetDiscoveredURLs()`, which `signIn()` also calls. The
+        // user typed this address; it must not vanish because a refresh token expired, sent them
+        // through `requireReauthentication()` (which deliberately keeps the server URL so they only
+        // re-authorize) and back into `signIn()`. Sign-out is the "changing server" boundary — this
+        // address describes the instance being left behind — and it is the only one that should
+        // discard it.
+        clearCustomRemoteURL()
         baseURL = nil
         tokenProvider = nil
         await store.reset()
@@ -266,6 +288,7 @@ final class AppModel {
                 userEntered: base,
                 discoveredInternal: storedURL(DefaultsKeys.discoveredInternalURL),
                 discoveredExternal: storedURL(DefaultsKeys.discoveredExternalURL),
+                customRemote: customRemoteURL,
                 lastWorking: storedURL(DefaultsKeys.lastWorkingURL),
                 homeSSIDMatch: ssidMatch,
                 pathClass: pathObserver.pathClass
@@ -555,6 +578,24 @@ final class AppModel {
         }
         UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
         havenLog.info("cloud/status → Nabu Casa remote access at \(url.absoluteString, privacy: .public), adopted")
+    }
+
+    /// Settings' "save" for the custom remote URL. Pure forwarding: every decision — HTTPS required,
+    /// `http://` refused rather than upgraded, what the refusal *says*, and whether anything is
+    /// written at all — belongs to `CustomRemoteURLStore`/`CustomRemoteURL` in HavenCore, where it
+    /// is tested. The view renders the returned error's `message` verbatim.
+    @discardableResult
+    func saveCustomRemoteURL(_ raw: String) -> Result<URL, CustomRemoteURLError> {
+        let result = customRemoteURLStore.save(raw)
+        // Only on success, so a rejected entry leaves the working address in place both in storage
+        // and on screen.
+        if case .success(let url) = result { customRemoteURL = url }
+        return result
+    }
+
+    func clearCustomRemoteURL() {
+        customRemoteURLStore.clear()
+        customRemoteURL = nil
     }
 
     private func forgetDiscoveredURLs() {

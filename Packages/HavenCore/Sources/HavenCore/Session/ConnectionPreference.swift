@@ -87,22 +87,31 @@ public enum ConnectionPreference {
     ///     the doomed local probe layer 2 just removed. Restricting the hoist to the leading class
     ///     keeps it doing its actual job — choosing *among* several candidates of the same kind —
     ///     without letting it outrank a live signal about where the phone is.
+    ///   - customRemote: the user's own externally-reachable URL, if they set one. **Required, not
+    ///     defaulted** — unlike `ConnectionEndpoint.candidates`'s parameter of the same name. This
+    ///     is the function `AppModel.connect()` calls, and the dominant failure mode for a feature
+    ///     like this is a perfectly tested HavenCore function that the one real caller never passes
+    ///     anything to: green tests, and the URL the user typed is never dialled. A required
+    ///     parameter makes that a compile error instead.
     ///   - homeSSIDMatch: layer 1, `nil` when unknown/not permitted. See `homeSSIDMatch(current:home:)`.
     ///   - pathClass: layer 2.
     ///
     /// **Candidates are reordered, never dropped** — including on cellular, where a local candidate
-    /// cannot possibly answer. Two reasons. `ConnectionEndpoint.candidates` buckets *any*
-    /// non-Nabu-Casa user-entered URL as local, so a Tailscale or reverse-proxy user's URL — the
-    /// one that does work off-LAN — sits in the "local" bucket, and dropping locals would strip
-    /// their only working candidate the moment they also have a Nabu Casa URL. And dropping breaks
-    /// the invariant that the list is never empty while any input URL is non-nil, which is what
-    /// stops a mis-signalled path class from turning into "the app cannot connect at all". The 2s
-    /// connect deadline is what makes carrying a doomed candidate at the back of the list cheap
-    /// enough that ordering alone is sufficient.
+    /// cannot possibly answer. Two reasons. `ConnectionEndpoint.candidates` buckets any
+    /// non-Nabu-Casa *user-entered* URL as local, so someone who signed in directly against their
+    /// Tailscale or reverse-proxy address — the one that does work off-LAN — has it sitting in the
+    /// "local" bucket, and dropping locals would strip their only working candidate the moment they
+    /// also have a Nabu Casa URL. (The `customRemote` slot below is the supported way to hold such
+    /// an address, and it *is* bucketed remote — but the sign-in URL is not, and both exist.) And
+    /// dropping breaks the invariant that the list is never empty while any input URL is non-nil,
+    /// which is what stops a mis-signalled path class from turning into "the app cannot connect at
+    /// all". The 2s connect deadline is what makes carrying a doomed candidate at the back of the
+    /// list cheap enough that ordering alone is sufficient.
     public static func candidates(
         userEntered: URL?,
         discoveredInternal: URL?,
         discoveredExternal: URL?,
+        customRemote: URL?,
         lastWorking: URL? = nil,
         homeSSIDMatch: Bool?,
         pathClass: NetworkPathClass
@@ -112,6 +121,7 @@ public enum ConnectionPreference {
             userEntered: userEntered,
             discoveredInternal: discoveredInternal,
             discoveredExternal: discoveredExternal,
+            customRemote: customRemote,
             preferredFirst: nil
         )
         let leading = leadingClass(homeSSIDMatch: homeSSIDMatch, pathClass: pathClass)

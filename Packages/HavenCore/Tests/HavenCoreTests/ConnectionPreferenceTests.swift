@@ -68,7 +68,7 @@ import Foundation
 
     @Test func homeSSIDMatchPutsTheLocalCandidateFirst() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             homeSSIDMatch: true, pathClass: .wifi
         )
         #expect(ordered == [.local(lan), .remote(nabu)])
@@ -76,7 +76,7 @@ import Foundation
 
     @Test func aForeignSSIDPutsTheRemoteCandidateFirst() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             homeSSIDMatch: false, pathClass: .wifi
         )
         #expect(ordered == [.remote(nabu), .local(lan)])
@@ -84,7 +84,7 @@ import Foundation
 
     @Test func cellularWithoutAnSSIDSignalPutsTheRemoteCandidateFirst() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             homeSSIDMatch: nil, pathClass: .cellular
         )
         #expect(ordered == [.remote(nabu), .local(lan)])
@@ -93,7 +93,7 @@ import Foundation
     @Test func wifiWithoutAnSSIDSignalProbesLocalFirstThenRemote() {
         // Layer 3, the universal fallback and the only one always available.
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             homeSSIDMatch: nil, pathClass: .wifi
         )
         #expect(ordered == [.local(lan), .remote(nabu)])
@@ -105,7 +105,7 @@ import Foundation
     @Test func withLocationPermissionAbsentEveryCandidateIsStillReachedOnEveryPathClass() {
         for path in [NetworkPathClass.wifi, .cellular, .other] {
             let ordered = ConnectionPreference.candidates(
-                userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+                userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
                 homeSSIDMatch: nil, pathClass: path
             )
             #expect(ordered.count == 2)
@@ -116,15 +116,18 @@ import Foundation
 
     /// Deliberate deviation from the plan's "on cellular, skip local entirely" parenthetical:
     /// candidates are **reordered, never dropped**. `ConnectionEndpoint.candidates` buckets any
-    /// non-Nabu-Casa user-entered URL as local, so a Tailscale or reverse-proxy user's URL — the
-    /// one that actually works off-LAN — sits in the "local" bucket. Dropping locals on cellular
-    /// would strip their only working candidate the moment they also had a Nabu Casa URL, and would
-    /// break the "never empty while any input is non-nil" invariant besides. The 2s connect
-    /// deadline is what makes carrying a doomed candidate at the back cheap enough.
+    /// non-Nabu-Casa *user-entered* URL as local, so someone who signed in directly against their
+    /// Tailscale or reverse-proxy address — the one that actually works off-LAN — has it sitting in
+    /// the "local" bucket. (Task 6's `customRemote` slot is the supported home for such an address
+    /// and *is* bucketed remote, but the sign-in URL is not, and the two are independent — a user
+    /// can perfectly well have one and not the other.) Dropping locals on cellular would strip their
+    /// only working candidate the moment they also had a Nabu Casa URL, and would break the "never
+    /// empty while any input is non-nil" invariant besides. The 2s connect deadline is what makes
+    /// carrying a doomed candidate at the back cheap enough.
     @Test func cellularNeverDropsCandidatesItOnlyReordersThem() {
         let tailscale = url("https://ha.example.com")
         let ordered = ConnectionPreference.candidates(
-            userEntered: tailscale, discoveredInternal: nil, discoveredExternal: nil,
+            userEntered: tailscale, discoveredInternal: nil, discoveredExternal: nil, customRemote: nil,
             homeSSIDMatch: nil, pathClass: .cellular
         )
         // Bucketed local by hostname, kept anyway — and it is the only way this user connects.
@@ -134,7 +137,7 @@ import Foundation
     @Test func aLocalOnlySetupIsUnaffectedByEveryLayer() {
         for (match, path) in [(true, NetworkPathClass.wifi), (false, .wifi), (false, .cellular)] as [(Bool?, NetworkPathClass)] {
             let ordered = ConnectionPreference.candidates(
-                userEntered: lan, discoveredInternal: nil, discoveredExternal: nil,
+                userEntered: lan, discoveredInternal: nil, discoveredExternal: nil, customRemote: nil,
                 homeSSIDMatch: match, pathClass: path
             )
             #expect(ordered == [.local(lan)])
@@ -144,7 +147,7 @@ import Foundation
     @Test func orderingIsStableWithinEachClass() {
         let internalURL = url("http://192.168.1.20:8123")
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: internalURL, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: internalURL, discoveredExternal: nabu, customRemote: nil,
             homeSSIDMatch: false, pathClass: .wifi
         )
         // Remote first, then the two locals in the order `ConnectionEndpoint.candidates` produced.
@@ -156,7 +159,7 @@ import Foundation
     @Test func lastWorkingHoistsWithinTheLeadingClass() {
         let internalURL = url("http://192.168.1.20:8123")
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: internalURL, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: internalURL, discoveredExternal: nabu, customRemote: nil,
             lastWorking: lan, homeSSIDMatch: true, pathClass: .wifi
         )
         // Both locals lead; the one that last worked goes first among them.
@@ -170,7 +173,7 @@ import Foundation
     /// layer pointless whenever the user was last home (i.e. almost always).
     @Test func lastWorkingDoesNotHoistAgainstALiveSignalAboutWhereWeAre() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             lastWorking: lan, homeSSIDMatch: nil, pathClass: .cellular
         )
         #expect(ordered == [.remote(nabu), .local(lan)])
@@ -179,7 +182,7 @@ import Foundation
     @Test func lastWorkingHoistsTheRemoteCandidateWhenRemoteLeads() {
         let other = url("https://other.ui.nabu.casa")
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: other, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: other, discoveredExternal: nabu, customRemote: nil,
             lastWorking: nabu, homeSSIDMatch: false, pathClass: .wifi
         )
         #expect(ordered.first == .remote(nabu))
@@ -187,7 +190,7 @@ import Foundation
 
     @Test func aLastWorkingURLThatIsNotAmongTheCandidatesIsIgnored() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu,
+            userEntered: lan, discoveredInternal: nil, discoveredExternal: nabu, customRemote: nil,
             lastWorking: url("http://10.9.9.9:8123"), homeSSIDMatch: true, pathClass: .wifi
         )
         #expect(ordered == [.local(lan), .remote(nabu)])
@@ -195,7 +198,7 @@ import Foundation
 
     @Test func noInputsYieldsAnEmptyListRatherThanAnInventedCandidate() {
         let ordered = ConnectionPreference.candidates(
-            userEntered: nil, discoveredInternal: nil, discoveredExternal: nil,
+            userEntered: nil, discoveredInternal: nil, discoveredExternal: nil, customRemote: nil,
             homeSSIDMatch: nil, pathClass: .wifi
         )
         #expect(ordered.isEmpty)

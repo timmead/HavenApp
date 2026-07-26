@@ -52,6 +52,12 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     ///     parameter — `isNabuCasaHost` below is a classification predicate and never establishes
     ///     that a URL belongs to this user (see its documentation, and the C-1 incident it
     ///     records).
+    ///   - customRemote: The externally-reachable URL the **user typed themselves** (Tailscale, a
+    ///     reverse proxy) — see `CustomRemoteURL`. Unlike the two above it carries no
+    ///     learned-over-local requirement, for the reason stated there: it was not self-reported by
+    ///     the far end, so there is no "is this really their instance?" question to answer. It is
+    ///     ordered **after** `discoveredExternal`, not instead of it — the two coexist, which is the
+    ///     entire point of it having its own storage slot.
     ///   - preferredFirst: A previously-successful URL to hoist to the front of the list, ahead
     ///     of the default local-before-remote ordering. Pass `nil` to always get the default
     ///     ordering (e.g. to re-probe the local candidate first).
@@ -59,6 +65,9 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     /// Rules:
     /// - Local candidates are tried before remote ones by default — local is faster and keeps
     ///   traffic off the internet.
+    /// - Among remotes, Nabu Casa (whatever is in `discoveredExternal`) is tried before the user's
+    ///   custom URL: it is the managed tunnel, verified by the cloud account itself, whereas the
+    ///   custom URL may point at a service the user is still setting up. Both are always present.
     /// - A `*.ui.nabu.casa` host is always classified remote, regardless of which parameter
     ///   supplied it.
     /// - Every remote candidate's scheme is normalized to `https` (so `HAConfig.webSocketURL`
@@ -69,6 +78,7 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         userEntered: URL?,
         discoveredInternal: URL?,
         discoveredExternal: URL?,
+        customRemote: URL? = nil,
         preferredFirst: URL? = nil
     ) -> [ConnectionEndpoint] {
         var seenKeys: Set<String> = []
@@ -84,10 +94,13 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         }
 
         // Local-leaning sources appended first, so the default order already prefers local over
-        // remote without any further sorting needed for the common case.
+        // remote without any further sorting needed for the common case. The two remote sources are
+        // appended in the order they should be tried in — the `locals + remotes` partition below is
+        // stable, so nothing further is needed to keep Nabu Casa ahead of the user's custom URL.
         append(discoveredInternal, defaultLocal: true)
         append(userEntered, defaultLocal: true)
         append(discoveredExternal, defaultLocal: false)
+        append(customRemote, defaultLocal: false)
 
         let locals = endpoints.filter { !$0.isRemote }
         let remotes = endpoints.filter(\.isRemote)

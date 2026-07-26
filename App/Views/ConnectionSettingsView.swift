@@ -32,6 +32,17 @@ struct ConnectionSettingsView: View {
     /// read as "not on Wi-Fi" even after the user just granted permission.
     @State private var currentSSID: String?
 
+    /// The custom remote URL being edited. Seeded from `app.customRemoteURL` when the screen
+    /// appears and thereafter owned by the text field — the model is only updated when the user
+    /// actually saves, so an abandoned half-typed address changes nothing.
+    @State private var customRemoteText = ""
+
+    /// The last save attempt's rejection, or `nil`. The text comes from
+    /// `CustomRemoteURLError.message` in HavenCore and is rendered verbatim — same arrangement as
+    /// `RemoteAccessOfferModel.failureMessage`, and for the same reason: "`http://` is rejected with
+    /// an actionable explanation" is a behaviour, and `App/` has no test target.
+    @State private var customRemoteError: String?
+
     var body: some View {
         NavigationStack {
             List {
@@ -45,6 +56,7 @@ struct ConnectionSettingsView: View {
                 if app.remoteAccessOffer.offer != nil || app.remoteAccessOffer.failureMessage != nil {
                     remoteAccessSection(app.remoteAccessOffer.offer)
                 }
+                customRemoteURLSection
                 Section {
                     switch app.homeNetwork.authorization {
                     case .notDetermined:
@@ -88,6 +100,10 @@ struct ConnectionSettingsView: View {
             .task(id: app.homeNetwork.authorization) {
                 currentSSID = await app.homeNetwork.currentSSID()
             }
+            // Seeded once per appearance rather than bound to the model: mid-edit text is not a
+            // saved setting, and rewriting the field from `app.customRemoteURL` on every model
+            // change would fight the keyboard.
+            .onAppear { customRemoteText = app.customRemoteURL?.absoluteString ?? "" }
             // Mirrors `OnboardingView`'s confirmation alert exactly — same confirmation type
             // (`HavenOnboardingConfirmation`), same gating (`pendingConfirmation != nil`), because
             // this is the same confirmation machinery, not a second one.
@@ -145,6 +161,89 @@ struct ConnectionSettingsView: View {
             }
         } header: {
             Text("Remote access")
+        }
+    }
+
+    /// Task 6: the second supported remote path, for people who reach their Home Assistant through
+    /// Tailscale or their own reverse proxy rather than Nabu Casa.
+    ///
+    /// Always shown, including for a Nabu Casa subscriber — the two are not alternatives. Someone
+    /// can legitimately run both, and the whole reason this address has a storage slot of its own is
+    /// so that having Nabu Casa doesn't silently delete it (see `CustomRemoteURLStore`). The footer
+    /// says which is tried first so that ordering isn't a surprise.
+    ///
+    /// No validation happens here. The button hands the raw text to `AppModel`, which forwards it to
+    /// HavenCore; what comes back is either a URL or a message to display.
+    @ViewBuilder
+    private var customRemoteURLSection: some View {
+        Section {
+            TextField("https://ha.example.com", text: $customRemoteText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .textContentType(.URL)
+                .onSubmit { saveCustomRemoteURL() }
+
+            if let customRemoteError {
+                Label(customRemoteError, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(HavenColor.warning)
+            }
+
+            Button {
+                saveCustomRemoteURL()
+            } label: {
+                Label("Save remote address", systemImage: "checkmark.circle")
+            }
+            // Nothing to save when the field already matches what's stored — including the common
+            // "opened settings, changed nothing" case.
+            .disabled(customRemoteText == (app.customRemoteURL?.absoluteString ?? ""))
+
+            if app.customRemoteURL != nil {
+                Button(role: .destructive) {
+                    app.clearCustomRemoteURL()
+                    customRemoteText = ""
+                    customRemoteError = nil
+                } label: {
+                    Label("Remove remote address", systemImage: "trash")
+                }
+            }
+        } header: {
+            Text("Your own remote address")
+        } footer: {
+            Text(customRemoteFooter)
+        }
+    }
+
+    /// Stated plainly rather than implied, because both facts surprise people: the address must be
+    /// HTTPS (and Haven will say so rather than quietly changing it), and it is tried *after* Nabu
+    /// Casa when both exist — but it is still tried, which is the point.
+    private var customRemoteFooter: String {
+        // Only claimed when `cloud/status` actually reported a usable Nabu Casa address — every
+        // other outcome (no subscription, cloud component absent, indeterminate) means this address
+        // is the only remote path there is, and saying otherwise would be noise at best.
+        var hasNabuCasa = false
+        if case .remoteAvailable = app.remoteAccess { hasNabuCasa = true }
+        let ordering = hasNabuCasa
+            ? " Your Home Assistant also has Nabu Casa remote access; Haven tries that first and this second."
+            : ""
+        return """
+        If you reach Home Assistant from outside your home some other way — Tailscale, or your own \
+        reverse proxy — enter that address here and Haven will use it when you're away. It must be \
+        an https:// address, because it travels over the internet.\(ordering) Changes take effect \
+        the next time Haven connects.
+        """
+    }
+
+    private func saveCustomRemoteURL() {
+        switch app.saveCustomRemoteURL(customRemoteText) {
+        case .success(let url):
+            // Show what was actually stored — `https://` filled in for a scheme-less entry, trailing
+            // whitespace gone — so the field never disagrees with the address Haven will dial.
+            customRemoteText = url.absoluteString
+            customRemoteError = nil
+        case .failure(let error):
+            customRemoteError = error.message
         }
     }
 
