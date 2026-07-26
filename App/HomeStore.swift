@@ -96,4 +96,9 @@ final class HomeStore {
         guard let connection else { return }
         Task { try? await connection.activate(sceneOrScript: id) }
     }
+
+    func setBrightness(_ id: String, percent: Int) {
+        guard let connection else { return }
+        Task { try? await connection.setBrightness(id, percent: percent) }
+    }
 }

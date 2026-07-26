@@ -31,5 +31,8 @@ struct DashboardView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .sheet(isPresented: Binding(get: { store.presented != nil }, set: { if !$0 { store.presented = nil } })) {
+            if let id = store.presented { DeviceModalView(entityId: id) }
+        }
     }
 }
