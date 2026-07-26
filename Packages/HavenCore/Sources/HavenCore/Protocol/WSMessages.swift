@@ -98,6 +98,10 @@ public enum WSCommand {
     /// instance itself thinks it can be reached, which is how HavenApp discovers a remote/Nabu
     /// Casa address without the user having to type it in. See `HAInstanceConfig`.
     public static func getConfig(id: Int) -> Data { data(["id": id, "type": "get_config"]) }
+    /// The `havenapp` integration's capability handshake — only registered once a config entry
+    /// for it exists (installing the files via HACS alone does not register it). Onboarding
+    /// probes this to detect the integration; see `HavenIntegrationDetector`.
+    public static func havenappInfo(id: Int) -> Data { data(["id": id, "type": "havenapp/info"]) }
     public static func registryList(id: Int, type: String) -> Data { data(["id": id, "type": type]) }
     public static func subscribeEvents(id: Int, eventType: String) -> Data {
         data(["id": id, "type": "subscribe_events", "event_type": eventType])
