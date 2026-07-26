@@ -12,18 +12,24 @@ public enum RegistryResolver {
         // Disabled entities (disabled_by != nil) never enter HA's state machine — they're
         // absent from get_states/state_changed — so they'd render as permanently-inert
         // tiles. Drop them here, before they reach any area.
-        var entitiesByArea: [String: [String]] = [:]
+        var entitiesByArea: [String: [EntityRegistryEntry]] = [:]
         for e in entities where e.disabledBy == nil {
             let resolvedArea = e.areaId ?? e.deviceId.flatMap { deviceArea[$0] ?? nil } ?? unassignedAreaId
-            entitiesByArea[resolvedArea, default: []].append(e.entityId)
+            entitiesByArea[resolvedArea, default: []].append(e)
         }
 
+        // Curation is computed per area, not per entity, because its never-empty-a-room rescue
+        // needs the whole area to decide (see `EntityCuration.tiers(for:)`).
         var areaModels = areas.map {
-            ResolvedArea(id: $0.areaId, name: $0.name, entityIds: (entitiesByArea[$0.areaId] ?? []).sorted(),
-                         temperatureEntityId: $0.temperatureEntityId, humidityEntityId: $0.humidityEntityId)
+            let entries = entitiesByArea[$0.areaId] ?? []
+            return ResolvedArea(id: $0.areaId, name: $0.name, entityIds: entries.map(\.entityId).sorted(),
+                                temperatureEntityId: $0.temperatureEntityId, humidityEntityId: $0.humidityEntityId,
+                                tiers: EntityCuration.tiers(for: entries))
         }
         if let orphans = entitiesByArea[unassignedAreaId], !orphans.isEmpty {
-            areaModels.append(ResolvedArea(id: unassignedAreaId, name: "Unassigned", entityIds: orphans.sorted()))
+            areaModels.append(ResolvedArea(id: unassignedAreaId, name: "Unassigned",
+                                           entityIds: orphans.map(\.entityId).sorted(),
+                                           tiers: EntityCuration.tiers(for: orphans)))
         }
 
         // area_id -> floor_id, plus synthetic floor for nil

@@ -27,8 +27,18 @@ public struct EntityRegistryEntry: Codable, Sendable {
     /// and never enters HA's state machine (absent from `get_states`/`state_changed`).
     /// `RegistryResolver.resolve` filters these out before they reach any area.
     public let disabledBy: String?
-    public init(entityId: String, areaId: String?, deviceId: String?, name: String?, disabledBy: String? = nil) {
+    /// HA's `entity_category` — `"config"` or `"diagnostic"` (the only two HA defines), or nil
+    /// for a normal entity. Both mark an entity as a device *setting* or *telemetry* rather than
+    /// something you control, which is why `EntityCuration` hides them.
+    public let entityCategory: String?
+    /// HA's `hidden_by` (e.g. "user", "integration") — non-nil means the entity is hidden in
+    /// HA's own UI. Unlike `disabledBy` it still has state, so it is a curation decision
+    /// (`CurationTier.hidden`), not a structural one, and it is never overridden by curation's
+    /// never-empty-a-room rescue: hiding it was an explicit choice made in HA.
+    public let hiddenBy: String?
+    public init(entityId: String, areaId: String?, deviceId: String?, name: String?, disabledBy: String? = nil,
+                entityCategory: String? = nil, hiddenBy: String? = nil) {
         self.entityId = entityId; self.areaId = areaId; self.deviceId = deviceId; self.name = name
-        self.disabledBy = disabledBy
+        self.disabledBy = disabledBy; self.entityCategory = entityCategory; self.hiddenBy = hiddenBy
     }
 }

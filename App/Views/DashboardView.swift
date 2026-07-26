@@ -4,6 +4,9 @@ import HavenCore
 struct DashboardView: View {
     @Environment(HomeStore.self) private var store
     @Environment(AppModel.self) private var app
+    /// Where the optional "connect faster at home" upgrade is offered. Reached only by deliberate
+    /// navigation — the location prompt behind it must never appear during onboarding.
+    @State private var showingConnectionSettings = false
     var body: some View {
         let rooms = store.rooms()
         TabView {
@@ -28,8 +31,11 @@ struct DashboardView: View {
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Menu {
+                                    Button("Connection", systemImage: "wifi") {
+                                        showingConnectionSettings = true
+                                    }
                                     Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                                        app.signOut()
+                                        Task { await app.signOut() }
                                     }
                                 } label: {
                                     Image(systemName: "ellipsis.circle")
@@ -44,5 +50,6 @@ struct DashboardView: View {
         .sheet(isPresented: Binding(get: { store.presented != nil }, set: { if !$0 { store.presented = nil } })) {
             if let id = store.presented { DeviceModalView(entityId: id) }
         }
+        .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
     }
 }

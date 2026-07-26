@@ -1,14 +1,25 @@
 import Foundation
 @testable import HavenCore
 
+/// Nonisolated, lock-protected flag — `WebSocketConnection.close()` is a synchronous, non-async
+/// protocol requirement, so `FakeWebSocketConnection` (an actor) must implement it `nonisolated`
+/// and can't touch actor-isolated storage from there directly.
+final class ClosedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _closed = false
+    var closed: Bool { lock.lock(); defer { lock.unlock() }; return _closed }
+    func markClosed() { lock.lock(); _closed = true; lock.unlock() }
+}
+
 actor FakeWebSocketConnection: WebSocketConnection {
     private var incoming: [Data] = []
     private var waiters: [CheckedContinuation<Data, Error>] = []
     private(set) var sent: [Data] = []
     var onSend: (@Sendable (Data) async -> Void)?
+    let closedFlag = ClosedFlag()
 
     func connect() async throws {}
-    nonisolated func close() {}
+    nonisolated func close() { closedFlag.markClosed() }
     func send(_ data: Data) async throws {
         sent.append(data)
         await onSend?(data)
@@ -35,10 +46,32 @@ struct FakeWebAuth: WebAuthSession {
 }
 
 final class FakeHTTP: HTTPPoster, @unchecked Sendable {
-    let response: String
+    var response: String
+    var error: Error?
+    /// Optional artificial delay before responding — used to hold a call "in flight" long enough
+    /// for concurrent callers to arrive and prove they coalesce onto it, rather than each firing
+    /// their own request.
+    var delay: Duration?
     private(set) var lastForm: [String: String]?
+    private(set) var lastURL: URL?
+    private(set) var callCount = 0
     init(response: String) { self.response = response }
     func post(_ url: URL, form: [String: String]) async throws -> Data {
-        lastForm = form; return Data(response.utf8)
+        callCount += 1
+        lastForm = form
+        lastURL = url
+        if let delay { try? await Task.sleep(for: delay) }
+        if let error { throw error }
+        return Data(response.utf8)
     }
+}
+
+/// Simple in-memory `TokenStore` double for tests that don't want to touch the Keychain.
+final class InMemoryTokenStore: TokenStore, @unchecked Sendable {
+    private(set) var saveCount = 0
+    var current: HATokens?
+    init(_ initial: HATokens? = nil) { self.current = initial }
+    func save(_ tokens: HATokens) throws { current = tokens; saveCount += 1 }
+    func load() -> HATokens? { current }
+    func clear() { current = nil }
 }

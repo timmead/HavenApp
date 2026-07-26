@@ -47,7 +47,9 @@ struct RoomSectionView: View {
             // matching the approved mockups. Hoisted into its own grid because `.gridCellColumns`
             // is inert inside `LazyVGrid` — a real 2-column `[GridItem]` is the only way to get
             // an actual 2-column span here.
-            let climateIds = room.deviceRefs.compactMap { ref -> String? in
+            // `overviewRefs`, not `deviceRefs`: the grid shows curated primary controls only —
+            // demoted sensors and device telemetry live in room detail (see `CurationTier`).
+            let climateIds = room.overviewRefs.compactMap { ref -> String? in
                 guard case .entity(let id) = ref, Domain.of(id) == .climate else { return nil }
                 return id
             }
@@ -57,7 +59,7 @@ struct RoomSectionView: View {
                 }
             }
 
-            let otherRefs = room.deviceRefs.filter { ref in
+            let otherRefs = room.overviewRefs.filter { ref in
                 guard case .entity(let id) = ref else { return true }
                 return Domain.of(id) != .climate
             }

@@ -8,6 +8,24 @@ final class HomeStore {
     var historyByKey: [String: HistorySeries] = [:]
     private var connection: HomeConnection?
     private var subscriptionTask: Task<Void, Never>?
+    /// True only while `reset()` is deliberately tearing a live connection down (sign-out,
+    /// reauth, or `AppModel`'s own reconnect already replacing it). Guards `onDisconnected`
+    /// below: without it, `reset()`'s own teardown of `subscriptionTask` would look — from
+    /// inside that task — identical to the socket dying on its own, and fire a reconnect nobody
+    /// asked for on top of a teardown already in progress.
+    private var isResetting = false
+    /// Fired when the state-change subscription's stream ends *without* `reset()` having been
+    /// the cause — i.e. the underlying WebSocket actually dropped (Wi-Fi lost, Home Assistant
+    /// restarted, anything else), not a deliberate sign-out/reconnect already under way.
+    ///
+    /// Before this existed, nothing in the app observed a socket drop once `phase == .ready`:
+    /// `connect()` returns for good the moment it succeeds, so walking out of Wi-Fi range left
+    /// the dashboard rendering stale `states` forever (including lock status), every command
+    /// silently no-op'd (the optimistic flip's `try?`'d call fails quietly and rolls back), and
+    /// C2's whole local/remote candidate failover never got a chance to engage — the one
+    /// scenario it exists for. `AppModel` wires this to the same reconnect it already runs after
+    /// `OnboardingModel`'s restart step, generalized to any drop.
+    var onDisconnected: (() -> Void)?
 
     func attach(_ connection: HomeConnection) {
         subscriptionTask?.cancel(); subscriptionTask = nil
@@ -24,19 +42,33 @@ final class HomeStore {
         subscriptionTask?.cancel()
         subscriptionTask = Task { [weak self] in
             for await s in stream { self?.states[s.entityId] = s }
+            // The stream only ends when the underlying socket's receive loop does — either
+            // `reset()` deliberately tore it down (in which case `isResetting` is still true; see
+            // its documentation), or it dropped on its own and nobody has been told yet.
+            guard let self, !self.isResetting else { return }
+            self.onDisconnected?()
         }
     }
 
-    /// Tear down the live session (used on sign-out). Clears history and any open modal
-    /// too — otherwise signing into a different HA instance can show the previous
+    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and
+    /// any open modal too — otherwise signing into a different HA instance can show the previous
     /// account's chart data for a same-named sensor, or leave a stale modal presented.
-    func reset() {
+    ///
+    /// Disconnects the underlying `HomeConnection` before dropping it — nothing else in the app
+    /// retains the `HAWebSocketClient` once this reference goes away, so skipping this would
+    /// leak the socket and its heartbeat timer for the rest of the process's lifetime, exactly
+    /// like the abandoned-clients-in-`connect()` bug this mirrors, just triggered by a sign-out
+    /// of a *working* connection instead of a failed attempt.
+    func reset() async {
+        isResetting = true
         subscriptionTask?.cancel(); subscriptionTask = nil
+        await connection?.disconnect()
         connection = nil
         home = ResolvedHome(floors: [])
         states = [:]
         historyByKey = [:]
         presented = nil
+        isResetting = false
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
@@ -104,6 +136,15 @@ final class HomeStore {
         Task { try? await connection.setBrightness(id, percent: percent) }
     }
 
+    /// Fire-and-forget, matching `setBrightness` exactly: no optimistic write into `states`,
+    /// since the light modal's own `dragKelvin` local state already covers the in-flight
+    /// preview and committing an unconfirmed kelvin value here would need the same
+    /// isOn-consistent rollback brightness deliberately doesn't do either.
+    func setColorTemp(_ id: String, kelvin: Int) {
+        guard let connection else { return }
+        Task { try? await connection.setColorTemp(id, kelvin: kelvin) }
+    }
+
     func setClimateMode(_ id: String, mode: String) {
         guard let connection else { return }
         Task { try? await connection.setClimateMode(id, mode: mode) }
@@ -143,12 +184,15 @@ final class HomeStore {
 
     func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home) }
 
-    /// Flattens a room's `deviceRefs` down to the plain entity ids `RoomRollups` needs.
+    /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.
+    /// Curated (`overviewRefs`) rather than raw, so "3/5 lights on · All Off" counts and acts
+    /// on exactly the tiles the user can see — a bulk action that silently reaches entities
+    /// curation hid would be worse than no bulk action.
     /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
     /// anywhere yet, so they're skipped here. Once composites exist, this will need to
     /// expand each one into its constituent input entities instead of dropping it.
     private func deviceEntityIds(_ room: RoomSection) -> [String] {
-        room.deviceRefs.compactMap { ref in
+        room.overviewRefs.compactMap { ref in
             if case .entity(let id) = ref { return id }
             return nil
         }

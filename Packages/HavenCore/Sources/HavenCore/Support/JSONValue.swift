@@ -35,4 +35,9 @@ public enum JSONValue: Codable, Sendable, Equatable {
         switch self { case .double(let d): return d; case .int(let i): return Double(i); default: return nil }
     }
     public var asObject: [String: JSONValue]? { if case .object(let o) = self { return o }; return nil }
+    /// Strictly a JSON `true`/`false` — a numeric 0/1 is deliberately *not* coerced. The only
+    /// caller (`HomeConnection.fetchCurrentUserIsAdmin`) turns a `nil` here into "we don't know
+    /// whether this user is an admin," which is safer than guessing an admin flag from a shape
+    /// Home Assistant never actually sends.
+    public var asBool: Bool? { if case .bool(let b) = self { return b }; return nil }
 }

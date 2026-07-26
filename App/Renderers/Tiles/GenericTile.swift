@@ -13,5 +13,8 @@ struct GenericTile: View {
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(AccessibilitySummary.generic(TileName.of(entityId, e), rawState: e?.state ?? "unknown"))
+        .accessibilityAddTraits(.isButton)
     }
 }

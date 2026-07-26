@@ -12,6 +12,8 @@ struct GenericModal: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach((e?.attributes.keys.sorted() ?? []), id: \.self) { k in
                         HStack { Text(k).font(.caption).foregroundStyle(.secondary); Spacer(); Text(display(e?.attributes[k] ?? .null)).font(.caption).lineLimit(1) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("\(k), \(display(e?.attributes[k] ?? .null))")
                     }
                 }
             }

@@ -22,4 +22,10 @@ enum HavenColor {
     /// Shared "warning/attention" semantic (jammed lock, active binary-sensor alert, etc.) —
     /// one amber token instead of each call site inventing its own.
     static let warning = Color(red: 0.85, green: 0.40, blue: 0.05)
+    /// Warm/cool endpoints for the light modal's colour-temperature gradient strip. Deliberately
+    /// literal RGB, not a `.primary`-derived token: a 2000K/6500K hue is a semantic fact about
+    /// the *light*, not a surface colour, so it must stay the same orange/blue in both light and
+    /// dark mode — an "adaptive" version of this pair would be the actual bug.
+    static let colorTempWarm = Color(red: 0.95, green: 0.55, blue: 0.16)
+    static let colorTempCool = Color(red: 0.42, green: 0.62, blue: 0.95)
 }

@@ -20,6 +20,33 @@ public actor HomeConnection {
         return try HACoding.decoder.decode([T].self, from: data)
     }
 
+    /// Asks the instance for its own advertised `internal_url`/`external_url` via `get_config`.
+    /// `AppModel` calls this once after a successful connection and persists whatever it learns,
+    /// so a later cold launch away from home can go straight to the remote URL instead of
+    /// waiting on a local connection attempt to fail first.
+    ///
+    /// Deliberately uses a plain `JSONDecoder`, *not* `HACoding.decoder` — that decoder's
+    /// `.convertFromSnakeCase` strategy rewrites `internal_url` to `internalUrl` before matching
+    /// against `CodingKeys`, which would silently defeat `HAInstanceConfig`'s explicit
+    /// `internal_url`/`external_url` keys and decode both URLs as `nil`.
+    public func fetchInstanceConfig() async throws -> HAInstanceConfig {
+        let v = try await client.request { WSCommand.getConfig(id: $0) }
+        let data = try JSONEncoder().encode(v)
+        let config = try JSONDecoder().decode(HAInstanceConfig.self, from: data)
+        // Same discipline as `AppModel.rememberDiscoveredURLs`'s both-URLs-nil warning: this
+        // wire shape (get_config's `components` field) has never been verified against a live
+        // response, so if the assumption is wrong, this is how it would otherwise silently
+        // degrade `HavenIntegrationDetector.classify` into confidently telling a fully-configured
+        // user to go install HACS (see `HavenIntegrationStatus.indeterminate`). A `nil` or empty
+        // list here is exactly the condition that produces that case, so it's logged loudly at
+        // the earliest possible point — this decode — rather than left to surface only once
+        // onboarding acts on it.
+        if config.components?.isEmpty ?? true {
+            havenCoreLog.error("get_config's components list was missing or empty — havenapp/HACS presence cannot be determined from this response alone; onboarding will fall back to the havenapp/info probe result")
+        }
+        return config
+    }
+
     public func loadStructure() async throws -> ResolvedHome {
         async let floorsV = client.request { WSCommand.registryList(id: $0, type: "config/floor_registry/list") }
         async let areasV  = client.request { WSCommand.registryList(id: $0, type: "config/area_registry/list") }
@@ -57,6 +84,15 @@ public actor HomeConnection {
 
     public func toggleLight(entityId: String) async throws {
         _ = try await client.request { WSCommand.callService(id: $0, domain: "light", service: "toggle", entityId: entityId) }
+    }
+
+    /// Tears down the underlying WebSocket client — cancels its heartbeat/receive loops and
+    /// closes the socket. Must be called before a `HomeConnection` for a session that reached
+    /// `.ready` is dropped (e.g. on sign-out), or the client — and its 10s heartbeat timer —
+    /// leaks for as long as the process runs, since nothing else retains or disconnects it once
+    /// this actor's reference goes away.
+    public func disconnect() async {
+        await client.disconnect()
     }
 }
 

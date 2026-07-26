@@ -18,11 +18,45 @@
   <key>UISupportedInterfaceOrientations</key><array>
     <string>UIInterfaceOrientationPortrait</string>
   </array>
+  <!--
+    App Transport Security. `NSAllowsLocalNetworking` alone — the blanket `NSAllowsArbitraryLoads`
+    that sat beside it (and overrode it) is gone. Cleartext HTTP to a Home Assistant on the local
+    network is a first-class configuration and stays allowed; cleartext to a public host is now
+    refused by iOS rather than merely by our own convention. That is the design's §1 trust model,
+    checked by the platform.
+
+    SCOPE — what this actually covers, which is one path out of three. ATS governs URLSession (and
+    WKWebView) in *this* process. So Haven's OAuth token exchange and refresh (URLSessionHTTP,
+    OAuthClient) are OS-enforced. Two things are not:
+      - The WebSocket. NWWebSocketConnection builds NWParameters directly and picks TLS from the
+        wss:// scheme, so it is outside ATS entirely; its TLS comes from ConnectionEndpoint forcing
+        https/wss on every remote candidate, enforced by HavenCore with tests.
+      - The sign-in web sheet. WebAuthPresenter uses ASWebAuthenticationSession, which runs
+        out-of-process and is governed by that process, not by this plist.
+    Do not describe the trust model as platform-checked end to end.
+
+    KNOWN LIMITATION, NOT YET VERIFIED ON DEVICE. ATS judges the *hostname*, not the address it
+    resolves to. NSAllowsLocalNetworking covers unqualified hostnames, .local names, and
+    private-range IP literals — but a fully-qualified name like hass.example.com that resolves to
+    192.168.1.10 is judged a public host and would be BLOCKED over http. The concrete shape this
+    takes: AppModel.signIn() fills in http:// for a scheme-less entry, so a user typing
+    hass.example.com gets http://hass.example.com and, if that name is a FQDN, ATS will refuse the
+    token request at runtime. This cannot be confirmed by a build — a successful build proves only
+    that this file parses. If it bites real setups, the fix is a narrow NSExceptionDomains entry,
+    NOT a return to NSAllowsArbitraryLoads. Tracked in the design doc §8.
+  -->
   <key>NSAppTransportSecurity</key><dict>
-    <key>NSAllowsArbitraryLoads</key><true/>
     <key>NSAllowsLocalNetworking</key><true/>
   </dict>
   <key>NSLocalNetworkUsageDescription</key><string>Haven connects to your Home Assistant server on your local network.</string>
+  <!--
+    Required by NEHotspotNetwork.fetchCurrent(), which iOS gates on Location Services. Haven asks
+    for this ONLY from Settings › Connection, framed as "connect faster at home" — never during
+    onboarding. It is used to compare the current Wi-Fi network's name against the one Haven last
+    reached Home Assistant on locally; no location is read, stored or transmitted. Declining leaves
+    the app fully functional (it probes the local address first and falls back).
+  -->
+  <key>NSLocationWhenInUseUsageDescription</key><string>Haven uses this only to see which Wi-Fi network you're on, so it can connect straight to your home instead of trying and waiting. Your location is never read, stored or shared.</string>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>app.haven.HavenApp</string>
     <key>CFBundleURLSchemes</key><array><string>havenapp</string></array>

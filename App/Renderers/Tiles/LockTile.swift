@@ -15,5 +15,9 @@ struct LockTile: View {
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(s.map { AccessibilitySummary.lock(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open controls") { store.presented = entityId }
     }
 }

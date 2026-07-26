@@ -23,5 +23,11 @@ struct LightTile: View {
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }
         .onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        // One combined element per tile, not five fragments — a VoiceOver user hears
+        // "Kitchen light, on, 60% brightness" once, not the icon/name/level bar separately.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(s.map { AccessibilitySummary.light(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open controls") { store.presented = entityId }
     }
 }

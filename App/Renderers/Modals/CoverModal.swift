@@ -26,6 +26,19 @@ struct CoverModal: View {
                                }
                            })
                     .tint(accent)
+                    .accessibilityLabel("Position")
+                    .accessibilityValue("\(Int((dragPercent ?? live).rounded()))% open")
+                    .accessibilityAdjustableAction { direction in
+                        let current = dragPercent ?? live
+                        let step = 5.0
+                        let next = direction == .increment ? min(100, current + step) : max(0, current - step)
+                        // Pin to `next`, not `nil` — `setCoverPosition` is fire-and-forget
+                        // with no write into `states`, so clearing this would leave
+                        // `accessibilityValue` (and each next swipe's `current`) stuck on
+                        // the stale pre-swipe reading until HA's echo lands.
+                        dragPercent = next
+                        store.setCoverPosition(entityId, percent: Int(next.rounded()))
+                    }
                 }
             }
             FacetCard { HStack(spacing: 10) {

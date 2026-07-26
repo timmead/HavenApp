@@ -15,6 +15,10 @@ targets:
   HavenApp:
     type: application
     platform: iOS
+    # Generate a *shared* scheme. Without this the only scheme is one Xcode autocreates into
+    # xcuserdata, which `xcodegen generate` wipes — so `xcodebuild -scheme HavenApp` fails on a
+    # fresh clone, in CI, or any time regeneration happens before the project is opened in Xcode.
+    scheme: {}
     sources: [App]
     dependencies:
       - package: HavenCore
@@ -24,3 +28,28 @@ targets:
         INFOPLIST_FILE: App/Resources/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
+        # ── GATED: Access WiFi Information ──────────────────────────────────────────────────
+        # Deliberately commented out until the Apple Developer Program membership is in place.
+        # `com.apple.developer.networking.wifi-info` is a *restricted* entitlement: it has to be
+        # enabled on the App ID in Apple's developer portal, which a free personal team cannot do.
+        # Left wired-but-unprovisionable, a device build fails to sign — so it is off by default
+        # rather than breaking the build for a feature that is only an accelerator.
+        #
+        # TO RE-ENABLE (the entire change — nothing else to do):
+        #   1. Enable "Access WiFi Information" on the App ID in the developer portal.
+        #   2. Uncomment BOTH lines below — they must move together.
+        #   3. Run `xcodegen generate`.
+        # `App/Resources/HavenApp.entitlements` is kept in the repo, ready and unchanged.
+        #
+        # The compilation condition is what the app code branches on. It exists because the
+        # entitlement's absence is otherwise indistinguishable at runtime from "not on Wi-Fi":
+        # `NEHotspotNetwork.fetchCurrent()` returns nil either way. Without it the settings screen
+        # would confidently tell a user sitting on Wi-Fi that they are not on Wi-Fi, and would
+        # offer a Location Services prompt that cannot possibly help — asking for a
+        # privacy-sensitive permission and delivering nothing in return.
+        #
+        # While gated: the SSID is permanently "unknown", and home detection falls through to the
+        # network path class and the 2s local probe. The app is fully correct in that state — see
+        # docs/superpowers/specs/2026-07-26-havenapp-connection-model-design.md §4.1.
+        # CODE_SIGN_ENTITLEMENTS: App/Resources/HavenApp.entitlements
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HAVEN_WIFI_INFO"
