@@ -166,6 +166,9 @@ final class AppModel {
               let host = url.host(), !host.isEmpty else {
             phase = .error("Enter a valid URL like http://homeassistant.local:8123"); return
         }
+        // Read before the write below replaces it, for the host comparison after
+        // `forgetDiscoveredURLs()`.
+        let previousBase = savedBaseURL()
         serverURLText = normalized
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.baseURL)
@@ -173,6 +176,17 @@ final class AppModel {
         // signed into (possibly a different host) — never let it leak into this instance's
         // candidate list.
         forgetDiscoveredURLs()
+        // The custom remote URL is deliberately *not* in `forgetDiscoveredURLs()` — the user typed
+        // it, and it must survive a plain re-authorization (see `signOut()`). But the sentence above
+        // applies to it just as much as to the discovered ones, and this is the one path that can
+        // reach a *different* instance without passing through `signOut()`:
+        // `requireReauthentication()` keeps `serverURLText`, the user edits it to another host, and
+        // signs in. Carrying the old instance's remote address into the new one's candidate list
+        // would hand the new instance's access token to the old host — the C-1 shape. So: cleared on
+        // a host change, kept when re-authorizing against the same host.
+        if let previousBase, previousBase.host()?.lowercased() != url.host()?.lowercased() {
+            clearCustomRemoteURL()
+        }
         phase = .connecting
         havenLog.info("OAuth starting against \(url.absoluteString, privacy: .public)")
         do {
@@ -200,9 +214,9 @@ final class AppModel {
         // Cleared here and **not** in `forgetDiscoveredURLs()`, which `signIn()` also calls. The
         // user typed this address; it must not vanish because a refresh token expired, sent them
         // through `requireReauthentication()` (which deliberately keeps the server URL so they only
-        // re-authorize) and back into `signIn()`. Sign-out is the "changing server" boundary — this
-        // address describes the instance being left behind — and it is the only one that should
-        // discard it.
+        // re-authorize) and back into `signIn()`. The two boundaries that *do* discard it are this
+        // one and a sign-in against a different host — see `signIn()`; both mean the instance this
+        // address describes is being left behind.
         clearCustomRemoteURL()
         baseURL = nil
         tokenProvider = nil
