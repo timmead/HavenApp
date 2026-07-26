@@ -101,4 +101,39 @@ final class HomeStore {
         guard let connection else { return }
         Task { try? await connection.setBrightness(id, percent: percent) }
     }
+
+    func setClimateMode(_ id: String, mode: String) {
+        guard let connection else { return }
+        Task { try? await connection.setClimateMode(id, mode: mode) }
+    }
+
+    func setClimateTemp(_ id: String, temp: Double) {
+        guard let connection else { return }
+        Task { try? await connection.setClimateTemp(id, temp: temp) }
+    }
+
+    func setFanMode(_ id: String, mode: String) {
+        guard let connection else { return }
+        Task { try? await connection.setFanMode(id, mode: mode) }
+    }
+
+    func openCover(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.openCover(id) }
+    }
+
+    func stopCover(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.stopCover(id) }
+    }
+
+    func closeCover(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.closeCover(id) }
+    }
+
+    func setCoverPosition(_ id: String, percent: Int) {
+        guard let connection else { return }
+        Task { try? await connection.setCoverPosition(id, percent: percent) }
+    }
 }
