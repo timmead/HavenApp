@@ -18,10 +18,16 @@ public struct URLSessionHTTP: HTTPPoster {
         req.httpBody = form.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed)!)" }
             .joined(separator: "&").data(using: .utf8)
         let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = resp as? HTTPURLResponse else {
             throw WSError(code: "http", message: "token endpoint failed")
         }
-        return data
+        if (200..<300).contains(http.statusCode) { return data }
+        // OAuth token endpoints use 400/401 for a rejected grant (expired/revoked refresh token,
+        // bad code, etc.) — a distinct, non-transient failure from network/server errors.
+        if http.statusCode == 400 || http.statusCode == 401 {
+            throw WSError(code: WSError.invalidGrantCode, message: "token endpoint rejected the request (\(http.statusCode))")
+        }
+        throw WSError(code: "http", message: "token endpoint failed (\(http.statusCode))")
     }
 }
 

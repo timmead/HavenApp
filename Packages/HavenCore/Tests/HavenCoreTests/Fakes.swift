@@ -35,10 +35,30 @@ struct FakeWebAuth: WebAuthSession {
 }
 
 final class FakeHTTP: HTTPPoster, @unchecked Sendable {
-    let response: String
+    var response: String
+    var error: Error?
+    /// Optional artificial delay before responding — used to hold a call "in flight" long enough
+    /// for concurrent callers to arrive and prove they coalesce onto it, rather than each firing
+    /// their own request.
+    var delay: Duration?
     private(set) var lastForm: [String: String]?
+    private(set) var callCount = 0
     init(response: String) { self.response = response }
     func post(_ url: URL, form: [String: String]) async throws -> Data {
-        lastForm = form; return Data(response.utf8)
+        callCount += 1
+        lastForm = form
+        if let delay { try? await Task.sleep(for: delay) }
+        if let error { throw error }
+        return Data(response.utf8)
     }
+}
+
+/// Simple in-memory `TokenStore` double for tests that don't want to touch the Keychain.
+final class InMemoryTokenStore: TokenStore, @unchecked Sendable {
+    private(set) var saveCount = 0
+    var current: HATokens?
+    init(_ initial: HATokens? = nil) { self.current = initial }
+    func save(_ tokens: HATokens) throws { current = tokens; saveCount += 1 }
+    func load() -> HATokens? { current }
+    func clear() { current = nil }
 }

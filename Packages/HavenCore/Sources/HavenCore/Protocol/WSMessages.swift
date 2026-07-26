@@ -4,6 +4,11 @@ public struct WSError: Sendable, Equatable, Error {
     public let code: String
     public let message: String
     public init(code: String, message: String) { self.code = code; self.message = message }
+
+    /// The token endpoint rejected the request with a 400/401 — a clear signal the refresh
+    /// (or authorization) grant is invalid/revoked, as opposed to a transient network/server failure.
+    public static let invalidGrantCode = "invalid_grant"
+    public var isInvalidGrant: Bool { code == Self.invalidGrantCode }
 }
 
 public enum ServerFrame: Sendable, Equatable {
