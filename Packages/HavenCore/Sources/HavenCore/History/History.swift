@@ -75,14 +75,34 @@ public struct HistorySeries: Sendable, Equatable {
 }
 
 public enum HistoryParsing {
+    /// Statistics rows may carry `start` either as milliseconds-since-epoch (a JSON
+    /// number, older/other HA versions) or as an ISO-8601 string (modern HA, e.g.
+    /// `"2026-07-25T10:00:00+00:00"`). Accept both; return nil if neither parses.
+    static func parseStatisticsStart(_ value: JSONValue?) -> Date? {
+        guard let value else { return nil }
+        if let ms = value.asDouble {
+            return Date(timeIntervalSince1970: ms / 1000.0)
+        }
+        if let s = value.asString {
+            let withoutFractional = ISO8601DateFormatter()
+            withoutFractional.formatOptions = [.withInternetDateTime]
+            if let d = withoutFractional.date(from: s) { return d }
+            let withFractional = ISO8601DateFormatter()
+            withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = withFractional.date(from: s) { return d }
+        }
+        return nil
+    }
+
     /// Parses `recorder/statistics_during_period` responses: keyed by statistic id,
-    /// rows carry `start` in milliseconds since epoch and a `mean` (fallback `state`).
+    /// rows carry `start` (ms epoch number or ISO-8601 string) and a value from
+    /// `mean` (fallback `state`, fallback `sum` for total/total_increasing sensors).
     public static func fromStatistics(_ result: JSONValue, statisticId: String) -> HistorySeries {
         let arr = result.asObject?[statisticId]?.asArray ?? []
         let pts = arr.compactMap { row -> HistoryPoint? in
-            guard let o = row.asObject, let start = o["start"]?.asDouble,
-                  let mean = (o["mean"]?.asDouble ?? o["state"]?.asDouble) else { return nil }
-            return HistoryPoint(time: Date(timeIntervalSince1970: start / 1000.0), value: mean)
+            guard let o = row.asObject, let start = parseStatisticsStart(o["start"]),
+                  let mean = (o["mean"]?.asDouble ?? o["state"]?.asDouble ?? o["sum"]?.asDouble) else { return nil }
+            return HistoryPoint(time: start, value: mean)
         }
         // Statistics rows may carry their own min/max (distinct from the mean series);
         // prefer those over deriving min/max from the plotted mean values.

@@ -49,13 +49,51 @@ import Foundation
 }
 
 @Test func statisticsWithNoPlottableRowsYieldsEmptySeriesWithNoMinMax() {
-    // sum-only rows: no mean and no state -> nothing plottable, so min/max must stay nil
-    let json = #"{"sensor.p":[{"start":1751328000000,"sum":9.0,"min":1.0,"max":2.0}]}"#
+    // no mean, no state, no sum -> nothing plottable, so min/max must stay nil
+    let json = #"{"sensor.p":[{"start":1751328000000,"min":1.0,"max":2.0}]}"#
     let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
     let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
     #expect(s.points.isEmpty)
     #expect(s.min == nil)
     #expect(s.max == nil)
+}
+
+@Test func statisticsSumOnlyRowYieldsAPoint() {
+    // total/total_increasing (energy) sensors report `sum`, not `mean`/`state`.
+    let json = #"{"sensor.p":[{"start":1751328000000,"sum":9.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.value == 9.0)
+}
+
+@Test func statisticsParsesISO8601StringStart() {
+    // Modern HA (2026.x) returns statistics `start` as an ISO-8601 string, not a ms epoch.
+    let json = #"{"sensor.p":[{"start":"2026-07-25T10:00:00+00:00","mean":42.5}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.value == 42.5)
+    let expected = ISO8601DateFormatter().date(from: "2026-07-25T10:00:00+00:00")
+    #expect(s.points.first?.time == expected)
+}
+
+@Test func statisticsParsesISO8601StringStartWithFractionalSeconds() {
+    let json = #"{"sensor.p":[{"start":"2026-07-25T10:00:00.123+00:00","mean":7.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.value == 7.0)
+}
+
+@Test func statisticsNumericMsStartStillParses() {
+    // Regression guard: existing ms-epoch-number behaviour must keep working.
+    let json = #"{"sensor.p":[{"start":1751328000000,"mean":100.0}]}"#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromStatistics(v, statisticId: "sensor.p")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.time == Date(timeIntervalSince1970: 1751328000))
+    #expect(s.points.first?.value == 100.0)
 }
 
 @Test func malformedPayloadsDegradeToEmptySeries() {
