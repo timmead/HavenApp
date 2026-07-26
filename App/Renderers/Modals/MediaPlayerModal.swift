@@ -25,8 +25,12 @@ struct MediaPlayerModal: View {
                     source(s, accent: accent)
                 }
             }
+            // No trailing `Spacer` after the `ScrollView` — unlike the other modals, whose bodies
+            // are plain stacks. Two flexible siblings in one `VStack` split the height between
+            // them, which at the `.medium` detent squashes the scroll view to roughly its content's
+            // ideal size and parks the rest as blank space below. The scroll view is the flexible
+            // element here; it fills what the header leaves.
             .scrollBounceBehavior(.basedOnSize)
-            Spacer(minLength: 0)
         }
     }
 

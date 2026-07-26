@@ -293,6 +293,12 @@ private struct ScrollingText: View {
                         LinearKeyframe(CGFloat.zero, duration: Double(overflow / 28))
                     }
                 }
+                // Identity pinned to the text, so the scroll restarts from the top when the track
+                // changes — and, more importantly, does *not* restart on every other body
+                // evaluation. A media player's state is pushed frequently (position, volume,
+                // buffering), and a title that jumped back to the top on each push would never
+                // reach its last line, which is the one thing this view exists to do.
+                .id(text)
             } else {
                 lines
             }
