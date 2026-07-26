@@ -70,14 +70,40 @@ final class HomeNetwork {
         manager.delegate = observer
     }
 
+    /// Whether this *build* can read an SSID at all, regardless of permission.
+    ///
+    /// Reading the SSID needs the restricted `com.apple.developer.networking.wifi-info`
+    /// entitlement, which requires enabling the capability on the App ID in Apple's developer
+    /// portal — not something a free personal team can do. It is currently gated off in
+    /// `project.yml`, which is also where the `HAVEN_WIFI_INFO` condition is defined and where the
+    /// instructions for turning both back on live.
+    ///
+    /// This has to be a *compile-time* flag rather than a runtime probe because the entitlement's
+    /// absence is indistinguishable from every other reason at runtime:
+    /// `NEHotspotNetwork.fetchCurrent()` simply returns nil. Without this distinction the settings
+    /// screen would tell a user sitting on Wi-Fi that they are "not on Wi-Fi" — a confident wrong
+    /// answer — and would offer a Location Services prompt that cannot possibly help.
+    static var isSSIDDetectionAvailable: Bool {
+        #if HAVEN_WIFI_INFO
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Whether the SSID can be read at all right now. `false` is an entirely ordinary state.
     var canReadSSID: Bool {
-        authorization == .authorizedWhenInUse || authorization == .authorizedAlways
+        Self.isSSIDDetectionAvailable
+            && (authorization == .authorizedWhenInUse || authorization == .authorizedAlways)
     }
 
     /// `true` only before the user has been asked — the settings surface uses this to decide
     /// between offering the prompt and pointing at the Settings app (iOS only ever prompts once).
-    var canRequestPermission: Bool { authorization == .notDetermined }
+    /// Always `false` while SSID detection is unavailable in this build: prompting for a
+    /// privacy-sensitive permission we could not act on even if granted is worse than not asking.
+    var canRequestPermission: Bool {
+        Self.isSSIDDetectionAvailable && authorization == .notDetermined
+    }
 
     /// **The only place that may trigger a system permission prompt, and it must stay that way.**
     /// Called from `ConnectionSettingsView` in response to a deliberate tap, never from a connect

@@ -58,6 +58,15 @@ struct ConnectionSettingsView: View {
                 }
                 customRemoteURLSection
                 Section {
+                    if !HomeNetwork.isSSIDDetectionAvailable {
+                        // Say what's true rather than letting the permission switch below run: with
+                        // no entitlement `currentSSID()` is permanently nil, so `authorizedRows`
+                        // would render "Not on Wi-Fi" to someone plainly on Wi-Fi, and
+                        // `.notDetermined` would offer a Location prompt that changes nothing.
+                        Label("Wi-Fi network detection isn't available in this build",
+                              systemImage: "wifi.slash")
+                            .foregroundStyle(.secondary)
+                    } else {
                     switch app.homeNetwork.authorization {
                     case .notDetermined:
                         Button {
@@ -81,6 +90,7 @@ struct ConnectionSettingsView: View {
                         } label: {
                             Label("Open Settings", systemImage: "gear")
                         }
+                    }
                     }
                 } header: {
                     Text("Home Wi-Fi")
@@ -306,6 +316,15 @@ struct ConnectionSettingsView: View {
     /// this text must not claim it's there either — a footer promising a button the screen doesn't
     /// show is exactly the dead end this screen exists to avoid.
     private var footer: String {
+        guard HomeNetwork.isSSIDDetectionAvailable else {
+            return """
+            Recognising your home Wi-Fi needs a capability that isn't enabled in this build, so \
+            Haven can't tell which network you're on.
+
+            Everything works without it — Haven tries your local address first and falls back to \
+            your remote one, which takes a couple of seconds longer when you're away from home.
+            """
+        }
         switch app.homeNetwork.authorization {
         case .notDetermined:
             return """
