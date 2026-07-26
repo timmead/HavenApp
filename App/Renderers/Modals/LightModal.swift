@@ -43,7 +43,12 @@ struct LightModal: View {
                         let current = dragPercent ?? live
                         let step = 5.0
                         let next = direction == .increment ? min(100, current + step) : max(0, current - step)
-                        dragPercent = nil
+                        // Pin the preview to what we just sent, not `nil` — `setBrightness`
+                        // is fire-and-forget with no write into `states`, so clearing this
+                        // would leave `accessibilityValue` reading the stale pre-swipe value
+                        // (and each subsequent swipe re-deriving `next` from that same stale
+                        // value) until HA's echo lands.
+                        dragPercent = next
                         store.setBrightness(entityId, percent: Int(next.rounded()))
                     }
                 }
@@ -75,7 +80,9 @@ struct LightModal: View {
                         let next = direction == .increment
                             ? min(Double(range.upperBound), current + step)
                             : max(Double(range.lowerBound), current - step)
-                        dragKelvin = nil
+                        // See the brightness slider's identical comment: pin to `next`, not
+                        // `nil`, since `setColorTemp` doesn't write `states` either.
+                        dragKelvin = next
                         store.setColorTemp(entityId, kelvin: Int(next.rounded()))
                     }
                     Text("\(Int((dragKelvin ?? liveKelvin).rounded()))K")
