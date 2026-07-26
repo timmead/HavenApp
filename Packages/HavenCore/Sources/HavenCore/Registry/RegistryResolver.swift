@@ -17,7 +17,8 @@ public enum RegistryResolver {
         for e in entities where e.disabledBy == nil {
             let resolvedArea = e.areaId ?? e.deviceId.flatMap { deviceArea[$0] ?? nil } ?? unassignedAreaId
             entitiesByArea[resolvedArea, default: []].append(e)
-            registryInfo[e.entityId] = EntityRegistryInfo(platform: e.platform, uniqueId: e.uniqueId)
+            registryInfo[e.entityId] = EntityRegistryInfo(platform: e.platform, uniqueId: e.uniqueId,
+                                                          deviceId: e.deviceId)
         }
 
         // Curation is computed per area, not per entity, because its never-empty-a-room rescue

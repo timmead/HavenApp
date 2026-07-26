@@ -7,6 +7,7 @@ public enum IconMap {
         case .lock: return "lock.fill"
         case .climate: return "thermometer.medium"
         case .mediaPlayer: return mediaSymbol(deviceClass)
+        case .camera: return "video.fill"
         case .scene: return "sparkles"
         case .script, .button: return "play.circle.fill"
         case .sensor: return sensorSymbol(deviceClass)

@@ -253,6 +253,43 @@ final class HomeStore {
         }
     }
 
+    // MARK: - Camera
+
+    /// Asks Home Assistant to start a stream for a camera and returns the playlist path it minted,
+    /// or `nil` when there is none to be had.
+    ///
+    /// `nil` covers every failure identically — no session, the camera has no stream, the command
+    /// errored, the socket dropped — because the caller does the same thing for all of them: fall
+    /// back to refreshing the still (`CameraStreamSource.snapshotRefresh`). That is a working live
+    /// view, just a slower one, and surfacing an error over it would replace something usable with
+    /// something that only looks broken.
+    ///
+    /// Returns the raw path rather than a resolved URL for the reason on
+    /// `HomeConnection.cameraStreamPath`: resolution belongs to `CameraStream.source`, against
+    /// whichever base URL is live when the player is actually built.
+    func cameraStreamPath(_ id: String) async -> String? {
+        guard let connection else { return nil }
+        return try? await connection.cameraStreamPath(entityId: id)
+    }
+
+    /// The binary sensors that belong with a camera, for the modal's **Events** card.
+    ///
+    /// This is the App half of the join and holds no policy: it turns the two things the store has
+    /// (`registryInfo`, keyed by entity id, and `states`, which is where `device_class` lives) into
+    /// candidates and hands them to `CameraEvents`, which decides what is related and what counts
+    /// as an event. Every rule — same-device before name-stem, which device classes qualify, how
+    /// short a stem is too short — is over there, under test.
+    func cameraEvents(_ id: String) -> [CameraEventSensor] {
+        let candidates = home.registryInfo.compactMap { entityId, info -> CameraEventCandidate? in
+            guard entityId.hasPrefix("binary_sensor.") else { return nil }
+            return CameraEventCandidate(entityId: entityId, deviceId: info.deviceId,
+                                        deviceClass: states[entityId]?.deviceClass)
+        }
+        return CameraEvents.related(cameraId: id,
+                                    cameraDeviceId: home.registryInfo[id]?.deviceId,
+                                    candidates: candidates)
+    }
+
     // MARK: - Room roll-ups + bulk actions
 
     func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home) }

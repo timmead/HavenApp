@@ -36,6 +36,11 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
         #expect(EntityCuration.tier(of: reg(id)) == .primary, "\(id) should be primary")
     }
     #expect(EntityCuration.tier(of: reg("media_player.tv")) == .primary)
+    // D.2 Task 4. Promoting a domain before it has a renderer puts a `GenericTile` reading "idle"
+    // on the overview grid where a picture belongs, so this line and `Domain.camera` land together
+    // — and this is the one link in that chain (curation → `Domain.of` → the surfaces' own filters)
+    // that a test can hold.
+    #expect(EntityCuration.tier(of: reg("camera.porch")) == .primary)
     // The prefix rule is what makes this list independent of which renderers exist: every id above
     // was already classified from its prefix while `media_player` still had no `Domain` case at
     // all, and gaining one in D.2 changed what renders, not what is curated.

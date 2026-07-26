@@ -10,6 +10,10 @@ struct RoomSectionView: View {
     private let climateColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
     // Same story for the 2×1 media tile — a real 2-column grid, not a span modifier.
     private let mediaColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
+    // And for the 2×2 camera tile. Cameras have *no* 1-column rendering at all (below two columns
+    // a feed is a thumbnail of a thumbnail), so unlike media this is not a nicety — a camera that
+    // slipped into the 4-column grid below would render at a size the design explicitly rejected.
+    private let cameraColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -61,9 +65,15 @@ struct RoomSectionView: View {
                 }
             }
 
+            // Everything that is not hoisted into a grid of its own. Cameras are excluded here for
+            // a stronger reason than climate and media are: those two have a legitimate 1×1, so a
+            // missed filter would only cost them their preferred size. A camera has none, and
+            // leaking into this 4-column grid would render it at exactly the size the design
+            // rejected.
             let otherRefs = room.overviewRefs.filter { ref in
                 guard case .entity(let id) = ref else { return true }
-                return Domain.of(id) != .climate && Domain.of(id) != .mediaPlayer
+                let domain = Domain.of(id)
+                return domain != .climate && domain != .mediaPlayer && domain != .camera
             }
             if !otherRefs.isEmpty {
                 LazyVGrid(columns: columns, spacing: 9) {
@@ -88,6 +98,22 @@ struct RoomSectionView: View {
                 LazyVGrid(columns: mediaColumns, spacing: 9) {
                     ForEach(mediaIds, id: \.self) { id in
                         MediaPlayerTile(entityId: id, size: .wide)
+                    }
+                }
+            }
+
+            // Cameras last, at half width, in their own 2-column grid. Last because a room glance
+            // is usually about the lights and the temperature; a camera still is worth space on the
+            // overview but not precedence over the controls — and putting four feeds at the top of
+            // every room would make the dashboard a security console.
+            let cameraIds = room.overviewRefs.compactMap { ref -> String? in
+                guard case .entity(let id) = ref, Domain.of(id) == .camera else { return nil }
+                return id
+            }
+            if !cameraIds.isEmpty {
+                LazyVGrid(columns: cameraColumns, spacing: 9) {
+                    ForEach(cameraIds, id: \.self) { id in
+                        CameraTile(entityId: id, size: .square)
                     }
                 }
             }

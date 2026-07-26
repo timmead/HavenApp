@@ -11,6 +11,7 @@ import Testing
     #expect(Domain.of("binary_sensor.door") == .binarySensor)
     #expect(Domain.of("sensor.power") == .sensor)
     #expect(Domain.of("media_player.tv") == .mediaPlayer)  // in scope as of D.2 Task 3
+    #expect(Domain.of("camera.porch") == .camera)          // in scope as of D.2 Task 4
     #expect(Domain.of("fan.attic") == .unknown)         // fan is NOT in the D catalog -> Generic
 }
 @Test func serviceDomainComesFromEntityIdPrefix() {
@@ -23,6 +24,9 @@ import Testing
     #expect(Domain.light.isActuator)
     #expect(!Domain.sensor.isActuator)
     #expect(!Domain.binarySensor.isActuator)
+    // A camera is watched, not operated. Marking it an actuator would put it in reach of the room
+    // roll-ups and their bulk actions, which act on things that turn on and off.
+    #expect(!Domain.camera.isActuator)
 }
 @Test func deviceClassAccessor() {
     let s = EntityState(entityId: "binary_sensor.d", state: "on",

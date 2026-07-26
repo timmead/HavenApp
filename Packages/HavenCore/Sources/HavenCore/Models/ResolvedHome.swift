@@ -6,8 +6,18 @@
 public struct EntityRegistryInfo: Sendable, Equatable {
     public let platform: String?
     public let uniqueId: String?
-    public init(platform: String?, uniqueId: String?) {
-        self.platform = platform; self.uniqueId = uniqueId
+    /// HA's `device_id` — which physical device this entity belongs to, or `nil` for the many
+    /// integrations that create entities without one.
+    ///
+    /// Carried here so the camera modal's **Events** card can join a camera to its own motion and
+    /// doorbell sensors on the device rather than on their names: two cameras sharing a name stem
+    /// (`camera.front`, `camera.front_gate`) would otherwise adopt each other's sensors, and a card
+    /// headed "Events" listing another camera's motion is a false statement about the user's home.
+    /// See `CameraEvents`, which uses this as the strong rung of its ladder and falls back to stem
+    /// matching only when it is absent.
+    public let deviceId: String?
+    public init(platform: String?, uniqueId: String?, deviceId: String? = nil) {
+        self.platform = platform; self.uniqueId = uniqueId; self.deviceId = deviceId
     }
 }
 

@@ -12,5 +12,6 @@ import Testing
     #expect(IconMap.symbol(domain: .sensor, deviceClass: "power") == "bolt.fill")
     #expect(IconMap.symbol(domain: .binarySensor, deviceClass: "door") == "door.left.hand.open")
     #expect(IconMap.symbol(domain: .binarySensor, deviceClass: "motion") == "figure.walk.motion")
+    #expect(IconMap.symbol(domain: .camera, deviceClass: nil) == "video.fill")
     #expect(IconMap.symbol(domain: .unknown, deviceClass: nil) == "square.dashed")
 }

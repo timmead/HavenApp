@@ -96,6 +96,24 @@ import Testing
     #expect(home.registryInfo["media_player.sonos"]?.uniqueId == nil)
 }
 
+/// `device_id` rides along for the same reason, and one more: `CameraEvents` joins a camera to its
+/// own motion/doorbell sensors on it. Without it that join falls back to matching entity-id stems,
+/// where two cameras sharing a name stem adopt each other's sensors — an "Events" card making a
+/// false statement about the user's home.
+@Test func resolverThreadsDeviceIdIntoRegistryInfo() {
+    let entities = [
+        EntityRegistryEntry(entityId: "camera.front_door", areaId: "a", deviceId: "dev-1", name: nil,
+                            platform: "unifiprotect", uniqueId: "abc123"),
+        EntityRegistryEntry(entityId: "binary_sensor.front_door_motion", areaId: "a", deviceId: "dev-1",
+                            name: nil, platform: "unifiprotect", uniqueId: "abc123_motion"),
+        EntityRegistryEntry(entityId: "light.deviceless", areaId: "a", deviceId: nil, name: nil),
+    ]
+    let home = RegistryResolver.resolve(floors: [], areas: [], devices: [], entities: entities)
+    #expect(home.registryInfo["camera.front_door"]?.deviceId == "dev-1")
+    #expect(home.registryInfo["binary_sensor.front_door_motion"]?.deviceId == "dev-1")
+    #expect(home.registryInfo["light.deviceless"]?.deviceId == nil)
+}
+
 /// A disabled entity never enters HA's state machine and has no renderer to hand this to, so it
 /// must not linger in `registryInfo` either — mirroring the same filter `RegistryResolver`
 /// already applies when bucketing entities into areas.

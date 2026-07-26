@@ -91,6 +91,18 @@ final class AppModel {
     /// for it, since such a key needs a default value and a loader pointed at nothing is a
     /// blank-tile generator.
     private(set) var imageLoader: AuthenticatedImageLoader?
+
+    /// The address this session is talking to **right now**, or `nil` while signed out.
+    ///
+    /// Read at the moment it is needed and never stored by the caller, for the same reason
+    /// `HAImageCredentialsProviding` is per-request: the app fails over between its local and
+    /// remote addresses mid-session, and the camera modal resolves Home Assistant's root-relative
+    /// HLS playlist path against this. A base URL captured when the modal opened would point an
+    /// `AVPlayer` at a host this session is no longer using — which `AVPlayer` reports as a black
+    /// rectangle and nothing else.
+    func currentBaseURL() async -> URL? {
+        await tokenProvider?.currentBaseURL()
+    }
     /// The class of the connection `remoteAccess`/`remoteAccessOffer` were last computed over.
     /// Needed again when `remoteAccessOfferModel`'s own re-probe (after a successful enable) comes
     /// back, so that re-probe can go through the exact same adoption path

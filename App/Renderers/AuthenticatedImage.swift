@@ -46,6 +46,16 @@ struct AuthenticatedImage<Content: View>: View {
     /// default (`0`) is an ordinary cached load, which is what artwork wants.
     var refreshTick: Int = 0
 
+    /// Called with the moment a frame finished decoding, and **only** on success.
+    ///
+    /// The camera tiles' staleness stamp is derived from this rather than from when the refresh was
+    /// *requested*, and the difference is the whole point: a refresh that 401s or times out must
+    /// leave the clock where it was, so the tile keeps saying "3m ago" over the last real frame
+    /// instead of resetting to "just now" over a picture nothing has updated. Resetting it on a
+    /// failed request would be the confident-blank failure this view exists to prevent, wearing a
+    /// timestamp.
+    var onLoad: ((Date) -> Void)? = nil
+
     @ViewBuilder var content: (Phase) -> Content
 
     typealias Phase = AuthenticatedImagePhase
@@ -87,9 +97,35 @@ struct AuthenticatedImage<Content: View>: View {
         case .image(let data):
             // A `Data` that isn't a decodable image is a failure, not a blank — the loader can only
             // vouch for the bytes arriving, not for what they are.
-            phase = UIImage(data: data).map { .image(Image(uiImage: $0)) } ?? .failed
+            guard let decoded = await Self.decode(data) else { phase = .failed; return }
+            phase = .image(Image(uiImage: decoded))
+            onLoad?(Date())
         case .empty: phase = .empty
         case .failure: phase = .failed
         }
+    }
+
+    /// Decodes off the main actor.
+    ///
+    /// This used to be a plain `UIImage(data:)` on the MainActor, which was fine while the only
+    /// caller was a single piece of album artwork loaded once. The camera tiles changed that: four
+    /// of them on a dashboard, each re-fetching a full-resolution JPEG every ten seconds on
+    /// independent, unsynchronised cadences. Tens of milliseconds of decode landing on the main
+    /// thread at arbitrary moments is the definition of a scroll hitch, so it moves off.
+    ///
+    /// **`preparingForDisplay()` is what makes the move real.** `UIImage(data:)` is lazy — it
+    /// parses the header and defers the actual decode until something draws it, which on the main
+    /// thread is exactly where the cost was in the first place. Without this call, "decoding off
+    /// the main actor" would be a change that measured as no change at all. It returns `nil` for an
+    /// image it cannot prepare, and the original is used in that case rather than failing a frame
+    /// that decoded perfectly well.
+    ///
+    /// `UIImage` crosses back rather than `Image`: it is `Sendable` and the SwiftUI wrapper is
+    /// built on the main side, so nothing here depends on `Image`'s own sendability.
+    private static func decode(_ data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let image = UIImage(data: data) else { return nil }
+            return image.preparingForDisplay() ?? image
+        }.value
     }
 }
