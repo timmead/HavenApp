@@ -6,24 +6,16 @@ import HavenCore
 /// `UserDefaults` is fine.
 private enum DefaultsKeys {
     static let baseURL = "baseURL"
-    /// No longer written or read — see `DiscoveredCandidateURLs`'s documentation for the full
-    /// incident: neither `internal_url` nor `external_url` from `get_config` is ever adopted as a
-    /// connection candidate, because a `*.ui.nabu.casa` suffix proves a host is *a* Nabu Casa
-    /// instance, never that it is *this user's*. Kept only as the name of a key a build prior to
-    /// that fix may have already written, so `purgeDiscoveredURLs()` can find and remove it.
-    static let discoveredInternalURL = "discoveredInternalURL"
-    /// No longer written or read — same reasoning as `discoveredInternalURL` above. Two earlier
-    /// fix rounds *did* persist this (gated on `isNabuCasaHost`, which — see that function's
-    /// documentation — was the identity-vs-category mistake itself), so this key may already hold
-    /// an attacker-supplied value on an upgrading device; kept only so `purgeDiscoveredURLs()` can
-    /// find and remove it.
-    static let discoveredExternalURL = "discoveredExternalURL"
-    /// Legacy. No longer written or read — it fed the `preferredFirst` candidate hoist, which is
-    /// vestigial now that `userEntered` is the only candidate source (see `connect()`). Kept only
-    /// so the reset path can find and remove it: on a device that ran an earlier build tonight it
-    /// may hold a URL that *was* discovered from `get_config` at the time it was written, back
-    /// when discovery still fed candidates.
-    static let lastWorkingURL = "lastWorkingURL"
+    /// `get_config`'s `internal_url`, adopted only when learned over a `.local` connection — see
+    /// `DiscoveredCandidateURLs`. Name shared with `DiscoveredURLMigration` rather than
+    /// redeclared, so the one-time migration and the read/write accessors can never drift apart.
+    static let discoveredInternalURL = DiscoveredURLMigration.discoveredInternalURLKey
+    /// `get_config`'s `external_url`, same rule — adopted only when learned over a `.local`
+    /// connection, and always stored as `https`.
+    static let discoveredExternalURL = DiscoveredURLMigration.discoveredExternalURLKey
+    /// The candidate URL that last completed a full connect (auth + bootstrap). Feeds
+    /// `ConnectionEndpoint.candidates`'s `preferredFirst` hoist.
+    static let lastWorkingURL = DiscoveredURLMigration.lastWorkingURLKey
 }
 
 @MainActor @Observable
@@ -52,6 +44,12 @@ final class AppModel {
     private var connectTask: Task<Void, Never>?
 
     init() {
+        // Runs here — once per launch, gated to once per device by its own flag — and deliberately
+        // NOT inside `connect()`. Its predecessor (`purgeDiscoveredURLs()`) was called at the top
+        // of every iteration of `connect()`'s `while true` loop, which with adoption re-enabled
+        // would delete the URL learned at the end of one round before the next round reads it:
+        // "remote access never works", no error anywhere. See `DiscoveredURLMigration`.
+        DiscoveredURLMigration.runIfNeeded(in: .standard)
         // The onboarding flow can deliberately take Home Assistant down (its restart step), and
         // `connect()` returns for good once it reaches `.ready` — nothing else in the app watches
         // for a socket drop afterwards. So the restart has to be able to ask for a reconnect, or
@@ -180,23 +178,15 @@ final class AppModel {
     /// rules (local before remote, `*.ui.nabu.casa` always remote, remote always `https`/`wss`,
     /// no duplicates).
     ///
-    /// Re-probe policy: there is nothing left to re-probe. Since `get_config`'s URLs are no
-    /// longer adopted (see below), `userEntered` is the *only* source of candidates, so a round
-    /// contains exactly one candidate and there is no ordering left to optimise. The
-    /// `lastWorkingURL` / `preferredFirst` machinery that earlier rounds of this file built —
-    /// to avoid paying a local connection timeout on every retry while away from home — is
-    /// therefore vestigial here, and is deliberately not used: `preferredFirst` can only *hoist*
-    /// a candidate already in the list, never introduce one, so with a single candidate it is a
-    /// no-op by construction.
+    /// Discovered URLs are read fresh at the top of each round (rather than hoisted out of the
+    /// loop) so that a URL learned by a *previous* round's successful-then-dropped connection is
+    /// picked up on the next one. Nothing in this loop ever deletes them — see
+    /// `DiscoveredURLMigration` for why that sentence is load-bearing.
     ///
-    /// It is removed rather than left in place because its read-side gate had become actively
-    /// misleading: it admitted a stored URL only when `isNabuCasaHost` passed — i.e. exactly the
-    /// class the C-1 finding showed cannot be trusted as proof of *whose* instance it is — while
-    /// rejecting the user's own (typically local, non-Nabu-Casa) address. Harmless while the
-    /// hoist is a no-op, but it would silently become a real hole the moment anyone adds a second
-    /// candidate source. `ConnectionEndpoint.candidates` keeps its `preferredFirst` parameter and
-    /// tests: the ordering logic is correct and worth keeping for when there is again more than
-    /// one candidate to order.
+    /// `lastWorkingURL` feeds `preferredFirst`, which avoids paying a local connection timeout on
+    /// every retry while away from home. It needs no validation of its own: `preferredFirst` can
+    /// only *hoist* a candidate that is already in the list, never introduce one, so the worst a
+    /// bogus value can do is nothing at all.
     private func connect() async {
         guard let base = baseURL, let tokenProvider else { return }
         phase = .connecting
@@ -215,18 +205,11 @@ final class AppModel {
         var didForceRefreshAfterAuthInvalid = false
         while true {
             if Task.isCancelled { return }
-            // Purges any `discoveredInternalURL`/`discoveredExternalURL` an earlier, less careful
-            // build may have already written to `UserDefaults` — see `purgeDiscoveredURLs()`.
-            purgeDiscoveredURLs()
             let candidates = ConnectionEndpoint.candidates(
                 userEntered: base,
-                // Deliberately always nil — see `DiscoveredCandidateURLs`'s documentation for the
-                // full incident: `get_config`'s `internal_url`/`external_url` are never adopted as
-                // connection candidates at all, from either the wire or persisted storage.
-                discoveredInternal: nil,
-                discoveredExternal: nil,
-                // Vestigial with a single candidate source — see this method's documentation.
-                preferredFirst: nil
+                discoveredInternal: storedURL(DefaultsKeys.discoveredInternalURL),
+                discoveredExternal: storedURL(DefaultsKeys.discoveredExternalURL),
+                preferredFirst: storedURL(DefaultsKeys.lastWorkingURL)
             )
             // Only escalate to `requireReauthentication()` once *every* candidate this round has
             // hit the "already spent this call's one forced refresh, still auth_invalid" wall —
@@ -271,11 +254,27 @@ final class AppModel {
                         try await store.bootstrap()
                         if Task.isCancelled { await c.disconnect(); return }
                         havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
+                        UserDefaults.standard.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
+                        // The UI must become usable now, not after `fetchInstanceConfig` below:
+                        // `request(_:)` (and so `get_config`) is deliberately unbounded — a server
+                        // that authenticates and bootstraps fine but never answers `get_config`
+                        // must not pin the connecting spinner forever over a socket that is
+                        // otherwise perfectly live and usable.
                         phase = .ready
-                        // Read-only: `probeHavenIntegration` only ever asks questions. Nothing
-                        // that changes the user's Home Assistant can happen without them
-                        // confirming it first (see `OnboardingModel.confirmPendingMutation`), so
-                        // this is safe to run unattended on every connect — which is also what
+                        // Best-effort, fire-and-forget: learning the instance's own URLs is a
+                        // nice-to-have for the *next* connection, never a reason to hold up (or
+                        // fail) this one. The `!Task.isCancelled` guard covers the `UserDefaults`
+                        // write specifically — without it, a `connect()` cancelled while this
+                        // await was in flight (e.g. by a sign-out that started after
+                        // `phase = .ready`) could still persist a URL for a session already gone.
+                        if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
+                            rememberDiscoveredURLs(config, learnedOver: candidate.connectionClass)
+                        }
+                        // Same best-effort footing, and read-only: `probeHavenIntegration` only
+                        // ever asks questions. Nothing that changes the user's Home Assistant can
+                        // happen without them confirming it first (see
+                        // `OnboardingModel.confirmPendingMutation`), so this is safe to run
+                        // unattended on every connect — which is also what
                         // lets the flow pick itself back up after the restart step drops the
                         // socket.
                         if !Task.isCancelled {
@@ -355,29 +354,45 @@ final class AppModel {
         UserDefaults.standard.string(forKey: DefaultsKeys.baseURL).flatMap(URL.init(string:))
     }
 
-    /// SECURITY (see `DiscoveredCandidateURLs`'s documentation for the full incident):
-    /// `get_config`'s `internal_url`/`external_url` are never adopted as connection candidates —
-    /// a `*.ui.nabu.casa` suffix proves a host is *a* Nabu Casa instance, never that it is *this
-    /// user's*, so two earlier fix rounds' write-boundary checks (rejecting/requiring that suffix
-    /// before persisting) stopped nothing: an attacker who legitimately owns their own Nabu Casa
-    /// subscription sailed straight through. Both keys may already hold a value one of those
-    /// builds wrote on a device that's since upgraded, so — rather than merely stop writing to
-    /// them — this purges both unconditionally, every round, treating anything already on disk as
-    /// exactly as untrusted as a fresh value fresh off the wire would be.
-    private func purgeDiscoveredURLs() {
+    /// A plain read of persisted state, with no validation — deliberately.
+    ///
+    /// Everything under these keys was written by `rememberDiscoveredURLs` below, which adopts
+    /// only what `DiscoveredCandidateURLs.validating` returned for a `.local` connection. The
+    /// trust decision therefore already happened, once, at the write boundary, in a pure function
+    /// with tests. Re-deciding it here — where nothing can test it — is how the earlier rounds
+    /// ended up with a read-side gate keyed on `isNabuCasaHost`: untested, and wrong in exactly
+    /// the way the C-1 finding described. Values written by builds that predate the current rule
+    /// are handled once by `DiscoveredURLMigration`, not re-litigated on every read.
+    private func storedURL(_ key: String) -> URL? {
+        UserDefaults.standard.string(forKey: key).flatMap(URL.init(string:))
+    }
+
+    /// The write boundary. `config` came straight off the wire, and whatever is persisted here
+    /// becomes a future connection candidate that `TokenProvider.setBaseURL` will later POST the
+    /// refresh token to — so the *only* thing that makes it safe is `learnedOver`: a `.local`
+    /// connection means this response came from the user's own Home Assistant inside the trusted
+    /// zone. Over a `.remote` connection `validating` adopts nothing, and this writes nothing;
+    /// discovery only ever flows inward. `AppModel` holds no adoption logic of its own — it hands
+    /// both raw values and the connection class to the pure function and stores the result.
+    private func rememberDiscoveredURLs(_ config: HAInstanceConfig, learnedOver: ConnectionClass) {
         let d = UserDefaults.standard
-        if d.object(forKey: DefaultsKeys.discoveredInternalURL) != nil {
-            d.removeObject(forKey: DefaultsKeys.discoveredInternalURL)
+        let validated = DiscoveredCandidateURLs.validating(
+            rawInternalURL: config.internalURL,
+            rawExternalURL: config.externalURL,
+            learnedOver: learnedOver
+        )
+        if let internalURL = validated.internalURL {
+            d.set(internalURL.absoluteString, forKey: DefaultsKeys.discoveredInternalURL)
         }
-        if d.object(forKey: DefaultsKeys.discoveredExternalURL) != nil {
-            d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
+        if let externalURL = validated.externalURL {
+            d.set(externalURL.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
         }
-        // Same reasoning: on a device that ran an earlier build tonight this could hold a URL that
-        // *was* a discovered candidate when it was written. Nothing reads it any more, so this is
-        // belt-and-braces rather than load-bearing — but leaving a known-untrustworthy value on
-        // disk purely because today's code happens not to read it is how it comes back.
-        if d.object(forKey: DefaultsKeys.lastWorkingURL) != nil {
-            d.removeObject(forKey: DefaultsKeys.lastWorkingURL)
+        // Logged, not silent: "remote access never appeared" has three quite different causes and
+        // they are indistinguishable from the outside.
+        if learnedOver == .remote, config.internalURL != nil || config.externalURL != nil {
+            havenLog.info("get_config answered over a remote connection — not adopting its URLs; a remote address is only ever learned on the local network")
+        } else if config.internalURL == nil && config.externalURL == nil {
+            havenLog.error("get_config returned neither internal_url nor external_url — nothing to remember for the next connection")
         }
     }
 

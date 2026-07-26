@@ -23,6 +23,25 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         return false
     }
 
+    /// This candidate's classification, expressed as the parameter
+    /// `DiscoveredCandidateURLs.validating` takes.
+    ///
+    /// **Known limitation — read this before building on it.** This reflects how `classify` sorted
+    /// the URL, which today keys on its *hostname* (`*.ui.nabu.casa` ⇒ remote) and on which
+    /// parameter supplied it — **not** on the network path actually in use. So a user-entered FQDN
+    /// that is genuinely remote, e.g. a Tailscale address or their own reverse proxy
+    /// `https://ha.example.com`, is classified `.local` here, and `get_config`'s URLs would be
+    /// adopted from a connection that in fact crossed the internet.
+    ///
+    /// That misclassification is older than the adoption rule, and was harmless while nothing was
+    /// adopted at all — but adoption is now keyed on this value, which makes it a **trust input**.
+    /// Whoever adds real path-class detection (plan Task 4) or custom remote URLs (Task 6) must
+    /// make this reflect the actual connection; until then, treat `.local` as "not classified
+    /// remote", not as "observed on the local network".
+    public var connectionClass: ConnectionClass {
+        isRemote ? .remote : .local
+    }
+
     /// Builds the ordered list of candidates to try for one connection attempt, from whatever
     /// URLs are known for this instance.
     ///
@@ -31,22 +50,16 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     ///     the LAN address, but classified remote if it happens to be a `*.ui.nabu.casa` host —
     ///     e.g. a user who signed in directly against their Nabu Casa URL.
     ///   - discoveredInternal: Home Assistant's own `internal_url` from `get_config`, if learned
-    ///     from a previous successful connection. **The caller must validate this before passing
-    ///     it** — this function does no more with it than with any other parameter here, and
-    ///     `internal_url` carries no reachability/privacy guarantee of any kind (see
-    ///     `DiscoveredCandidateURLs`'s documentation for why it cannot be validated as "a private
-    ///     address" at all). `AppModel` deliberately always passes `nil` here — it does not
-    ///     persist or read back a discovered `internal_url` — since it has no legitimate use this
-    ///     app needs (local access is already served by `userEntered`) and validating it within
-    ///     this app's MITM-on-the-LAN threat model isn't implementable. This parameter, and its
-    ///     existing tests, are kept for callers (present or future) able to supply an
-    ///     independently-validated value.
-    ///   - discoveredExternal: Home Assistant's own `external_url` from `get_config`, **if the
-    ///     caller has independently verified it belongs to this user** — `isNabuCasaHost` below
-    ///     does *not* establish that (see its documentation) and must never be used as the sole
-    ///     gate for this parameter. `AppModel` deliberately always passes `nil` here — see
-    ///     `DiscoveredCandidateURLs`'s documentation for the full reasoning. Kept for callers
-    ///     (present or future) able to supply a value verified some other way.
+    ///     from a previous successful connection. **The caller must have obtained this from
+    ///     `DiscoveredCandidateURLs.validating` — i.e. it must have been learned over a `.local`
+    ///     connection.** This function performs no trust check of its own; it only orders and
+    ///     classifies what it is handed.
+    ///   - discoveredExternal: Home Assistant's own `external_url` from `get_config`, under
+    ///     exactly the same requirement: learned over a `.local` connection and adopted by
+    ///     `DiscoveredCandidateURLs.validating`. Note what does *not* qualify a value for this
+    ///     parameter — `isNabuCasaHost` below is a classification predicate and never establishes
+    ///     that a URL belongs to this user (see its documentation, and the C-1 incident it
+    ///     records).
     ///   - preferredFirst: A previously-successful URL to hoist to the front of the list, ahead
     ///     of the default local-before-remote ordering. Pass `nil` to always get the default
     ///     ordering (e.g. to re-probe the local candidate first).
@@ -112,11 +125,12 @@ public enum ConnectionEndpoint: Sendable, Equatable {
     /// reported `external_url` was safe to auto-adopt as a future connection candidate (one that
     /// `TokenProvider` would later trust with the refresh token) — that was the bug: it let an
     /// attacker who MITM'd exactly one `get_config` response inject their own genuine, valid Nabu
-    /// Casa host and have it trusted indefinitely afterwards. See `DiscoveredCandidateURLs`'s
-    /// documentation for the full incident and why `get_config` no longer feeds a candidate at
-    /// all. This function is still correct and still needed for what it actually answers:
-    /// *classifying* a URL the caller already has some other reason to trust (chiefly, one the
-    /// user typed themselves) as local vs. remote — see `classify` below, its only caller.
+    /// Casa host and have it trusted indefinitely afterwards. What decides adoption now is the
+    /// *connection class* a URL was learned over, never its hostname — see
+    /// `DiscoveredCandidateURLs`. This function is still correct and still needed for what it
+    /// actually answers: *classifying* a URL the caller already has an independent reason to trust
+    /// (one the user typed, or one learned over a local connection) as local vs. remote, so that
+    /// every remote candidate gets its mandatory `https` — see `classify` below, its only caller.
     public static func isNabuCasaHost(_ url: URL) -> Bool {
         url.host?.lowercased().hasSuffix(".ui.nabu.casa") ?? false
     }
