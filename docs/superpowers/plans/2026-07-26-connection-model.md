@@ -147,7 +147,42 @@ actionable message; success re-probes and advances.
 **Files:** create `Packages/HavenCore/Sources/HavenCore/Session/ConnectionPreference.swift`,
 modify `Networking/NWWebSocketConnection.swift`, `App/AppModel.swift`, plus a settings surface; tests.
 
+> **Execution order note:** this task runs **immediately after Task 1**, ahead of
+> Tasks 2–3. Step 0 below fixes the security input those tasks depend on.
+
 **Steps:**
+
+0. **Classify the connection by the peer's actual IP, not by the hostname.**
+   `ConnectionEndpoint.connectionClass` is currently `isRemote ? .remote : .local`,
+   and `isRemote` is true only for `*.ui.nabu.casa`. So a user-entered Tailscale or
+   reverse-proxy URL (`https://ha.example.com`) classifies **`.local`** — and since
+   Task 1 keyed adoption on this value, `get_config`'s URLs would be adopted over a
+   connection that actually crossed the internet. That voids §1's trust rule, which
+   is the entire security design.
+
+   A hostname cannot answer "is this on my LAN" — and on a hostile network, neither
+   can DNS. The socket can: after the connection reaches `.ready`, read the peer
+   endpoint (`NWConnection.currentPath?.remoteEndpoint`) and classify on the
+   **resolved address**:
+   - `.local` iff the peer IP is loopback, link-local, or private —
+     IPv4 `127/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`;
+     IPv6 `::1`, `fc00::/7` (ULA), `fe80::/10`.
+   - Anything else → `.remote`.
+   - **Address unavailable → `.remote` (fail closed).** Worst case we don't learn a
+     remote URL and the user enters it by hand; the reverse mistake adopts an
+     attacker's URL.
+
+   Put the range test in HavenCore as a **pure function over an address string** so
+   it is unit-testable, and have `NWWebSocketConnection` expose the observed peer
+   address. `ConnectionEndpoint.connectionClass` — the hostname-based guess — is
+   then **removed**, not merely documented, so it cannot be picked up again by
+   mistake.
+
+   Tests: each private range and its nearest public neighbour (`10.0.0.1` local vs
+   `11.0.0.1` remote; `172.15/16/31/32` boundaries; `192.167`/`192.168`;
+   `169.254.x` link-local); IPv6 ULA and link-local vs a public IPv6; loopback;
+   unavailable/garbage address → `.remote`.
+
 1. **Reduce the connect deadline from 8s to 2s** in `NWWebSocketConnection`
    (`deadline: Duration = .seconds(2)`). A LAN connect is sub-100ms; 8s was C2 review
    finding I-1 and is a dead spinner on foreign Wi-Fi. Update the existing timeout test.
