@@ -11,6 +11,7 @@ struct DeviceModalView: View {
             case .cover: CoverModal(entityId: entityId)
             case .lock: LockModal(entityId: entityId)
             case .climate: ClimateModal(entityId: entityId)
+            case .mediaPlayer: MediaPlayerModal(entityId: entityId)
             case .scene, .script, .button: SceneModal(entityId: entityId)
             case .sensor: SensorModal(entityId: entityId)
             case .binarySensor: BinarySensorModal(entityId: entityId)

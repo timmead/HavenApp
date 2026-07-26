@@ -8,6 +8,8 @@ struct RoomSectionView: View {
     // Climate tiles render in their own 2-column grid (see body) — a genuine `Grid`/`GridRow`
     // span, not `.gridCellColumns(2)`, which is inert inside a `LazyVGrid`.
     private let climateColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
+    // Same story for the 2×1 media tile — a real 2-column grid, not a span modifier.
+    private let mediaColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -61,7 +63,7 @@ struct RoomSectionView: View {
 
             let otherRefs = room.overviewRefs.filter { ref in
                 guard case .entity(let id) = ref else { return true }
-                return Domain.of(id) != .climate
+                return Domain.of(id) != .climate && Domain.of(id) != .mediaPlayer
             }
             if !otherRefs.isEmpty {
                 LazyVGrid(columns: columns, spacing: 9) {
@@ -69,6 +71,23 @@ struct RoomSectionView: View {
                         if case .entity(let id) = ref {
                             DeviceTileView(entityId: id)
                         }
+                    }
+                }
+            }
+
+            // Media players sit *below* the main grid, at half width (2-of-4 columns), for the same
+            // structural reason Climate sits above it in its own grid: `.gridCellColumns` is inert
+            // inside a `LazyVGrid`, so a 2-wide tile needs a real 2-column `[GridItem]`. Below
+            // rather than above because the lights and switches are what a room glance is usually
+            // for; what's playing is worth space, not precedence.
+            let mediaIds = room.overviewRefs.compactMap { ref -> String? in
+                guard case .entity(let id) = ref, Domain.of(id) == .mediaPlayer else { return nil }
+                return id
+            }
+            if !mediaIds.isEmpty {
+                LazyVGrid(columns: mediaColumns, spacing: 9) {
+                    ForEach(mediaIds, id: \.self) { id in
+                        MediaPlayerTile(entityId: id, size: .wide)
                     }
                 }
             }

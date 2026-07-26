@@ -180,6 +180,79 @@ final class HomeStore {
         Task { try? await connection.setCoverPosition(id, percent: percent) }
     }
 
+    // MARK: - Media player
+
+    /// Play ⇄ pause. Which service is sent follows from the state we just wrote optimistically, so
+    /// the two can never disagree about which direction the tap was going.
+    func mediaPlayPause(_ id: String) {
+        guard let current = states[id] else { return }
+        let wasPlaying = MediaPlayerState(current).isPlaying
+        optimisticMedia(id, MediaPlayerOptimistic.playPause(current, now: Date())) { c in
+            try await wasPlaying ? c.mediaPause(id) : c.mediaPlay(id)
+        }
+    }
+
+    /// No optimistic state: what the next track *is* is unknowable until the device says so, and
+    /// blanking the title in the meantime would flash an empty now-playing card between two songs.
+    func mediaNextTrack(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.mediaNextTrack(id) }
+    }
+
+    func mediaPreviousTrack(_ id: String) {
+        guard let connection else { return }
+        Task { try? await connection.mediaPreviousTrack(id) }
+    }
+
+    func setMediaVolume(_ id: String, percent: Int) {
+        guard let current = states[id] else { return }
+        optimisticMedia(id, MediaPlayerOptimistic.volume(current, percent: percent)) { c in
+            try await c.setMediaVolume(id, percent: percent)
+        }
+    }
+
+    func setMediaMuted(_ id: String, muted: Bool) {
+        guard let current = states[id] else { return }
+        optimisticMedia(id, MediaPlayerOptimistic.mute(current, muted: muted)) { c in
+            try await c.setMediaMuted(id, muted: muted)
+        }
+    }
+
+    func selectMediaSource(_ id: String, source: String) {
+        guard let current = states[id] else { return }
+        optimisticMedia(id, MediaPlayerOptimistic.source(current, source)) { c in
+            try await c.selectMediaSource(id, source: source)
+        }
+    }
+
+    /// Power, never play/pause — the modal only offers this where `supported_features` declares
+    /// both halves.
+    func setMediaPower(_ id: String, on: Bool) {
+        guard let current = states[id] else { return }
+        optimisticMedia(id, MediaPlayerOptimistic.power(current, on: on)) { c in
+            try await c.setMediaPower(id, on: on)
+        }
+    }
+
+    /// The media-player flavour of `optimistic(_:on:_:)`: the caller hands over an already-computed
+    /// next `EntityState` rather than a single on/off, because a media command implies a *set* of
+    /// attributes — pausing restamps the position so the progress bar doesn't jump backwards, and
+    /// powering off clears the whole now-playing set. Those transforms are
+    /// `MediaPlayerOptimistic`'s, in HavenCore with tests; nothing is decided here.
+    ///
+    /// Rollback compares the whole entity, not one field, and so is strictly safer than the on/off
+    /// version: any state push that landed while the command was in flight leaves the comparison
+    /// unequal and the rollback is skipped, exactly as intended.
+    private func optimisticMedia(_ id: String, _ next: EntityState,
+                                 _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
+        guard let connection, let previous = states[id] else { return }
+        states[id] = next
+        Task {
+            do { try await work(connection) }
+            catch { if self.states[id] == next { self.states[id] = previous } }
+        }
+    }
+
     // MARK: - Room roll-ups + bulk actions
 
     func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home) }

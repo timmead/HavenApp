@@ -37,6 +37,22 @@ public enum AccessibilitySummary {
         return "\(name), \(mode), target \(Int(target.rounded()))\(s.unit)"
     }
 
+    /// "Kitchen speaker, playing, So What by Miles Davis". State first (a VoiceOver user gets no
+    /// benefit from the accent colour that says it to everyone else), then what is playing, then
+    /// the volume — which is otherwise legible only from a slider's fill.
+    public static func mediaPlayer(_ name: String, _ s: MediaPlayerState) -> String {
+        guard s.isActive else { return "\(name), \(s.playback.label.lowercased())" }
+        var parts = ["\(name), \(s.playback.label.lowercased())"]
+        if let title = s.title {
+            parts.append(s.secondaryLine.map { "\(title) by \($0)" } ?? title)
+        } else {
+            parts.append("nothing playing")
+        }
+        if s.isMuted { parts.append("muted") }
+        else if let volume = s.volumePercent { parts.append("volume \(volume)%") }
+        return parts.joined(separator: ", ")
+    }
+
     public static func binarySensor(_ name: String, _ s: BinarySensorState) -> String {
         "\(name), \(s.isActive ? "active" : "clear")"
     }

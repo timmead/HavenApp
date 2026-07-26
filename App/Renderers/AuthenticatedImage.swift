@@ -17,6 +17,23 @@ import HavenCore
 /// cancels when the view disappears and again whenever the id changes, so a fast scroll through a
 /// dashboard abandons the tiles it passed instead of piling their requests up behind the ones now
 /// on screen.
+/// What `AuthenticatedImage` currently has to show.
+///
+/// Declared outside the view rather than nested inside it because the view is generic over its
+/// content: a nested `Phase` would be spelled `AuthenticatedImage<Content>.Phase`, so the closure
+/// parameter's type would depend on the very generic parameter the closure's *return* type is
+/// meant to infer, and every call site fails with "generic parameter 'Content' could not be
+/// inferred". `AuthenticatedImage.Phase` still spells it, via the typealias below.
+enum AuthenticatedImagePhase {
+    case loading
+    case image(Image)
+    /// Nothing to show, nothing wrong.
+    case empty
+    /// Could not be loaded. Distinct from `.empty` on purpose — the caller is expected to draw
+    /// these two differently, which is the entire reason this view exists.
+    case failed
+}
+
 struct AuthenticatedImage<Content: View>: View {
     /// The `entity_picture`-style reference to load: relative to the current base URL, or already
     /// absolute (third-party artwork). `nil` or blank means the entity has no picture, and gives
@@ -31,15 +48,7 @@ struct AuthenticatedImage<Content: View>: View {
 
     @ViewBuilder var content: (Phase) -> Content
 
-    enum Phase {
-        case loading
-        case image(Image)
-        /// Nothing to show, nothing wrong.
-        case empty
-        /// Could not be loaded. Distinct from `.empty` on purpose — the caller is expected to draw
-        /// these two differently, which is the entire reason this view exists.
-        case failed
-    }
+    typealias Phase = AuthenticatedImagePhase
 
     @Environment(AppModel.self) private var app
     @State private var phase: Phase = .loading

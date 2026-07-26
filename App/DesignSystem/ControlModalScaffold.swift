@@ -5,6 +5,12 @@ import SwiftUI
 struct ModalHeader: View {
     let systemImage: String; let title: String; let subtitle: String; let accent: Color
     var toggle: Binding<Bool>? = nil
+    /// Occupies the toggle's place for a device whose primary action genuinely isn't on/off — today
+    /// only a Sonos speaker, which has no meaningful power state and offers a hand-off to its own
+    /// app there instead (see `MediaPlayerModal`). Deliberately an *alternative* to `toggle`, not an
+    /// addition beside it: the slot means one thing per device, which is the property that made the
+    /// header trustworthy in the first place. Passing both is a caller bug, and the toggle wins.
+    var accessory: AnyView? = nil
     var onClose: () -> Void
     var body: some View {
         HStack(spacing: 10) {
@@ -27,6 +33,7 @@ struct ModalHeader: View {
             .accessibilityLabel(subtitle.isEmpty ? title : "\(title), \(subtitle)")
             Spacer()
             if let toggle { Toggle("", isOn: toggle).labelsHidden().tint(accent).accessibilityLabel(title) }
+            else if let accessory { accessory }
             Button { onClose() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary).frame(width: 28, height: 28).background(.gray.opacity(0.15), in: Circle()) }
                 .accessibilityLabel("Close")
         }

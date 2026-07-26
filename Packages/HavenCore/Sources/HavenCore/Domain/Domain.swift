@@ -1,7 +1,7 @@
 import Foundation
 
 public enum Domain: String, Sendable, Equatable {
-    case light, switchOutlet, cover, lock, climate, scene, script, button, sensor, binarySensor, unknown
+    case light, switchOutlet, cover, lock, climate, mediaPlayer, scene, script, button, sensor, binarySensor, unknown
 
     public static func of(_ entityId: String) -> Domain {
         switch String(entityId.prefix(while: { $0 != "." })) {
@@ -10,6 +10,7 @@ public enum Domain: String, Sendable, Equatable {
         case "cover": return .cover
         case "lock": return .lock
         case "climate": return .climate
+        case "media_player": return .mediaPlayer
         case "scene": return .scene
         case "script": return .script
         case "button", "input_button": return .button
@@ -20,7 +21,7 @@ public enum Domain: String, Sendable, Equatable {
     }
     public var isActuator: Bool {
         switch self {
-        case .light, .switchOutlet, .cover, .lock, .climate, .scene, .script, .button: return true
+        case .light, .switchOutlet, .cover, .lock, .climate, .mediaPlayer, .scene, .script, .button: return true
         case .sensor, .binarySensor, .unknown: return false
         }
     }

@@ -35,9 +35,11 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
                "scene.a", "script.a", "button.a", "input_button.a"] {
         #expect(EntityCuration.tier(of: reg(id)) == .primary, "\(id) should be primary")
     }
-    // `media_player` has no `Domain` case (it maps to `.unknown`), so this only passes because
-    // classification reads the entity-id prefix rather than the renderer enum.
     #expect(EntityCuration.tier(of: reg("media_player.tv")) == .primary)
+    // The prefix rule is what makes this list independent of which renderers exist: every id above
+    // was already classified from its prefix while `media_player` still had no `Domain` case at
+    // all, and gaining one in D.2 changed what renders, not what is curated.
+    #expect(EntityCuration.tier(of: reg("fan.attic")) == .secondary)
 }
 
 @Test func rawSensorsAreDemotedNotDropped() {

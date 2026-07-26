@@ -6,11 +6,22 @@ public enum IconMap {
         case .cover: return "blinds.horizontal.closed"
         case .lock: return "lock.fill"
         case .climate: return "thermometer.medium"
+        case .mediaPlayer: return mediaSymbol(deviceClass)
         case .scene: return "sparkles"
         case .script, .button: return "play.circle.fill"
         case .sensor: return sensorSymbol(deviceClass)
         case .binarySensor: return binarySymbol(deviceClass)
         case .unknown: return "square.dashed"
+        }
+    }
+    /// `media_player` device classes are just the three: `tv`, `speaker`, `receiver`. A receiver
+    /// falls to the generic play glyph rather than to a speaker's — it may well be driving a
+    /// projector, and the wrong picture is worse than a neutral one.
+    private static func mediaSymbol(_ dc: String?) -> String {
+        switch dc {
+        case "tv": return "tv"
+        case "speaker": return "hifispeaker.fill"
+        default: return "play.rectangle.fill"
         }
     }
     private static func sensorSymbol(_ dc: String?) -> String {

@@ -10,7 +10,7 @@ import Testing
     #expect(Domain.of("scene.movie") == .scene)
     #expect(Domain.of("binary_sensor.door") == .binarySensor)
     #expect(Domain.of("sensor.power") == .sensor)
-    #expect(Domain.of("media_player.tv") == .unknown)   // out of scope -> unknown
+    #expect(Domain.of("media_player.tv") == .mediaPlayer)  // in scope as of D.2 Task 3
     #expect(Domain.of("fan.attic") == .unknown)         // fan is NOT in the D catalog -> Generic
 }
 @Test func serviceDomainComesFromEntityIdPrefix() {

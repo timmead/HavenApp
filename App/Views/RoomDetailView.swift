@@ -23,6 +23,7 @@ struct RoomDetailView: View {
         var climate: [String] = []
         var lights: [String] = []
         var covers: [String] = []
+        var media: [String] = []
         var other: [String] = []
         var sensors: [String] = []
     }
@@ -36,6 +37,7 @@ struct RoomDetailView: View {
             case .climate: g.climate.append(id)
             case .light: g.lights.append(id)
             case .cover: g.covers.append(id)
+            case .mediaPlayer: g.media.append(id)
             case .scene, .script, .button, .lock, .switchOutlet, .unknown: g.other.append(id)
             case .sensor, .binarySensor: g.sensors.append(id)
             }
@@ -51,6 +53,7 @@ struct RoomDetailView: View {
                 group("Climate", g.climate, columns: climateColumns)
                 group("Lights", g.lights, rollup: rollups.first { $0.kind == .lights })
                 group("Shades", g.covers, rollup: rollups.first { $0.kind == .covers })
+                mediaGroup(g.media)
                 group("Scenes & more", g.other)
                 group("Sensors", g.sensors)
             }
@@ -69,6 +72,24 @@ struct RoomDetailView: View {
                             text: v + unit,
                             accent: hs.role == .temperature ? HavenColor.domain(.climate) : HavenColor.domain(.cover)
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    /// The Media group, at full width (4-of-4 columns) — the size the approved design gives the
+    /// artwork-and-transport tile. Its own `VStack`, not `group(_:_:columns:)`: a full-bleed 4×2
+    /// tile is not a `DeviceTileView` in a narrower grid, it is a different tile rendering, and the
+    /// dispatcher deliberately only knows the 1×1 (see `DeviceTileView`).
+    @ViewBuilder
+    private func mediaGroup(_ ids: [String]) -> some View {
+        if !ids.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack { Text("Media").font(.system(size: 14, weight: .bold)); Spacer() }
+                VStack(spacing: 9) {
+                    ForEach(ids, id: \.self) { id in
+                        MediaPlayerTile(entityId: id, size: .large)
                     }
                 }
             }

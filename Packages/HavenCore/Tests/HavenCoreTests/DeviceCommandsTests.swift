@@ -44,6 +44,39 @@ private func authed() async throws -> (FakeWebSocketConnection, HomeConnection) 
     #expect(sent.contains { $0.contains("\"domain\":\"scene\"") && $0.contains("\"service\":\"turn_on\"") })
     #expect(sent.contains { $0.contains("\"domain\":\"script\"") && $0.contains("\"service\":\"turn_on\"") })
 }
+@Test func mediaTransportEmitsExplicitPlayAndPause() async throws {
+    // Explicit `media_play`/`media_pause` rather than the `media_play_pause` toggle: the caller
+    // already knows which direction it is going, and these two map one-to-one onto the two
+    // `supported_features` bits the button is gated on.
+    let (conn, home) = try await authed()
+    try await home.mediaPlay("media_player.kitchen")
+    try await home.mediaPause("media_player.kitchen")
+    try await home.mediaNextTrack("media_player.kitchen")
+    try await home.mediaPreviousTrack("media_player.kitchen")
+    let sent = await conn.sentTexts()
+    #expect(sent.contains { $0.contains("\"domain\":\"media_player\"") && $0.contains("\"service\":\"media_play\"") })
+    #expect(sent.contains { $0.contains("\"service\":\"media_pause\"") })
+    #expect(sent.contains { $0.contains("\"service\":\"media_next_track\"") })
+    #expect(sent.contains { $0.contains("\"service\":\"media_previous_track\"") })
+}
+@Test func mediaVolumeMuteAndSourceCarryTheirPayloads() async throws {
+    let (conn, home) = try await authed()
+    try await home.setMediaVolume("media_player.kitchen", percent: 40)
+    try await home.setMediaMuted("media_player.kitchen", muted: true)
+    try await home.selectMediaSource("media_player.kitchen", source: "TV")
+    let sent = await conn.sentTexts()
+    // Percent in, HA's own 0…1 `volume_level` out.
+    #expect(sent.contains { $0.contains("\"service\":\"volume_set\"") && $0.contains("\"volume_level\":0.4") })
+    #expect(sent.contains { $0.contains("\"service\":\"volume_mute\"") && $0.contains("\"is_volume_muted\":true") })
+    #expect(sent.contains { $0.contains("\"service\":\"select_source\"") && $0.contains("\"source\":\"TV\"") })
+}
+@Test func mediaPowerIsTurnOnOffAndUsesTheEntityPrefixDomain() async throws {
+    // The header toggle is power, never play/pause — and the domain comes from the entity id, so a
+    // media player behind some other prefix could not be sent to `media_player.turn_off`.
+    let (conn, home) = try await authed()
+    try await home.setMediaPower("media_player.kitchen", on: false)
+    #expect(await conn.sentTexts().contains { $0.contains("\"domain\":\"media_player\"") && $0.contains("\"service\":\"turn_off\"") })
+}
 @Test func setSwitchUsesEntityPrefixDomain() async throws {
     let (conn, home) = try await authed()
     try await home.setSwitch("input_boolean.guest", on: true)
