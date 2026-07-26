@@ -10,7 +10,8 @@ struct LightModal: View {
         let e = store.state(entityId)
         let s = e.map(LightState.init)
         let accent = HavenColor.domain(.light)
-        let live = Double(s?.brightnessPercent ?? 0)
+        // An off light has no brightness — don't show a stale percentage.
+        let live = Double((s?.isOn ?? false) ? (s?.brightnessPercent ?? 0) : 0)
         VStack(spacing: 12) {
             ModalHeader(systemImage: "lightbulb.fill", title: TileName.of(entityId, e),
                         subtitle: (s?.isOn ?? false) ? "On" : "Off", accent: accent,
@@ -30,6 +31,9 @@ struct LightModal: View {
                 }
             }
             Spacer()
+        }
+        .onChange(of: s?.isOn ?? false) { _, isOn in
+            if !isOn { dragPercent = nil }
         }
     }
 }
