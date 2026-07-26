@@ -388,7 +388,15 @@ final class AppModel {
                         // (permission absent / no home network captured yet) flows through unchanged
                         // as "unknown" — never as "home".
                         let peerAddress = conn.observedPeerAddress
-                        let learnedOver = ConnectionClass.observed(peerAddress: peerAddress, onKnownHomeNetwork: ssidMatch)
+                        // `dialledRemoteCandidate` is our own record of which slot this candidate
+                        // came from, not a guess from its hostname (review finding I-1): if we
+                        // deliberately went out to the internet, nothing observed afterwards makes
+                        // the connection local — not the peer address, not the SSID.
+                        let learnedOver = ConnectionClass.observed(
+                            peerAddress: peerAddress,
+                            onKnownHomeNetwork: ssidMatch,
+                            dialledRemoteCandidate: candidate.isRemote
+                        )
                         // Logged because "remote access never appeared" otherwise has several
                         // indistinguishable causes, and two of them are signals we simply couldn't
                         // read (address unavailable, SSID unknown).

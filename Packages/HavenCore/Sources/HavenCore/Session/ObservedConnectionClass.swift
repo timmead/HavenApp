@@ -47,13 +47,25 @@ extension ConnectionClass {
     /// candidate *ordering* — reused here, not recomputed, so there is exactly one place that decides
     /// what "home" means.
     ///
-    /// **This is not a loosening of the trust rule, it is the same rule read correctly.** The
-    /// existing IP check already trusts *any* private address as "the local network" — which really
-    /// means "whatever network handed out that private address", rogue access point included. A
-    /// matching SSID is exactly as spoofable as that, no more and no less; it is not a weaker signal
-    /// bolted onto a strong one, it is a second way to observe the same thing the IP check observes.
-    /// Both still describe *where a fact was learned*, which is what §1 requires — neither says
-    /// anything about *what* the fact says.
+    /// **The SSID corroborates locality; it can never establish it on its own.** This is the
+    /// correction to review finding I-1, and the distinction is the whole of it: a matching SSID
+    /// proves *"the phone is physically on the home network"*. It does **not** prove *"this
+    /// connection stayed on the LAN"* — you can be sitting at home and still route out to the
+    /// internet and back. Consulting it first and unconditionally, as this function originally did,
+    /// meant a connection with a definitively public peer address was classified `.local` merely
+    /// because the phone was at home: the far end of a connection that crossed the internet could
+    /// then nominate a new token-receiving host, which is precisely what §1 forbids. So the SSID is
+    /// now reached only where the address evidence is genuinely *ambiguous* — an IPv6 GUA, or no
+    /// usable address at all — which is the case it was introduced for, and never where the address
+    /// answers the question by itself.
+    ///
+    /// **And a candidate we deliberately dialled as remote is remote, whatever else says otherwise.**
+    /// `dialledRemoteCandidate` is our own record of which storage slot the URL came from — the Nabu
+    /// Casa/discovered-external slot, or the user's custom remote URL — not an inference from the
+    /// URL's *shape*. That distinction matters: this is **not** a return of the deleted
+    /// `ConnectionEndpoint.connectionClass`, which guessed from the hostname (`*.ui.nabu.casa` ⇒
+    /// remote, everything else ⇒ local) and so mislabelled a user's reverse proxy as local. Here the
+    /// app is not guessing at all — it chose to go out to the internet, and it knows it did.
     ///
     /// - Parameters:
     ///   - peerAddress: The peer's resolved IP literal, e.g. from
@@ -61,21 +73,39 @@ extension ConnectionClass {
     ///   - onKnownHomeNetwork: Whether the current Wi-Fi is known to match the user's configured home
     ///     network — `ConnectionPreference.homeSSIDMatch(current:home:)`. `nil` and `false` are
     ///     treated identically: **"unknown" must never be read as "home"**, the same fail-closed
-    ///     posture as an unresolved address below. Defaulted to `nil` so every existing call site
-    ///     (all of §1–§4's IP-only tests) keeps its original meaning unchanged.
-    public static func observed(peerAddress: String?, onKnownHomeNetwork: Bool? = nil) -> ConnectionClass {
-        if onKnownHomeNetwork == true { return .local }
+    ///     posture as an unresolved address. Only consulted where the address cannot decide.
+    ///   - dialledRemoteCandidate: Whether the candidate this connection was made to came from a
+    ///     remote slot — `ConnectionEndpoint.isRemote` for the candidate `AppModel` actually dialled.
+    ///     **Required, not defaulted:** the permissive value would be the wrong default for an input
+    ///     that decides whether a self-reported URL may be adopted, and every call site should have
+    ///     to say which kind of candidate it is describing.
+    public static func observed(
+        peerAddress: String?,
+        onKnownHomeNetwork: Bool? = nil,
+        dialledRemoteCandidate: Bool
+    ) -> ConnectionClass {
+        // We chose to dial a remote address. Nothing observed afterwards can make that connection
+        // local, and no other signal gets a vote.
+        if dialledRemoteCandidate { return .remote }
 
-        guard let peerAddress, !peerAddress.isEmpty else { return .remote }
-
-        if let octets = strictIPv4Octets(peerAddress) {
-            return isPrivateIPv4(octets) ? .local : .remote
+        if let peerAddress, !peerAddress.isEmpty {
+            if let octets = strictIPv4Octets(peerAddress) {
+                // Definitive both ways: a LAN never hands out a public IPv4, so a public one here
+                // means the bytes left the network — the SSID does not get to overrule it.
+                return isPrivateIPv4(octets) ? .local : .remote
+            }
+            if let v6 = IPv6Address(peerAddress) {
+                if isPrivateIPv6(Array(v6.rawValue)) { return .local }
+                // The one genuinely ambiguous address, and the reason `onKnownHomeNetwork` exists: a
+                // globally-routable IPv6 (SLAAC GUA) is what a growing number of consumer routers
+                // hand out *on the LAN*, and it is indistinguishable from an internet host by
+                // address alone.
+                return onKnownHomeNetwork == true ? .local : .remote
+            }
         }
-        if let v6 = IPv6Address(peerAddress) {
-            return isPrivateIPv6(Array(v6.rawValue)) ? .local : .remote
-        }
-        // Not a parseable IP literal at all — a hostname that was never resolved, or garbage.
-        return .remote
+        // No usable address: unresolved, unreportable, or not an IP literal at all. Ambiguous in the
+        // same way, so the SSID is the only evidence left — and absent that, fail closed.
+        return onKnownHomeNetwork == true ? .local : .remote
     }
 
     /// Strict dotted-quad parsing, deliberately hand-rolled rather than using `IPv4Address(String)`.

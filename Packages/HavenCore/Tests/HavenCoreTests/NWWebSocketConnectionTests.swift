@@ -47,7 +47,7 @@ private final class TestContinuationBox<T: Sendable>: @unchecked Sendable {
         let conn = NWWebSocketConnection(url: URL(string: "ws://192.0.2.1:8123/api/websocket")!)
         _ = try? await conn.connect()
         #expect(conn.observedPeerAddress == nil)
-        #expect(ConnectionClass.observed(peerAddress: conn.observedPeerAddress) == .remote)
+        #expect(ConnectionClass.observed(peerAddress: conn.observedPeerAddress, dialledRemoteCandidate: false) == .remote)
     }
 
     /// **The assumption Step 0 of the connection model rests on**, pinned by a test rather than a
@@ -101,7 +101,7 @@ private final class TestContinuationBox<T: Sendable>: @unchecked Sendable {
 
         let address = conn.observedPeerAddress
         #expect(address == "127.0.0.1" || address == "::1")
-        #expect(ConnectionClass.observed(peerAddress: address) == .local)
+        #expect(ConnectionClass.observed(peerAddress: address, dialledRemoteCandidate: false) == .local)
     }
 
     @Test func remoteEndpointReportsAResolvedAddressEvenWhenDialledByName() async throws {
@@ -142,6 +142,6 @@ private final class TestContinuationBox<T: Sendable>: @unchecked Sendable {
         #expect(address != nil)
         #expect(address == "127.0.0.1" || address == "::1")
         // And it classifies the way the trust rule needs it to.
-        #expect(ConnectionClass.observed(peerAddress: address) == .local)
+        #expect(ConnectionClass.observed(peerAddress: address, dialledRemoteCandidate: false) == .local)
     }
 }
