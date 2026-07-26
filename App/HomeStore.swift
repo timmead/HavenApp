@@ -40,11 +40,17 @@ final class HomeStore {
     func toggleLightOptimistic(_ entityId: String) {
         guard let connection, var s = states[entityId] else { return }
         let previous = s
-        s.state = (s.state == "on") ? "off" : "on"      // optimistic flip
+        let optimisticValue = (s.state == "on") ? "off" : "on"      // optimistic flip
+        s.state = optimisticValue
         states[entityId] = s
         Task {
             do { try await connection.toggleLight(entityId: entityId) }
-            catch { self.states[entityId] = previous }    // rollback
+            catch {
+                // Only roll back if the entity still holds the value we optimistically wrote —
+                // otherwise a late failure would clobber newer state (e.g. attributes from a
+                // WS push that arrived while the command was in flight).
+                if self.states[entityId]?.state == optimisticValue { self.states[entityId] = previous }
+            }
         }
     }
 
@@ -59,24 +65,31 @@ final class HomeStore {
         Domain.of(id) == .light ? setLight(id, on: on) : setSwitch(id, on: on)
     }
 
-    /// Flip local state immediately, run the command, roll back on failure.
+    /// Flip local state immediately, run the command, roll back on failure — but only if the
+    /// entity still holds the value we optimistically wrote, so a late failure can't clobber
+    /// state that changed in the meantime (e.g. attributes from a WS push while in flight).
     private func optimistic(_ id: String, on: Bool, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
         guard let connection, var s = states[id] else { return }
         let previous = s
-        s.state = on ? "on" : "off"
+        let optimisticValue = on ? "on" : "off"
+        s.state = optimisticValue
         states[id] = s
-        Task { do { try await work(connection) } catch { self.states[id] = previous } }
+        Task {
+            do { try await work(connection) }
+            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
+        }
     }
 
     func openCloseCover(_ id: String) {
         guard let connection, var s = states[id] else { return }
         let previous = s
         let open = s.state == "open" || s.state == "opening"
-        s.state = open ? "closed" : "open"
+        let optimisticValue = open ? "closed" : "open"
+        s.state = optimisticValue
         states[id] = s
         Task {
             do { try await (open ? connection.closeCover(id) : connection.openCover(id)) }
-            catch { self.states[id] = previous }
+            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
         }
     }
 
@@ -84,11 +97,12 @@ final class HomeStore {
         guard let connection, var s = states[id] else { return }
         let previous = s
         let locked = s.state == "locked"
-        s.state = locked ? "unlocked" : "locked"
+        let optimisticValue = locked ? "unlocked" : "locked"
+        s.state = optimisticValue
         states[id] = s
         Task {
             do { try await connection.setLock(id, locked: !locked) }
-            catch { self.states[id] = previous }
+            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
         }
     }
 
@@ -162,7 +176,10 @@ final class HomeStore {
     /// primitive for a single entity, so each entity's failure is isolated from the rest.
     /// Entities already off are skipped so this doesn't spam HA with redundant calls.
     func allOff(_ rollup: Rollup) {
-        guard rollup.kind == .lights else { return }   // targetEntityIds are only lights when kind == .lights
+        guard rollup.kind == .lights else {
+            assertionFailure("allOff called with rollup.kind == \(rollup.kind), expected .lights")
+            return
+        }
         for id in rollup.targetEntityIds {
             guard states[id]?.state == "on" else { continue }
             setLight(id, on: false)
@@ -174,7 +191,10 @@ final class HomeStore {
     /// per-entity optimistic flip → command → rollback instead of the on/off helper.
     /// Already-closed (or closing) covers are skipped.
     func closeAll(_ rollup: Rollup) {
-        guard rollup.kind == .covers else { return }   // targetEntityIds are only covers when kind == .covers
+        guard rollup.kind == .covers else {
+            assertionFailure("closeAll called with rollup.kind == \(rollup.kind), expected .covers")
+            return
+        }
         for id in rollup.targetEntityIds {
             let current = states[id]?.state
             guard current == "open" || current == "opening" else { continue }
@@ -184,14 +204,17 @@ final class HomeStore {
 
     /// Per-entity optimistic close for one cover: flip state immediately, run the command,
     /// roll back on failure. Isolated per entity so one failing cover doesn't undo the rest.
+    /// Rollback only fires if the entity still holds the value we optimistically wrote, so a
+    /// late failure can't clobber state that changed in the meantime.
     private func optimisticClose(_ id: String) {
         guard let connection, var s = states[id] else { return }
         let previous = s
-        s.state = "closed"
+        let optimisticValue = "closed"
+        s.state = optimisticValue
         states[id] = s
         Task {
             do { try await connection.closeCover(id) }
-            catch { self.states[id] = previous }
+            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
         }
     }
 
