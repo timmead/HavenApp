@@ -61,4 +61,14 @@
     <key>CFBundleURLName</key><string>app.haven.HavenApp</string>
     <key>CFBundleURLSchemes</key><array><string>havenapp</string></array>
   </dict></array>
+  <!--
+    Vendor hand-off (VendorHandoff, HavenCore/Registry/VendorHandoff.swift). `canOpenURL` returns
+    false for any scheme not declared here — with no error anywhere — so without this entry the
+    Protect/Sonos hand-off buttons would permanently believe the vendor app isn't installed, even
+    when it is. Schemes only, never with `://`.
+  -->
+  <key>LSApplicationQueriesSchemes</key><array>
+    <string>unifi-protect</string>
+    <string>sonos</string>
+  </array>
 </dict></plist>

@@ -1,6 +1,28 @@
+/// The registry fields a renderer needs to identify an entity's owning integration and device,
+/// without holding the full `EntityRegistryEntry` (area/device wiring, curation fields, …) that
+/// produced it. `platform` is the integration domain (`"unifiprotect"`, `"sonos"`); `uniqueId` is
+/// that integration's own identifier for the device. See `VendorHandoff` for what these are used
+/// for and what is and isn't verified about them.
+public struct EntityRegistryInfo: Sendable, Equatable {
+    public let platform: String?
+    public let uniqueId: String?
+    public init(platform: String?, uniqueId: String?) {
+        self.platform = platform; self.uniqueId = uniqueId
+    }
+}
+
 public struct ResolvedHome: Sendable, Equatable {
     public var floors: [ResolvedFloor]
-    public init(floors: [ResolvedFloor]) { self.floors = floors }
+    /// Every enabled entity's registry info, keyed by entity id — flat and area-independent
+    /// because a renderer holding just an entity id (a camera or media player modal) has no
+    /// reason to also carry its area to look this up. Filtered to `disabledBy == nil` entities
+    /// only, matching `RegistryResolver`'s existing filter: a disabled entity never reaches the
+    /// state machine, so it has no renderer to hand this to in the first place.
+    public var registryInfo: [String: EntityRegistryInfo]
+    public init(floors: [ResolvedFloor], registryInfo: [String: EntityRegistryInfo] = [:]) {
+        self.floors = floors
+        self.registryInfo = registryInfo
+    }
 }
 public struct ResolvedFloor: Sendable, Equatable, Identifiable {
     public let id: String; public let name: String; public let level: Int; public var areas: [ResolvedArea]

@@ -13,9 +13,11 @@ public enum RegistryResolver {
         // absent from get_states/state_changed — so they'd render as permanently-inert
         // tiles. Drop them here, before they reach any area.
         var entitiesByArea: [String: [EntityRegistryEntry]] = [:]
+        var registryInfo: [String: EntityRegistryInfo] = [:]
         for e in entities where e.disabledBy == nil {
             let resolvedArea = e.areaId ?? e.deviceId.flatMap { deviceArea[$0] ?? nil } ?? unassignedAreaId
             entitiesByArea[resolvedArea, default: []].append(e)
+            registryInfo[e.entityId] = EntityRegistryInfo(platform: e.platform, uniqueId: e.uniqueId)
         }
 
         // Curation is computed per area, not per entity, because its never-empty-a-room rescue
@@ -51,6 +53,6 @@ public enum RegistryResolver {
             floorModels.append(ResolvedFloor(id: noFloorId, name: "Home", level: Int.max,
                                              areas: noFloorAreas.sorted { $0.name < $1.name }))
         }
-        return ResolvedHome(floors: floorModels.sorted { $0.level < $1.level })
+        return ResolvedHome(floors: floorModels.sorted { $0.level < $1.level }, registryInfo: registryInfo)
     }
 }
