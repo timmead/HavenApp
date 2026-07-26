@@ -39,6 +39,18 @@ final class AppModel {
     let pathObserver = NetworkPathObserver()
     let homeNetwork = HomeNetwork()
 
+    /// What `cloud/status` last said about this instance's Nabu Casa remote access, or `nil` if
+    /// we haven't asked yet (or have signed out). Purely a rendering input — the classification
+    /// itself is `NabuCasaRemoteAccessDetector.classify`, in HavenCore with tests, and `App/` may
+    /// only display what it produced. Tasks 3 (offer to enable) and 6 (custom remote URL) own the
+    /// surfaces that read this; nothing renders it yet.
+    ///
+    /// Note this is set regardless of whether the connection was local or remote: it is honest to
+    /// *say* remote access exists no matter where we heard it. What must not happen over a remote
+    /// connection is *adopting* the URL, and that decision lives in `adoptableRemoteURL` below,
+    /// not here.
+    private(set) var remoteAccess: NabuCasaRemoteAccess?
+
     private let tokens: TokenStore = KeychainTokenStore()
     private let oauth = OAuthClient()
     private let http = URLSessionHTTP()
@@ -307,6 +319,19 @@ final class AppModel {
                         if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
                             rememberDiscoveredURLs(config, learnedOver: learnedOver)
                         }
+                        // Nabu Casa bootstrap: ask the instance whether it has remote access and
+                        // at what domain, so remote access needs zero configuration. Same
+                        // best-effort footing as `get_config` above — `fetchCloudStatus` never
+                        // throws, and an instance without the `cloud` component simply answers
+                        // `unknown_command`, which is the ordinary self-hosted user rather than a
+                        // failure. Deliberately runs on *every* connection, local or remote: the
+                        // classification is safe to know either way, and gating the probe itself
+                        // on the connection class would put a security decision here, in code with
+                        // no test target, instead of in the one function that owns it.
+                        let cloudStatus = await home.fetchCloudStatus()
+                        if !Task.isCancelled {
+                            rememberNabuCasaRemoteAccess(cloudStatus, learnedOver: learnedOver)
+                        }
                         // Capture the home Wi-Fi network automatically, so the user never types an
                         // SSID — and only on a connection the *peer address* proved was local, so
                         // a café's SSID can never be recorded as home. A no-op without Location
@@ -442,8 +467,49 @@ final class AppModel {
     }
 
 
+    /// The Nabu Casa half of the write boundary, and the same shape as `rememberDiscoveredURLs`:
+    /// hand the raw result and the observed connection class to pure functions, store what comes
+    /// back. No branching on `logged_in`, `active_subscription`, `remote_enabled` or
+    /// `remote_connected` happens here — every one of those decisions is
+    /// `NabuCasaRemoteAccessDetector.classify`'s, in HavenCore, under test.
+    ///
+    /// The URL goes through `adoptableRemoteURL`, which is implemented *by calling*
+    /// `DiscoveredCandidateURLs.validating` — the exact function `get_config`'s URLs already flow
+    /// through. There is therefore one place in the codebase that decides whether a self-reported
+    /// address may be remembered, not two that have to agree.
+    ///
+    /// It writes to the same `discoveredExternalURL` slot `get_config`'s `external_url` uses, and
+    /// runs after it, so `cloud/status` wins when both answer. That is the right precedence for
+    /// Nabu Casa — `remote_domain` is the cloud's own authority on its tunnel, whereas
+    /// `external_url` is free text the user may have set to anything. A user running *both* Nabu
+    /// Casa and their own reverse proxy loses the latter from the candidate list; giving a
+    /// user-supplied remote URL a slot of its own is Task 6's job, not something to improvise here.
+    private func rememberNabuCasaRemoteAccess(
+        _ status: Result<HACloudStatus, WSError>,
+        learnedOver: ConnectionClass
+    ) {
+        let outcome = NabuCasaRemoteAccessDetector.classify(status)
+        remoteAccess = outcome
+        guard let url = NabuCasaRemoteAccessDetector.adoptableRemoteURL(
+            from: outcome, learnedOver: learnedOver
+        ) else {
+            // Logged, not silent: "remote access never appeared" has several quite different
+            // causes and they are indistinguishable from the outside — no cloud component, no
+            // subscription, remote switched off, or a perfectly good answer we declined to adopt
+            // because we heard it over the internet.
+            havenLog.info("cloud/status → \(String(describing: outcome), privacy: .public); no remote URL adopted (connection classified \(learnedOver == .local ? "local" : "remote", privacy: .public))")
+            return
+        }
+        UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
+        havenLog.info("cloud/status → Nabu Casa remote access at \(url.absoluteString, privacy: .public), adopted")
+    }
+
     private func forgetDiscoveredURLs() {
         let d = UserDefaults.standard
+        // Describes the previous instance's cloud account, not this one's — carrying it across
+        // would render a stale (and possibly contradictory) remote-access state for a home it
+        // says nothing about.
+        remoteAccess = nil
         d.removeObject(forKey: DefaultsKeys.discoveredInternalURL)
         d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
         d.removeObject(forKey: DefaultsKeys.lastWorkingURL)

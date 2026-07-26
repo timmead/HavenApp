@@ -17,6 +17,22 @@ public struct WSError: Sendable, Hashable, Error {
     /// handshake.
     public static let authInvalidCode = "auth_invalid"
     public var isAuthInvalid: Bool { code == Self.authInvalidCode }
+
+    /// Home Assistant's own `ERR_UNKNOWN_COMMAND` (`components/websocket_api/const.py`) — the
+    /// answer to any command type that isn't registered, because the component providing it isn't
+    /// loaded.
+    ///
+    /// Read as an *answer*, not a failure, in exactly one place:
+    /// `NabuCasaRemoteAccessDetector.classify` treats it on `cloud/status` as "the `cloud`
+    /// component isn't loaded", i.e. an ordinary self-hosted user. Note the corollary — a
+    /// misspelled command name is indistinguishable from a missing component at the wire level, so
+    /// every command string this app sends must be verified against its source and asserted in
+    /// tests, or "cloud isn't loaded" is what a typo looks like to every Nabu Casa subscriber.
+    /// `HavenIntegrationDetector.classify` deliberately does *not* branch on it (see
+    /// `HavenIntegrationStatus.commandsUnregistered`), because there `get_config`'s `components`
+    /// list is the stronger signal.
+    public static let unknownCommandCode = "unknown_command"
+    public var isUnknownCommand: Bool { code == Self.unknownCommandCode }
 }
 
 public enum ServerFrame: Sendable, Equatable {
@@ -110,6 +126,17 @@ public enum WSCommand {
     /// its `ha_user_is_admin`) never ran at all. See `HavenIntegrationDetector.classify`'s
     /// `isAdmin` parameter.
     public static func currentUser(id: Int) -> Data { data(["id": id, "type": "auth/current_user"]) }
+
+    /// Home Assistant Cloud's (Nabu Casa's) account/remote-access status — how HavenApp discovers
+    /// a remote URL with zero user configuration. Verified against `home-assistant/core`'s
+    /// `components/cloud/http_api.py` (`websocket_cloud_status`); the fields consumed are
+    /// documented on `HACloudStatus`.
+    ///
+    /// An instance without the `cloud` component loaded answers this with HA's `unknown_command`
+    /// — the self-hosted user, not an error. Which is also why the literal string below is
+    /// asserted in `CloudStatusTests`: a typo here would answer `unknown_command` for *everyone*,
+    /// and be indistinguishable from a genuinely cloud-less instance.
+    public static func cloudStatus(id: Int) -> Data { data(["id": id, "type": "cloud/status"]) }
 
     // MARK: - HACS
     //
