@@ -152,6 +152,36 @@ Design each of the above as a focused unit with a clear interface (a renderer kn
 - Room detail groups devices by domain with no container chrome and per-group roll-up actions.
 - The whole surface reads as one cohesive Light-Glass system in both light and dark.
 
+## 10a. Delivered — implementation notes (completed 2026-07-25)
+
+Sub-project D shipped in 41 commits (branch `feat/subproject-d-renderers`), 61 HavenCore unit tests, verified against a live Home Assistant 2026.6.4 instance. Everything in §9's in-scope list is delivered.
+
+**Bugs worth remembering** (found by review or live testing, all fixed):
+- `activate()` branched on the domain enum, so `input_button` entities emitted `button.press` — HA returns *success* and silently does nothing. Service domains must derive from the **entity-id prefix**, not the renderer's domain case.
+- Statistics `start` arrives from HA as an **ISO-8601 string**, not a millisecond epoch. Parsing only the numeric form dropped every row and rendered the calm "No history yet" placeholder — a silent failure indistinguishable from a sensor with no data. The parser now accepts both.
+- Energy (`total`/`total_increasing`) sensors report `sum`, not `mean`; the value fallback is `mean ?? state ?? sum`.
+- `.gridCellColumns(_:)` is **inert inside `LazyVGrid`** (it is a `Grid`/`GridRow` trait). Multi-column tiles need their own grid with a narrower `[GridItem]` array.
+- Disabled registry entities (`disabled_by`) never enter HA's state machine, so they rendered as normal-looking tiles that silently swallowed taps forever. They are filtered in the resolver.
+- Optimistic rollback must not revert an entity whose state has moved on since the write, or a failed command clobbers a value the user just set.
+
+## 10b. Deferred to D.2 — carried forward deliberately
+
+**Spec items consciously not built in D** (both have supporting code already in place):
+- **Light modal colour-temperature bar** (§4). `LightState.supportsColorTemp` and `HomeConnection.setColorTemp(_:kelvin:)` exist with zero call sites.
+- **Binary-sensor "recent changes"** (§4). `BinarySensorModal` currently ships as a header only.
+
+**Renderers out of scope for D:** Media Player and Camera (§9).
+
+**Quality follow-ups** (none blocking; ordered by value):
+1. **Accessibility** — no `accessibilityLabel`s anywhere in the app layer, and `HavenSegmented` is built on `.onTapGesture` rather than `Button`, so it carries no button traits. Combined with state conveyed largely by colour, this is a real gap.
+2. **Optimistic attribute writes** for brightness / cover position / target temperature — these controls can visibly snap back between release and HA's echo.
+3. **`unavailable` / `unknown` treatment** — §2 calls for a distinct *calm* state; the app currently has none, so an unavailable device looks like a normal off one.
+4. **De-duplicate the optimistic pattern** — five near-identical flip→command→rollback blocks in `HomeStore`; extract a `setCover`-style primitive so `openCloseCover`/`optimisticClose` collapse.
+5. **Partial bulk-action failure surfacing** — an "All off" that half-fails silently reverts the failed rows with no explanation; also unbounded fan-out for large rooms.
+6. **Display polish** — `ClimateTile` interpolates a raw `fanMode` (`"fan auto_high"`) while the modal formats it; `GenericModal` renders integer-valued doubles as `42.0` and is unlocalized; tapping a *jammed* lock tile still sends `lock` while the modal drops its toggle.
+7. **History caching** — no TTL, so a Day-range chart never refreshes within a session; rapid range switching can issue duplicate fetches.
+8. **Housekeeping** — `Model/` vs `Models/` directories; `JSONValue.asArray` lives in `HomeConnection.swift`; `Rollup` is not `Identifiable`.
+
 ## 11. Open questions / follow-ups
 
 - **Entity curation / intelligent defaults (raised 2026-07-25 at the Task 13 runtime checkpoint — deferred, but required before this is usable).** A real Home Assistant instance exposes *hundreds* of entities per home, and the current model renders every entity in an area. That is correct-but-unusable at scale: a room section becomes a wall of tiles. Haven needs to ship a curated default set and let the rest be opt-in. Cheap, high-value first pass (all available from data we already fetch):
