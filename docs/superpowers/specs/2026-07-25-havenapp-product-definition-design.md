@@ -148,6 +148,13 @@ A first-class pillar. Principle: **registry auto-generation gets you to a great 
 
 **Persistence & sync (privacy-first, no Haven cloud):** Haven's config is its own state and syncs across the user's devices by being stored **in the user's own Home Assistant** via the `haven-hacs` integration (a stored key/blob, the mechanism Domika uses for its dashboard blob). A local cache provides instant load; HA is the sync point. Nothing touches a Haven-operated server. (Contract for Sub-project B.)
 
+**HA is the single source of truth for configuration — not the device, not a cloud.** The local cache is a read-through cache for startup latency, never an authority: on conflict, HA's stored config wins, and a device that edited offline reconciles against it rather than overwriting blindly.
+
+**Multi-user households (added 2026-07-25).** Because config lives in HA rather than on a device, several people in the same household can see the *same* configured view from their own phones — this is a first-class goal, not a side effect. It requires decisions deferred to Sub-project B:
+- **Shared vs per-user scope.** The default should be one **shared household configuration** (everyone sees the same rooms/tiles, which is what makes a home dashboard feel coherent). Genuinely personal state — favorites, which rooms you pinned, per-device widget choices — likely wants a **per-user overlay** keyed by the HA user id, layered over the shared base.
+- **Concurrent edits.** Two people editing the dashboard at once needs at minimum last-write-wins with a version/etag so a stale client can detect it was superseded, rather than silently clobbering.
+- **Permissions.** Whether every HA user may edit the shared config, or only admins, follows HA's own admin flag.
+
 ## 11. Onboarding (registry-first)
 
 > **Amended 2026-07-25** (during Sub-project D design): HavenApp is **registry-first** — HA's floor/area/device/entity registry *is* the structure of truth. The earlier "migrate an existing Lovelace dashboard" path is **dropped from v1** (deferred as a possible future import). See `docs/superpowers/specs/2026-07-25-havenapp-subproject-d-renderers-dashboard-design.md` §1.
