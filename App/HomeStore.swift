@@ -184,12 +184,15 @@ final class HomeStore {
 
     func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home) }
 
-    /// Flattens a room's `deviceRefs` down to the plain entity ids `RoomRollups` needs.
+    /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.
+    /// Curated (`overviewRefs`) rather than raw, so "3/5 lights on · All Off" counts and acts
+    /// on exactly the tiles the user can see — a bulk action that silently reaches entities
+    /// curation hid would be worse than no bulk action.
     /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
     /// anywhere yet, so they're skipped here. Once composites exist, this will need to
     /// expand each one into its constituent input entities instead of dropping it.
     private func deviceEntityIds(_ room: RoomSection) -> [String] {
-        room.deviceRefs.compactMap { ref in
+        room.overviewRefs.compactMap { ref in
             if case .entity(let id) = ref { return id }
             return nil
         }
