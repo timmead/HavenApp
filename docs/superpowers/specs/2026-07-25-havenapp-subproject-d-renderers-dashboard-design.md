@@ -154,6 +154,13 @@ Design each of the above as a focused unit with a clear interface (a renderer kn
 
 ## 11. Open questions / follow-ups
 
+- **Entity curation / intelligent defaults (raised 2026-07-25 at the Task 13 runtime checkpoint — deferred, but required before this is usable).** A real Home Assistant instance exposes *hundreds* of entities per home, and the current model renders every entity in an area. That is correct-but-unusable at scale: a room section becomes a wall of tiles. Haven needs to ship a curated default set and let the rest be opt-in. Cheap, high-value first pass (all available from data we already fetch):
+  - Exclude entities whose registry entry has `entity_category` of `config` or `diagnostic` — these are settings/telemetry, not things you control.
+  - Exclude `hidden_by` / `disabled_by` entities (the user already hid them in HA).
+  - Prefer primary controllable domains (light, switch, cover, lock, climate, media_player, scene) by default; demote raw `sensor`/`binary_sensor` to the room's detail view or the environment chips rather than the overview grid.
+  - Collapse device-companion entities (a light's `_brightness`/`_color` helper entities, battery/linkquality sensors) behind their parent device.
+  Anything beyond that (relevance ranking, usage-based promotion) belongs with the configuration sub-project, where the user can override the defaults.
+
 - **Icon nit:** temperature → classic bulb-thermometer symbol (capture in `IconMap`).
 - **Sensor-history depth in D:** confirmed in-scope but implemented as the sensor renderer's history (single-series, range-switched); broader energy viz stays later.
 - **Product-def spec §11** should be updated to registry-first (dashboard import dropped) for consistency.
