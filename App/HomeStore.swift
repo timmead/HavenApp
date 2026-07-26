@@ -37,23 +37,6 @@ final class HomeStore {
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
 
-    func toggleLightOptimistic(_ entityId: String) {
-        guard let connection, var s = states[entityId] else { return }
-        let previous = s
-        let optimisticValue = (s.state == "on") ? "off" : "on"      // optimistic flip
-        s.state = optimisticValue
-        states[entityId] = s
-        Task {
-            do { try await connection.toggleLight(entityId: entityId) }
-            catch {
-                // Only roll back if the entity still holds the value we optimistically wrote —
-                // otherwise a late failure would clobber newer state (e.g. attributes from a
-                // WS push that arrived while the command was in flight).
-                if self.states[entityId]?.state == optimisticValue { self.states[entityId] = previous }
-            }
-        }
-    }
-
     var presented: String?                                   // entityId whose modal is open
     func state(_ id: String) -> EntityState? { states[id] }
 
