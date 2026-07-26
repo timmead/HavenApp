@@ -27,6 +27,9 @@ struct CameraModal: View {
     /// someone who did not open the app. Deliberately not persisted: "for that viewing" means
     /// exactly that, and a remembered preference would make the *next* opening the startling one.
     @State private var isMuted = true
+    /// Whether this view currently holds the shared audio route. Tracked rather than inferred from
+    /// `isMuted`, so releasing it is tied to having taken it — see `releaseAudioSession`.
+    @State private var holdsAudioSession = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -44,34 +47,39 @@ struct CameraModal: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        // Re-keyed on availability, not just on the entity id. A camera that was unavailable when
-        // the modal opened (an NVR reboot, a Wi-Fi blip) used to stay showing "Unavailable" until
-        // the user closed and reopened the sheet — while the header subtitle a few points above it
-        // updated to "Idle" off the same state push. Two parts of one modal disagreeing on screen
-        // about whether the camera is working.
-        .task(id: TaskKey(entityId: entityId, isAvailable: s?.isAvailable ?? false)) { await start(s) }
+        // Everything about the stream's life hangs off this one key, so there is exactly one place
+        // that starts a player and one that stops it.
+        //
+        // - **Availability.** A camera that was unavailable when the modal opened (an NVR reboot, a
+        //   Wi-Fi blip) used to stay showing "Unavailable" until the user closed and reopened the
+        //   sheet, while the header subtitle a few points above it had already updated to "Idle"
+        //   off the same state push — two parts of one modal disagreeing on screen.
+        // - **Foreground.** The tiles got a structural guarantee that they stop on background; the
+        //   component actually holding a live stream needs it more, and `.task` cancels on
+        //   *disappear*, which backgrounding is not. Coming back rebuilds rather than resumes:
+        //   `play()` starts at the live edge when a player is *created*, not after a pause, so
+        //   resuming would leave a live indicator pulsing over a frame minutes old — the same class
+        //   of dishonesty as a stale staleness stamp. Home Assistant's stream token may well have
+        //   expired by then too.
+        .task(id: TaskKey(entityId: entityId,
+                          isAvailable: s?.isAvailable ?? false,
+                          isForeground: scenePhase == .active)) {
+            guard scenePhase == .active else { teardown(); return }
+            await start(s)
+        }
         // **Teardown, and why it is here rather than only in `.task`'s cancellation.** Cancelling
         // the task stops us *asking* for things; it does nothing to an `AVPlayer` that is already
         // running, which would go on pulling segments from the user's Home Assistant — and go on
         // holding an open video connection to a camera in their home — for as long as the object
         // lived. A lingering stream is a battery drain and a privacy problem in the same breath.
         .onDisappear { teardown() }
-        // The tiles were given a structural guarantee that they stop on background; the component
-        // actually holding a live stream needs it more. `.task` cancels on *disappear*, and
-        // backgrounding is not a disappear — so without this the player keeps pulling HLS segments
-        // from the user's home while the app is off screen. iOS suspends us soon enough (there is
-        // no `UIBackgroundModes` entry), but "soon enough, by someone else's decision" is not the
-        // same as stopped.
-        .onChange(of: scenePhase) { _, phase in
-            guard let player else { return }
-            phase == .active ? player.play() : player.pause()
-        }
     }
 
     /// `.task`'s id. A struct rather than a tuple so the intent of each field survives.
     private struct TaskKey: Equatable {
         let entityId: String
         let isAvailable: Bool
+        let isForeground: Bool
     }
 
     // MARK: - Header
@@ -179,9 +187,7 @@ struct CameraModal: View {
     /// of renaming the button.
     private var muteButton: some View {
         Button {
-            isMuted.toggle()
-            player?.isMuted = isMuted
-            configureAudioSession(muted: isMuted)
+            setMuted(!isMuted)
         } label: {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 15, weight: .semibold))
@@ -285,22 +291,29 @@ struct CameraModal: View {
     /// stopped, and it starts pulling HLS segments from a camera inside the user's home
     /// immediately. That is a direct hole in "tear the stream down on dismiss", in the one place
     /// the plan calls out as both a battery drain and a privacy problem.
+    ///
+    /// **Nothing on screen is disturbed until there is something to replace it with.** The teardown
+    /// happens after the awaits, immediately before the new player is built — not on entry. Tearing
+    /// down first meant that a camera merely *flapping* between `idle` and `unavailable` (the exact
+    /// NVR-reboot case the availability re-key exists for) blanked a working feed to "Connecting…"
+    /// for however long `camera/stream` took to answer, once per transition.
     private func start(_ s: CameraState?) async {
-        // This can now run more than once — the task is re-keyed when the camera becomes available
-        // — so a previous player must be stopped before a second one is built beside it.
-        // `teardown` is written to be safe to call with nothing to tear down.
-        teardown()
-        guard let s else { source = .unavailable; return }
+        guard let s else { replace(with: .unavailable, player: nil); return }
         // `nil` is every way this can fail to produce a URL — never asked, command errored, socket
         // dropped — and `CameraStream.source` turns all of them into the still fallback rather than
         // into an error, because the still is a working live view, just a slower one.
         let path = CameraStream.shouldRequestStream(s) ? await store.cameraStreamPath(entityId) : nil
         if Task.isCancelled { return }
-        guard let baseURL = await app.currentBaseURL() else { source = .unavailable; return }
+        guard let baseURL = await app.currentBaseURL() else {
+            replace(with: .unavailable, player: nil)
+            return
+        }
         if Task.isCancelled { return }
         let resolved = CameraStream.source(hlsPath: path, state: s, baseURL: baseURL)
-        source = resolved
-        guard case .hls(let url) = resolved else { return }
+        guard case .hls(let url) = resolved else {
+            replace(with: resolved, player: nil)
+            return
+        }
         // **Before `play()`, and it matters even though we start muted.** Starting an HLS asset
         // with an audio track activates the shared `AVAudioSession`, and the app's default
         // category (`.soloAmbient`) does not mix — so opening a camera would interrupt whatever
@@ -308,47 +321,76 @@ struct CameraModal: View {
         // activation. `.ambient` mixes and is silenced by the ring switch, which is the right
         // default for a feed nobody has asked to hear. Unmuting escalates to `.playback`, which is
         // what makes the sound actually audible on a phone set to silent.
-        try? AVAudioSession.sharedInstance().setCategory(.ambient)
+        //
+        // Guarded on `isMuted`, because this now also runs for a *replacement* — a flap, a return
+        // from the background — and a user who had already turned the sound on would otherwise have
+        // their `.playback` route quietly downgraded back to `.ambient` underneath them, taking the
+        // ring switch back with it. The control would still read "on" while the phone stayed quiet.
+        if isMuted { try? AVAudioSession.sharedInstance().setCategory(.ambient) }
         let player = AVPlayer(url: url)
         player.isMuted = isMuted
         // No `automaticallyWaitsToMinimizeStalling` fiddling and no seek-to-live: HA's HLS playlist
-        // is a live window, so `play()` starts at the live edge on its own.
+        // is a live window, so a *newly created* player starts at the live edge on its own. That is
+        // also why returning from the background rebuilds instead of resuming — see the task key.
         player.play()
-        self.player = player
+        replace(with: resolved, player: player)
     }
 
-    /// Stops the stream and lets go of it. Called on dismiss.
+    /// Swaps in a new source and player, stopping whatever was there first.
+    ///
+    /// One function so "the old player is always stopped before the new one is shown" is a property
+    /// of the code rather than of every caller remembering the pair — and so the swap is a single
+    /// synchronous step with no await in the middle for a placeholder to appear through.
+    private func replace(with source: CameraStreamSource, player: AVPlayer?) {
+        stopPlayer()
+        self.player = player
+        self.source = source
+    }
+
+    /// Stops the stream, lets go of it, and gives back the audio route. The *leaving* path — the
+    /// sheet being dismissed, or the app going to the background. A replacement goes through
+    /// `replace(with:player:)` instead, which stops the old player without touching audio.
     private func teardown() {
+        stopPlayer()
+        source = nil
+        // The audio route is released here and not in `stopPlayer`, so a stream *replacement*
+        // (a flap, a return from the background) doesn't silently revoke a sound the user
+        // deliberately turned on. Only leaving the view does.
+        releaseAudioSession()
+    }
+
+    private func stopPlayer() {
         player?.pause()
         // Detaching the item is what actually ends the network activity — a paused `AVPlayer` still
         // holds its asset, and an HLS asset holds a connection to the user's Home Assistant.
         player?.replaceCurrentItem(with: nil)
         player = nil
-        source = nil
-        // Hand the audio route back only if we ever took it. Deactivating a session this view
-        // never activated would send `.notifyOthersOnDeactivation` to whatever *else* is playing,
-        // on behalf of a camera the user opened and closed without ever asking for sound.
-        if !isMuted {
-            isMuted = true
-            configureAudioSession(muted: true)
-        }
     }
 
-    /// Takes the audio route only while the user has actually asked for sound.
+    /// Applies the user's mute choice to the current player and to the audio route.
     ///
     /// `.playback` is what makes an unmute audible at all on a phone with the ring switch set to
     /// silent, which is the phone most people are holding — without it, "tap to enable sound" would
-    /// do nothing at all for them and look like a broken control. It is set only on unmute and
-    /// released on mute or teardown, so opening a camera never interrupts what the user was
-    /// listening to; only deliberately turning its sound on does.
-    private func configureAudioSession(muted: Bool) {
+    /// do nothing for them and look like a broken control. It is taken only on an explicit unmute,
+    /// so opening a camera never interrupts what the user was listening to; only deliberately
+    /// turning its sound on does.
+    private func setMuted(_ muted: Bool) {
+        isMuted = muted
+        player?.isMuted = muted
+        guard !muted else { releaseAudioSession(); return }
         let session = AVAudioSession.sharedInstance()
-        if muted {
-            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
-        } else {
-            try? session.setCategory(.playback, mode: .default)
-            try? session.setActive(true)
-        }
+        try? session.setCategory(.playback, mode: .default)
+        try? session.setActive(true)
+        holdsAudioSession = true
+    }
+
+    /// Hands the audio route back, and **only if we ever took it**. Deactivating a session this
+    /// view never activated would send `.notifyOthersOnDeactivation` to whatever else is playing,
+    /// on behalf of a camera the user opened and closed without ever asking for sound.
+    private func releaseAudioSession() {
+        guard holdsAudioSession else { return }
+        holdsAudioSession = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 }
 
