@@ -8,10 +8,14 @@ struct LockModal: View {
         let e = store.state(entityId); let s = e.map(LockState.init)
         let locked = s?.isLocked ?? false; let jammed = s?.isJammed ?? false
         let subtitle = jammed ? "Jammed" : (locked ? "Locked" : "Unlocked")
+        let symbol = jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill")
+        // A jammed lock's true position is unknown — omit the toggle rather than show a
+        // control that implies a known (and likely wrong) locked/unlocked state.
+        let toggleBinding: Binding<Bool>? = jammed ? nil : Binding(get: { locked }, set: { _ in store.toggleLock(entityId) })
         VStack {
-            ModalHeader(systemImage: locked ? "lock.fill" : "lock.open.fill", title: TileName.of(entityId, e), subtitle: subtitle,
+            ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle,
                         accent: jammed ? HavenColor.domain(.light) : HavenColor.domain(.lock),
-                        toggle: Binding(get: { locked }, set: { _ in store.toggleLock(entityId) })) { dismiss() }
+                        toggle: toggleBinding) { dismiss() }
             Spacer()
         }
     }
