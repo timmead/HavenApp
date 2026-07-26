@@ -5,6 +5,54 @@ import Foundation
 @Suite struct ConnectionEndpointTests {
     private func url(_ s: String) -> URL { URL(string: s)! }
 
+    // MARK: - isNabuCasaHost — the security-critical adopt/reject predicate
+    //
+    // `AppModel` calls this exact function at both boundaries around a discovered `external_url`:
+    // once when `get_config`'s result first arrives off the wire (write boundary,
+    // `rememberDiscoveredURLs`), and again every time a previously-persisted value is loaded back
+    // out of `UserDefaults` (read boundary, `discoveredURLs()`/`lastWorkingURL()`) — the latter so
+    // a hostile value written by an earlier, unvalidated build doesn't keep being trusted forever
+    // just because it's already on disk. Being a pure function in HavenCore is what makes both of
+    // those call sites (and this reuse) actually verifiable, since there is no App-layer test
+    // target `AppModel` itself could be exercised from.
+
+    @Test func isNabuCasaHostAdoptsAGenuineNabuCasaHost() {
+        #expect(ConnectionEndpoint.isNabuCasaHost(url("https://abc123.ui.nabu.casa")))
+    }
+
+    @Test func isNabuCasaHostRejectsAnArbitraryHTTPSHost() {
+        // The core I-3 attack: an on-LAN MITM injects this as get_config's external_url so it
+        // gets tried — and trusted with the refresh token — later, off-network.
+        #expect(!ConnectionEndpoint.isNabuCasaHost(url("https://evil.example")))
+    }
+
+    @Test func isNabuCasaHostRejectsLookalikeHosts() {
+        // Dash instead of dot right before "ui" — not a subdomain of ui.nabu.casa at all.
+        #expect(!ConnectionEndpoint.isNabuCasaHost(url("https://evil-ui.nabu.casa")))
+        // A host the attacker fully controls, merely containing the string as a path component —
+        // `URL.host` is only ever the authority's host, never the path, so this must not match.
+        #expect(!ConnectionEndpoint.isNabuCasaHost(url("https://attacker.com/.ui.nabu.casa")))
+        // A real Nabu Casa subdomain used as a subdomain of an attacker's own host.
+        #expect(!ConnectionEndpoint.isNabuCasaHost(url("https://abc123.ui.nabu.casa.attacker.com")))
+    }
+
+    @Test func isNabuCasaHostRejectsAHostileValueArrivingFromPersistedState() {
+        // Simulates constraint A of the I-3 fix: a hostile `external_url` an earlier,
+        // unvalidated build (commit a78bdc2) already wrote to UserDefaults with no check at all.
+        // `AppModel.discoveredURLs()` round-trips exactly this way (read the stored string, parse
+        // it back to a URL, run it through this same predicate) before ever treating it as a
+        // candidate — proving the predicate rejects it identically regardless of whether it just
+        // arrived on the wire or was already sitting in persisted state from before this fix
+        // existed.
+        let persisted = "https://evil.example"
+        let roundTripped = UserDefaults.standard
+        roundTripped.set(persisted, forKey: "test.legacyDiscoveredExternalURL")
+        defer { roundTripped.removeObject(forKey: "test.legacyDiscoveredExternalURL") }
+        let loaded = roundTripped.string(forKey: "test.legacyDiscoveredExternalURL").flatMap(URL.init(string:))
+        #expect(loaded != nil)
+        #expect(!ConnectionEndpoint.isNabuCasaHost(loaded!))
+    }
+
     @Test func singleUserEnteredURLYieldsOneLocalCandidate() {
         let candidates = ConnectionEndpoint.candidates(
             userEntered: url("http://homeassistant.local:8123"),

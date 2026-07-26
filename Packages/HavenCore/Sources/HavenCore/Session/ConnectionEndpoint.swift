@@ -85,9 +85,19 @@ public enum ConnectionEndpoint: Sendable, Equatable {
         return ordered
     }
 
+    /// The single, strict definition of "this is a genuine Nabu Casa host" — a suffix match on
+    /// `.ui.nabu.casa` (so `abc123.ui.nabu.casa` matches, but a lookalike like
+    /// `evil-ui.nabu.casa` or a host merely containing the string, e.g. `attacker.com` serving a
+    /// path of `/.ui.nabu.casa`, does not: `URL.host` is just the authority's host component,
+    /// never a path). Exposed publicly so callers outside this type — e.g. `AppModel` deciding
+    /// whether a `get_config`-reported `external_url` is safe to auto-adopt — apply the exact
+    /// same check `classify` does below, rather than a second, potentially-drifting copy of it.
+    public static func isNabuCasaHost(_ url: URL) -> Bool {
+        url.host?.lowercased().hasSuffix(".ui.nabu.casa") ?? false
+    }
+
     private static func classify(_ url: URL, defaultLocal: Bool) -> ConnectionEndpoint {
-        let isNabuCasa = url.host?.lowercased().hasSuffix(".ui.nabu.casa") ?? false
-        guard !isNabuCasa, defaultLocal else {
+        guard !isNabuCasaHost(url), defaultLocal else {
             return .remote(forcedHTTPS(url))
         }
         return .local(url)

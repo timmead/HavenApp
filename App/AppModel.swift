@@ -124,13 +124,16 @@ final class AppModel {
     /// no duplicates).
     ///
     /// Re-probe policy (the exact cadence was left to my judgement — see
-    /// `.superpowers/overnight/c2-remote-failover-report.md` for the reasoning): round 0 of
-    /// every `connect()` call — i.e. every fresh app launch (`restoreIfPossible`) and every
-    /// explicit sign-in, the only two callers — always uses the default local-first ordering, so
-    /// returning home always re-probes the fast path on the very next launch. Only once a whole
-    /// round has failed and we're backing off does a later round prefer whatever URL last
-    /// completed a full connect, so a phone that's genuinely away from home doesn't pay a local
-    /// connection-timeout on every single backoff retry.
+    /// `.superpowers/overnight/c2-remote-failover-report.md` for the reasoning, including a
+    /// fix-round-1 correction to what's described here): `lastWorkingURL` is passed as
+    /// `preferredFirst` on *every* round, including round 0 — i.e. every fresh app launch
+    /// (`restoreIfPossible`) and every explicit sign-in, the only two callers. `preferredFirst`
+    /// only *hoists* a candidate that's already in the list; it never removes any other
+    /// candidate. So on a cold launch away from home with a remembered remote winner, the order
+    /// becomes `[remote, local, …]` — remote is tried (and normally succeeds) first, but local is
+    /// still probed immediately afterwards in that same round with no backoff in between, so
+    /// "returning home returns to the fast path" is preserved without needing a separate
+    /// staleness/timestamp mechanism.
     private func connect() async {
         guard let base = baseURL, let tokenProvider else { return }
         phase = .connecting
@@ -141,18 +144,25 @@ final class AppModel {
         // so two `auth_invalid`s separated by hours of otherwise-ordinary retrying each still get
         // their own forced-refresh chance instead of the second one being terminal by accident.
         // Shared across every candidate/round in this `connect()` call: an auth_invalid is a
-        // property of the token, not of which URL we used to reach the instance.
+        // property of the token, not of which URL we used to reach the instance. BUT a single
+        // candidate's auth_invalid is not trusted as proof the token itself is bad — see
+        // `candidatesWithPersistentAuthInvalid` below — since a rogue device answering on one
+        // candidate's address could return auth_invalid purely to bait a sign-out before the
+        // genuine remaining candidates (e.g. the real remote/Nabu Casa one) are ever tried.
         var didForceRefreshAfterAuthInvalid = false
         while true {
             if Task.isCancelled { return }
             let discovered = discoveredURLs()
-            let preferredFirst = attempt == 0 ? nil : lastWorkingURL()
             let candidates = ConnectionEndpoint.candidates(
                 userEntered: base,
                 discoveredInternal: discovered.internal,
                 discoveredExternal: discovered.external,
-                preferredFirst: preferredFirst
+                preferredFirst: lastWorkingURL()
             )
+            // Only escalate to `requireReauthentication()` once *every* candidate this round has
+            // hit the "already spent this call's one forced refresh, still auth_invalid" wall —
+            // see the check after this round's candidate loop, and the comment at the guard below.
+            var candidatesWithPersistentAuthInvalid = 0
 
             for candidate in candidates {
                 if Task.isCancelled { return }
@@ -193,13 +203,22 @@ final class AppModel {
                         if Task.isCancelled { await c.disconnect(); return }
                         havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
                         rememberWorkingURL(candidate.url)
-                        // Best-effort: learning the instance's own internal/external URLs is a
-                        // nice-to-have for the *next* connection, never a reason to fail this one.
-                        if let config = try? await home.fetchInstanceConfig() {
+                        // The UI must become usable now, not after `fetchInstanceConfig` below:
+                        // `receive()` (and so `request(_:)`, and so `get_config`) is deliberately
+                        // unbounded — a server that authenticates and bootstraps fine but never
+                        // answers `get_config` must not pin the connecting spinner forever over a
+                        // socket that's otherwise perfectly live and usable.
+                        phase = .ready
+                        // Best-effort, fire-and-forget from here on: learning the instance's own
+                        // internal/external URLs is a nice-to-have for the *next* connection,
+                        // never a reason to hold up (or fail) this one. The `!Task.isCancelled`
+                        // guards the `UserDefaults` write specifically — without it, a
+                        // `connect()` call cancelled while this await was in flight (e.g. by a
+                        // sign-out that started after `phase = .ready`) could still persist a
+                        // discovered URL after the session it belongs to is already gone.
+                        if let config = try? await home.fetchInstanceConfig(), !Task.isCancelled {
                             rememberDiscoveredURLs(config)
                         }
-                        if Task.isCancelled { await c.disconnect(); return }
-                        phase = .ready
                         return
                     } catch TokenProviderError.reauthenticationRequired {
                         await client?.disconnect()
@@ -211,9 +230,17 @@ final class AppModel {
                         await client?.disconnect()
                         if Task.isCancelled { return }
                         guard !didForceRefreshAfterAuthInvalid else {
-                            havenLog.error("token still invalid after a forced refresh — signing out")
-                            await requireReauthentication()
-                            return
+                            // A second auth_invalid after this call's one forced refresh is
+                            // already spent could mean the token really is dead — or it could be
+                            // a rogue device answering on *this* candidate's address (e.g. port
+                            // 8123 on the LAN) returning auth_invalid to induce a sign-out before
+                            // the genuine remaining candidates are ever tried. Don't trust a
+                            // single candidate's word for it: fail just this candidate, and only
+                            // actually sign out once every candidate this round has said the same
+                            // thing (checked right after the candidate loop below).
+                            candidatesWithPersistentAuthInvalid += 1
+                            havenLog.error("token still invalid after a forced refresh — treating the \(candidate.isRemote ? "remote" : "local", privacy: .public) candidate as failed, not signing out yet")
+                            break candidateAttempt
                         }
                         didForceRefreshAfterAuthInvalid = true
                         havenLog.error("Home Assistant rejected the access token as invalid — forcing a refresh")
@@ -246,6 +273,14 @@ final class AppModel {
             }
 
             if Task.isCancelled { return }
+            if !candidates.isEmpty, candidatesWithPersistentAuthInvalid == candidates.count {
+                // Every candidate this round said the same thing after its own forced-refresh
+                // chance: this is corroborated across the whole instance, not just one rogue
+                // responder — now it's safe to trust as a real, terminal token problem.
+                havenLog.error("token rejected as invalid by every candidate this round — signing out")
+                await requireReauthentication()
+                return
+            }
             attempt += 1
             havenLog.error("all candidates failed this round — backing off (attempt \(attempt, privacy: .public))")
             phase = .retrying(attempt: attempt)
@@ -257,28 +292,82 @@ final class AppModel {
         UserDefaults.standard.string(forKey: DefaultsKeys.baseURL).flatMap(URL.init(string:))
     }
 
+    /// SECURITY (read boundary — see `rememberDiscoveredURLs` for the write boundary and the full
+    /// threat model): the fix there only stops a hostile `external_url` from being written *from
+    /// now on*. It does nothing for a device that already ran the earlier, unvalidated build —
+    /// commit a78bdc2 persisted whatever `get_config` returned with no check at all, so a hostile
+    /// host may already be sitting in this exact `UserDefaults` key. Re-running the identical
+    /// `isNabuCasaHost` check here, and dropping (and purging) anything that fails it, treats
+    /// already-stored state as just as untrustworthy as a fresh value straight off the wire —
+    /// which it is; it was written by a build that trusted the wire.
     private func discoveredURLs() -> (internal: URL?, external: URL?) {
         let d = UserDefaults.standard
         let internalURL = d.string(forKey: DefaultsKeys.discoveredInternalURL).flatMap(URL.init(string:))
-        let externalURL = d.string(forKey: DefaultsKeys.discoveredExternalURL).flatMap(URL.init(string:))
+        var externalURL = d.string(forKey: DefaultsKeys.discoveredExternalURL).flatMap(URL.init(string:))
+        if let candidate = externalURL, !ConnectionEndpoint.isNabuCasaHost(candidate) {
+            havenLog.error("stored discoveredExternalURL (host: \(candidate.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — dropping it as untrusted (possibly left over from an earlier build)")
+            d.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
+            externalURL = nil
+        }
         return (internalURL, externalURL)
     }
 
+    /// SECURITY: also re-validated on read, same reasoning as `discoveredURLs()` above. A
+    /// genuine remote candidate can, after the write-boundary fix, only ever be a Nabu Casa host
+    /// — so requiring that here to trust `lastWorkingURL` as a preference costs nothing for the
+    /// legitimate local case: a local candidate is already tried first by `ConnectionEndpoint`'s
+    /// default ordering regardless of any `preferredFirst` hoist, so dropping a non-Nabu-Casa
+    /// `lastWorkingURL` here never changes which candidate is actually tried, only (at most) a
+    /// minor ordering nuance between two local candidates — never a security-relevant one.
     private func lastWorkingURL() -> URL? {
-        UserDefaults.standard.string(forKey: DefaultsKeys.lastWorkingURL).flatMap(URL.init(string:))
+        guard let url = UserDefaults.standard.string(forKey: DefaultsKeys.lastWorkingURL).flatMap(URL.init(string:)) else {
+            return nil
+        }
+        guard ConnectionEndpoint.isNabuCasaHost(url) else {
+            // Not necessarily hostile — most of the time this is simply a perfectly legitimate
+            // local address, which just doesn't need to be (and after this fix, never needs to
+            // be) trusted here to still work correctly. Not logged as an error for that reason.
+            return nil
+        }
+        return url
     }
 
     private func rememberWorkingURL(_ url: URL) {
         UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
     }
 
+    /// SECURITY: `config` came straight off the wire (`get_config`'s result), and whatever we
+    /// persist here becomes a future connection candidate that `TokenProvider.setBaseURL` will
+    /// later POST the refresh token to (see `connect()`). The default server URL is cleartext
+    /// `http://homeassistant.local:8123` and the app allows arbitrary cleartext loads, so a
+    /// transient on-LAN attacker can MITM this exact response — `forcedHTTPS` on the candidate
+    /// side is no defense, since they can simply serve a valid cert for a host they control.
+    /// Without this check, injecting `external_url: https://evil.example` into one MITM'd
+    /// `get_config` would get it persisted and later tried — and trusted with the refresh token —
+    /// every time local fails from then on, e.g. once the phone is on cellular. Home Assistant
+    /// Cloud's `*.ui.nabu.casa` is the one remote address this app has a product reason to trust
+    /// automatically (the user's own existing Nabu Casa subscription); anything else must be
+    /// rejected, not silently dropped — logged clearly so a real HA feature (e.g. a self-hosted
+    /// reverse proxy `external_url`) failing to appear as a candidate doesn't look like a bug with
+    /// no explanation. (A user-confirmed opt-in for non-Nabu-Casa remote URLs is a real, separate
+    /// feature this does not implement.)
     private func rememberDiscoveredURLs(_ config: HAInstanceConfig) {
         let d = UserDefaults.standard
         if let internalURL = config.internalURL {
             d.set(internalURL.absoluteString, forKey: DefaultsKeys.discoveredInternalURL)
         }
         if let externalURL = config.externalURL {
-            d.set(externalURL.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
+            if ConnectionEndpoint.isNabuCasaHost(externalURL) {
+                d.set(externalURL.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
+            } else {
+                havenLog.error("get_config's external_url (host: \(externalURL.host ?? "?", privacy: .public)) is not a *.ui.nabu.casa address — rejecting, not persisting; HavenApp only auto-adopts the user's own Nabu Casa remote address")
+            }
+        }
+        if config.internalURL == nil && config.externalURL == nil {
+            // The wire shape here (get_config's internal_url/external_url fields) is assumed from
+            // HA's documented behavior, not yet verified against a live instance — if that
+            // assumption is wrong, this is how the feature would silently no-op with no error.
+            havenLog.error("get_config returned neither internal_url nor external_url — nothing to remember for the next connection")
         }
     }
 
