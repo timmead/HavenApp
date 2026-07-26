@@ -66,4 +66,28 @@ final class HomeStore {
         states[id] = s
         Task { do { try await work(connection) } catch { self.states[id] = previous } }
     }
+
+    func openCloseCover(_ id: String) {
+        guard let connection, var s = states[id] else { return }
+        let previous = s
+        let open = s.state == "open" || s.state == "opening"
+        s.state = open ? "closed" : "open"
+        states[id] = s
+        Task {
+            do { try await (open ? connection.closeCover(id) : connection.openCover(id)) }
+            catch { self.states[id] = previous }
+        }
+    }
+
+    func toggleLock(_ id: String) {
+        guard let connection, var s = states[id] else { return }
+        let previous = s
+        let locked = s.state == "locked"
+        s.state = locked ? "unlocked" : "locked"
+        states[id] = s
+        Task {
+            do { try await connection.setLock(id, locked: !locked) }
+            catch { self.states[id] = previous }
+        }
+    }
 }
