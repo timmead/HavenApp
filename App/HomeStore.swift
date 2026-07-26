@@ -5,6 +5,7 @@ import HavenCore
 final class HomeStore {
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
+    var historyByKey: [String: HistorySeries] = [:]
     private var connection: HomeConnection?
     private var subscriptionTask: Task<Void, Never>?
 
@@ -135,5 +136,25 @@ final class HomeStore {
     func setCoverPosition(_ id: String, percent: Int) {
         guard let connection else { return }
         Task { try? await connection.setCoverPosition(id, percent: percent) }
+    }
+
+    /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
+    /// (or the load failed) — callers should render an empty/loading state, not crash.
+    func history(_ entityId: String, _ range: HistoryRange) -> HistorySeries? {
+        historyByKey["\(entityId)#\(range)"]
+    }
+
+    /// Fetches and caches a history series for `entityId`/`range`. Reuses the cache when
+    /// already populated (a range switch always misses since the key changes); never
+    /// caches a failure, so a transient error doesn't permanently block a later retry.
+    func loadHistory(_ entityId: String, range: HistoryRange) async {
+        let key = "\(entityId)#\(range)"
+        guard historyByKey[key] == nil else { return }
+        guard let connection else { return }
+        do {
+            historyByKey[key] = try await connection.history(entityId: entityId, range: range, now: Date())
+        } catch {
+            // Leave the cache untouched so a later attempt (e.g. reopening the modal) can retry.
+        }
     }
 }
