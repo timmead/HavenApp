@@ -138,6 +138,63 @@ final class HomeStore {
         Task { try? await connection.setCoverPosition(id, percent: percent) }
     }
 
+    // MARK: - Room roll-ups + bulk actions
+
+    func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home) }
+
+    /// Flattens a room's `deviceRefs` down to the plain entity ids `RoomRollups` needs.
+    /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
+    /// anywhere yet, so they're skipped here. Once composites exist, this will need to
+    /// expand each one into its constituent input entities instead of dropping it.
+    private func deviceEntityIds(_ room: RoomSection) -> [String] {
+        room.deviceRefs.compactMap { ref in
+            if case .entity(let id) = ref { return id }
+            return nil
+        }
+    }
+
+    func rollups(_ room: RoomSection) -> [Rollup] {
+        RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
+    }
+
+    /// Turns off every entity in the roll-up (e.g. "All off" for a room's lights).
+    /// Reuses `setLight`, which is already the optimistic flip → command → rollback
+    /// primitive for a single entity, so each entity's failure is isolated from the rest.
+    /// Entities already off are skipped so this doesn't spam HA with redundant calls.
+    func allOff(_ rollup: Rollup) {
+        guard rollup.kind == .lights else { return }   // targetEntityIds are only lights when kind == .lights
+        for id in rollup.targetEntityIds {
+            guard states[id]?.state == "on" else { continue }
+            setLight(id, on: false)
+        }
+    }
+
+    /// Closes every cover in the roll-up (e.g. "Close all" for a room's covers). Covers use
+    /// "open"/"closed" rather than "on"/"off", so this mirrors `openCloseCover(_:)`'s
+    /// per-entity optimistic flip → command → rollback instead of the on/off helper.
+    /// Already-closed (or closing) covers are skipped.
+    func closeAll(_ rollup: Rollup) {
+        guard rollup.kind == .covers else { return }   // targetEntityIds are only covers when kind == .covers
+        for id in rollup.targetEntityIds {
+            let current = states[id]?.state
+            guard current == "open" || current == "opening" else { continue }
+            optimisticClose(id)
+        }
+    }
+
+    /// Per-entity optimistic close for one cover: flip state immediately, run the command,
+    /// roll back on failure. Isolated per entity so one failing cover doesn't undo the rest.
+    private func optimisticClose(_ id: String) {
+        guard let connection, var s = states[id] else { return }
+        let previous = s
+        s.state = "closed"
+        states[id] = s
+        Task {
+            do { try await connection.closeCover(id) }
+            catch { self.states[id] = previous }
+        }
+    }
+
     /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
     /// (or the load failed) — callers should render an empty/loading state, not crash.
     func history(_ entityId: String, _ range: HistoryRange) -> HistorySeries? {
