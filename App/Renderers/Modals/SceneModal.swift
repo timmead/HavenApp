@@ -6,9 +6,9 @@ struct SceneModal: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         let e = store.state(entityId)
-        VStack {
-            ModalHeader(systemImage: IconMap.symbol(domain: Domain.of(entityId), deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e), subtitle: e?.state ?? "—", accent: .gray) { dismiss() }
+        VStack(spacing: 14) {
+            ModalHeader(systemImage: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil), title: TileName.of(entityId, e), subtitle: "", accent: HavenColor.domain(.scene)) { dismiss() }
+            Button { store.run(entityId); dismiss() } label: { Text("Run").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).tint(HavenColor.domain(.scene))
             Spacer()
         }
     }
