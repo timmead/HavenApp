@@ -131,15 +131,24 @@ final class HomeStore {
         Task { try? await connection.activate(sceneOrScript: id) }
     }
 
+    /// Brightness, optimistically. D spec §10b item 2 names this control by name as one that
+    /// visibly snaps back between release and Home Assistant's echo; `LightOptimistic.brightness`
+    /// is what removes the snap, and it writes `state` as well as `brightness` because a light
+    /// given a brightness is on — the tile's tint, icon and name colour all read the former.
     func setBrightness(_ id: String, percent: Int) {
-        guard let connection else { return }
-        Task { try? await connection.setBrightness(id, percent: percent) }
+        guard let current = states[id] else { return }
+        optimisticState(id, LightOptimistic.brightness(current, percent: percent)) { c in
+            try await c.setBrightness(id, percent: percent)
+        }
     }
 
-    /// Fire-and-forget, matching `setBrightness` exactly: no optimistic write into `states`,
-    /// since the light modal's own `dragKelvin` local state already covers the in-flight
-    /// preview and committing an unconfirmed kelvin value here would need the same
-    /// isOn-consistent rollback brightness deliberately doesn't do either.
+    /// Fire-and-forget, and now deliberately *unlike* `setBrightness`, which gained an optimistic
+    /// write when the tiles got a draggable brightness pip.
+    ///
+    /// Colour temperature has no tile control and no snap-back to remove: the light modal's own
+    /// `dragKelvin` covers the in-flight preview, and it is the only place a kelvin value can be
+    /// set. Writing one into `states` here would be inventing a reading for an attribute nothing
+    /// on the grid displays, with a rollback to get right for no visible gain.
     func setColorTemp(_ id: String, kelvin: Int) {
         guard let connection else { return }
         Task { try? await connection.setColorTemp(id, kelvin: kelvin) }
@@ -175,9 +184,15 @@ final class HomeStore {
         Task { try? await connection.closeCover(id) }
     }
 
+    /// Cover position, optimistically — and the open/closed state with it. `CoverState` reads those
+    /// two from different places (`current_position` versus the entity's `state` string), so
+    /// writing only the position leaves a shade dragged half-open rendering as closed everywhere
+    /// except the bar the user just moved, roll-up counts included. See `CoverOptimistic.position`.
     func setCoverPosition(_ id: String, percent: Int) {
-        guard let connection else { return }
-        Task { try? await connection.setCoverPosition(id, percent: percent) }
+        guard let current = states[id] else { return }
+        optimisticState(id, CoverOptimistic.position(current, percent: percent)) { c in
+            try await c.setCoverPosition(id, percent: percent)
+        }
     }
 
     // MARK: - Media player
@@ -187,7 +202,7 @@ final class HomeStore {
     func mediaPlayPause(_ id: String) {
         guard let current = states[id] else { return }
         let wasPlaying = MediaPlayerState(current).isPlaying
-        optimisticMedia(id, MediaPlayerOptimistic.playPause(current, now: Date())) { c in
+        optimisticState(id, MediaPlayerOptimistic.playPause(current, now: Date())) { c in
             try await wasPlaying ? c.mediaPause(id) : c.mediaPlay(id)
         }
     }
@@ -214,7 +229,7 @@ final class HomeStore {
     func setMediaVolume(_ id: String, percent: Int) {
         guard let current = states[id] else { return }
         let unmuting = MediaPlayerState(current).volumeChangeShouldUnmute
-        optimisticMedia(id, MediaPlayerOptimistic.volume(current, percent: percent, unmuting: unmuting)) { c in
+        optimisticState(id, MediaPlayerOptimistic.volume(current, percent: percent, unmuting: unmuting)) { c in
             if unmuting { try await c.setMediaMuted(id, muted: false) }
             try await c.setMediaVolume(id, percent: percent)
         }
@@ -222,14 +237,14 @@ final class HomeStore {
 
     func setMediaMuted(_ id: String, muted: Bool) {
         guard let current = states[id] else { return }
-        optimisticMedia(id, MediaPlayerOptimistic.mute(current, muted: muted)) { c in
+        optimisticState(id, MediaPlayerOptimistic.mute(current, muted: muted)) { c in
             try await c.setMediaMuted(id, muted: muted)
         }
     }
 
     func selectMediaSource(_ id: String, source: String) {
         guard let current = states[id] else { return }
-        optimisticMedia(id, MediaPlayerOptimistic.source(current, source)) { c in
+        optimisticState(id, MediaPlayerOptimistic.source(current, source)) { c in
             try await c.selectMediaSource(id, source: source)
         }
     }
@@ -238,21 +253,27 @@ final class HomeStore {
     /// both halves.
     func setMediaPower(_ id: String, on: Bool) {
         guard let current = states[id] else { return }
-        optimisticMedia(id, MediaPlayerOptimistic.power(current, on: on)) { c in
+        optimisticState(id, MediaPlayerOptimistic.power(current, on: on)) { c in
             try await c.setMediaPower(id, on: on)
         }
     }
 
-    /// The media-player flavour of `optimistic(_:on:_:)`: the caller hands over an already-computed
-    /// next `EntityState` rather than a single on/off, because a media command implies a *set* of
-    /// attributes — pausing restamps the position so the progress bar doesn't jump backwards, and
-    /// powering off clears the whole now-playing set. Those transforms are
-    /// `MediaPlayerOptimistic`'s, in HavenCore with tests; nothing is decided here.
+    /// The whole-state flavour of `optimistic(_:on:_:)`: the caller hands over an already-computed
+    /// next `EntityState` rather than a single on/off, because most commands imply a *set* of
+    /// attributes — pausing a player restamps the position so the progress bar doesn't jump
+    /// backwards, powering one off clears the whole now-playing set, setting a cover's position
+    /// changes whether it is open, and giving a light a brightness turns it on. Those transforms
+    /// live in `MediaPlayerOptimistic`, `LightOptimistic` and `CoverOptimistic`, in HavenCore with
+    /// tests; nothing is decided here.
+    ///
+    /// Shared by every domain rather than copied per domain — the D spec already flags five
+    /// near-identical flip/command/rollback blocks in this file as wanting extraction, and adding
+    /// a sixth and seventh for lights and covers would have been the wrong direction.
     ///
     /// Rollback compares the whole entity, not one field, and so is strictly safer than the on/off
     /// version: any state push that landed while the command was in flight leaves the comparison
     /// unequal and the rollback is skipped, exactly as intended.
-    private func optimisticMedia(_ id: String, _ next: EntityState,
+    private func optimisticState(_ id: String, _ next: EntityState,
                                  _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
         guard let connection, let previous = states[id] else { return }
         states[id] = next

@@ -12,7 +12,20 @@ struct CoverTile: View {
                     Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(open ? accent : .secondary).symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(open ? .primary : .secondary)
                 }
-                if let pos = s?.positionPercent { Spacer(minLength: 6); LevelBar(percent: pos, color: accent).padding(.vertical, 2) }
+                // Unlike the light, this is shown at every position including 0 — a closed shade
+                // has a real, meaningful position — so a drag up from the bottom genuinely opens
+                // it, and `CoverOptimistic.position` moves the open/closed state along with the
+                // number so the tile's tint and the bar can't disagree. Hence `minimum: 0`: for a
+                // cover, dragging to the bottom is closing it, which is a legitimate thing to ask
+                // for and leaves the control on screen.
+                if let pos = s?.positionPercent {
+                    Spacer(minLength: 6)
+                    PipSlider(percent: pos, accent: accent, axis: .vertical,
+                              label: "Position",
+                              onCommit: { store.setCoverPosition(entityId, percent: $0) },
+                              onTap: { store.openCloseCover(entityId) })
+                        .padding(.vertical, 2)
+                }
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
