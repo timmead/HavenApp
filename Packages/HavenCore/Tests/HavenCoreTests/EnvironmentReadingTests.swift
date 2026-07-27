@@ -42,6 +42,15 @@ private let thermostatHumid = UpliftedSensor(role: .humidity, entityId: "climate
     #expect(EnvironmentReading.display(humid, state: state("sensor.h", "50")) == "50%")
 }
 
+/// `format` is the shared formatter `display` and the room history scrub readout both go through —
+/// pinned directly, and against a non-default unit, so a Fahrenheit home can't drift back to a
+/// hand-rolled `String(format: "%.1f")` plus a hardcoded "°" the way the scrub readout once did.
+@Test func theSharedFormatterAppliesToBothRolesAndAnyUnit() {
+    #expect(EnvironmentReading.format(71.6, role: .temperature, unit: "°F") == "71.6°F")
+    #expect(EnvironmentReading.format(21.0, role: .temperature, unit: "°C") == "21°C")
+    #expect(EnvironmentReading.format(44.6, role: .humidity, unit: "%") == "45%")
+}
+
 // MARK: - The absence cases
 
 /// The bug this replaces: the previous inline `state + "°"` rendered the literal string
@@ -57,6 +66,16 @@ private let thermostatHumid = UpliftedSensor(role: .humidity, entityId: "climate
     #expect(EnvironmentReading.display(temp, state: state("sensor.t", "not a number")) == "—")
     // An attribute source whose attribute simply isn't there.
     #expect(EnvironmentReading.display(thermostatTemp, state: state("climate.lr", "heat")) == "—")
+    // `Double("nan")` and friends all parse successfully in Swift, unlike ordinary garbage text —
+    // so these need their own guard, not just the `Double(...)` failure above. Unguarded, the
+    // humidity branch of `format` traps on `Int(inf.rounded())` and the temperature branch renders
+    // the literal string "nan°C".
+    #expect(EnvironmentReading.display(temp, state: state("sensor.t", "nan")) == "—")
+    #expect(EnvironmentReading.display(temp, state: state("sensor.t", "inf")) == "—")
+    #expect(EnvironmentReading.display(temp, state: state("sensor.t", "infinity")) == "—")
+    #expect(EnvironmentReading.display(temp, state: state("sensor.t", "-inf")) == "—")
+    #expect(EnvironmentReading.display(humid, state: state("sensor.h", "nan")) == "—")
+    #expect(EnvironmentReading.display(humid, state: state("sensor.h", "inf")) == "—")
 }
 
 /// The invariant the persistence guard rests on: `value` is nil in exactly the cases `display`
@@ -73,6 +92,14 @@ private let thermostatHumid = UpliftedSensor(role: .humidity, entityId: "climate
         (thermostatTemp, state("climate.lr", "heat", ["current_temperature": .double(20)])),
         // An unavailable thermostat: the attribute may linger, but there is no reading.
         (thermostatTemp, state("climate.lr", "unavailable", ["current_temperature": .double(20)])),
+        // Non-finite states: `Double(...)` parses these successfully, so they need their own
+        // guard rather than riding along with the ordinary-garbage-text case above.
+        (temp, state("sensor.t", "nan")),
+        (temp, state("sensor.t", "inf")),
+        (temp, state("sensor.t", "infinity")),
+        (temp, state("sensor.t", "-inf")),
+        (humid, state("sensor.h", "nan")),
+        (humid, state("sensor.h", "inf")),
     ]
     for (sensor, s) in cases {
         let isNil = EnvironmentReading.value(sensor, state: s) == nil

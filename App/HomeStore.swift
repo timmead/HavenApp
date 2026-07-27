@@ -51,7 +51,6 @@ final class HomeStore {
         var initial: [String: EntityState] = [:]
         for s in try await connection.loadStates() { initial[s.entityId] = s }
         states = initial
-        await loadDashboardConfig()
         let stream = try await connection.subscribeStateChanges()
         subscriptionTask?.cancel()
         subscriptionTask = Task { [weak self] in
@@ -62,6 +61,16 @@ final class HomeStore {
             guard let self, !self.isResetting else { return }
             self.onDisconnected?()
         }
+        // Deliberately after the subscription is established, not before: `subscribe_events`
+        // never replays, so any state change landing in the gap between `loadStates()` and the
+        // subscription taking effect is lost until that entity next changes. `loadDashboardConfig`
+        // is a config get (and possibly a write-back) round trip with no bearing on that
+        // subscription — nothing here depends on it running before the socket is subscribed — so
+        // putting it after shrinks that window instead of widening it with a config round trip.
+        // A config failure still can't fail `bootstrap()` itself: `loadDashboardConfig` swallows
+        // its own errors (see its doc comment) and there is nothing after it in this function that
+        // could turn a config problem into a thrown one.
+        await loadDashboardConfig()
     }
 
     /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and

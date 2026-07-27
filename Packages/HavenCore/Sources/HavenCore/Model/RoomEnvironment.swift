@@ -195,12 +195,29 @@ public enum RoomEnvironmentResolver {
             env[role] = proposal
 
             // Rendering a proposal is free; *writing* one is a decision that sticks, because rung 1
-            // never re-picks. Candidacy reads `device_class` from live state, and an unavailable
-            // entity arrives with its attributes stripped — so a launch that happens to catch the
-            // room's real sensor offline would resolve a different one and persist it permanently,
-            // with no in-app repair path until the configuration UX exists. Deferring the write to
-            // a launch where the pick is actually readable costs one launch; getting it wrong costs
-            // the user a wrong pill indefinitely.
+            // never re-picks. What this guard actually delivers: it stops persisting a nomination
+            // that is *chosen* but cannot currently be read — e.g. the top candidate reporting
+            // `"unknown"`, where `device_class` and the rest of its attributes survive, so it stays
+            // top-ranked and simply waits for a launch where it reads.
+            //
+            // What it does NOT deliver: protection against the top candidate dropping out of
+            // *candidacy* altogether. `candidates(role:area:sources:)` reads `device_class` from
+            // live state, and if an unavailable entity arrives with that attribute stripped, it
+            // stops being a candidate at all — a lower-ranked one wins in its place, and *that* one
+            // is readable, so it IS persisted permanently, with no in-app repair path until the
+            // configuration UX exists. This guard cannot see that happening, because by the time it
+            // runs the disqualified sensor is already gone from `candidates(for:)`.
+            //
+            // Open question, not settled here: does a real Home Assistant entity keep `device_class`
+            // while `unavailable`? `RoomEnvironmentStickinessTests`'
+            // `anOfflineSensorIsNominatedForDisplayButNotForPersistence` models both answers in its
+            // two halves: strip `device_class` too (`state(..., "unavailable", [:])`) and the
+            // top candidate loses candidacy outright, `sensor.b_temp` wins in its place, is
+            // readable, and IS persisted — the failure mode this guard cannot see. Keep
+            // `device_class` alone (`state(..., "unavailable", ["device_class": .string("temperature")])`)
+            // and the same sensor stays top-ranked, is chosen, is judged unreadable, and this guard
+            // does its job. Which of those a live Home Assistant instance actually produces is what's
+            // unsettled; settling it needs one, not more unit tests.
             if isReadable(proposal) { env.proposed.insert(role) }
         }
         return env

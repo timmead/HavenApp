@@ -67,6 +67,18 @@ struct RoomEnvironmentHistoryView: View {
     /// point at the selected date — and only its opacity toggles with `selectedDate`. That is
     /// what actually guarantees the property that matters here: the row's height cannot change
     /// between scrubbing and not, because the same subviews are always laid out.
+    ///
+    /// Height alone isn't the whole story: at rest each line is the one-character `"—"`, while
+    /// scrubbing it grows to something like `"21.5°C · 14:32"` — nearly ten times as wide — and an
+    /// `HStack` sizes its `Spacer` from whatever room is left, so the live-value block on the left
+    /// would shift horizontally the instant a finger lands. `readoutMinWidth` reserves a floor for
+    /// the column sized to comfortably fit the strings this row produces at default text size, so
+    /// the ordinary rest → scrub transition doesn't move anything to its left — it only reveals
+    /// text that was already reserved space. It is a floor, not a hard pin: it is a fixed constant,
+    /// not measured off actual content, so a longer localized string (a wider Dynamic Type size, a
+    /// long month name) can still exceed it and grow the row past this reservation. Structurally
+    /// pinning it against that too would mean reserving space with a hidden widest-case string
+    /// rather than a constant — left as a known gap rather than done here.
     private var readoutRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             ForEach(sensors) { sensor in
@@ -86,10 +98,19 @@ struct RoomEnvironmentHistoryView: View {
                         .foregroundStyle(accent(sensor.role))
                 }
             }
+            .frame(minWidth: readoutMinWidth, alignment: .trailing)
             .opacity(selectedDate == nil ? 0 : 1)
             .accessibilityHidden(selectedDate == nil)
         }
     }
+
+    /// A width comfortably wider than the longest string `scrubLine` ever produces — e.g.
+    /// `"-40.0°C · 14:32"` or `"100% · Jul 27"` — at `.caption` size, so reserving it up front
+    /// guarantees the readout column never grows between rest (`"—"`) and mid-scrub, regardless
+    /// of locale or which of temperature/humidity is showing. Not measured off the actual string
+    /// (that would make the guarantee depend on content, the exact bug this fixes), just a fixed
+    /// constant chosen to outsize it.
+    private let readoutMinWidth: CGFloat = 110
 
     /// The scrub readout's text for one sensor, or a placeholder when there's no selection or no
     /// point near it — always one line, never an absent one, so the readout column's height is
@@ -221,11 +242,12 @@ struct RoomEnvironmentHistoryView: View {
     }
 
     private func scrubText(_ sensor: UpliftedSensor, _ point: HistoryPoint) -> String {
-        let value = sensor.role == .temperature
-            ? String(format: "%.1f", point.value)
-            : String(Int(point.value.rounded()))
-        let unit = sensor.role == .temperature ? "°" : "%"
-        return "\(value)\(unit) · \(point.time.formatted(scrubTimestampFormat))"
+        // The sensor's real unit, not a hardcoded "°" — `EnvironmentReading.format` is the one
+        // place a number becomes text, shared with the pill above, so a Fahrenheit home doesn't
+        // get a pill reading `71.6°F` and a scrub readout reading `71.6°` one row below.
+        let unit = EnvironmentReading.unit(sensor, state: store.state(sensor.entityId))
+        let value = EnvironmentReading.format(point.value, role: sensor.role, unit: unit)
+        return "\(value) · \(point.time.formatted(scrubTimestampFormat))"
     }
 
     /// Snaps a continuous chart selection to the nearest recorded point — same reasoning as
