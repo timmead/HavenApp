@@ -86,6 +86,9 @@ struct PipSlider: View {
     /// and `onCommit` — the *value* is translation-driven either way, so this threshold can never
     /// be the reason a tap does or doesn't change something.
     private let tapSlop: CGFloat = 3
+    /// Names the stationary track so the drag can be measured against something that doesn't move.
+    /// See `drag(travel:)` for why the default `.local` space cannot be used here.
+    private let trackSpace = "PipSliderTrack"
 
     private var displayed: Double { dragPercent ?? Double(max(0, min(100, percent))) }
     private var fraction: CGFloat { CGFloat(displayed) / 100 }
@@ -116,6 +119,9 @@ struct PipSlider: View {
             .overlay(alignment: axis == .horizontal ? .leading : .bottom) {
                 pipHandle(travel: travel)
             }
+            // The fixed reference the drag is measured against. It sits on the track — which never
+            // moves — rather than on the pip, which does.
+            .coordinateSpace(.named(trackSpace))
         }
         // Exactly the footprint of the static bar this replaces: a 4pt-wide column, or a 4pt-tall
         // strip. No tile's layout width or height changes because this control is in it.
@@ -177,7 +183,22 @@ struct PipSlider: View {
     private func drag(travel: CGFloat) -> some Gesture {
         // `minimumDistance: 0` so the pip responds the instant it is touched — the "tapped and
         // dragged on" feel — which is safe only because the value is translation-driven.
-        DragGesture(minimumDistance: 0)
+        //
+        // **The coordinate space must be the stationary track, never the default `.local`.**
+        // `.local` is local to the view the gesture is attached to, and that view is the pip —
+        // which this very drag moves. That closes a feedback loop: the finger travels 10pt, the
+        // value rises, the pip offsets 10pt to follow it, and in the pip's *new* local space the
+        // finger is back where it started, so the translation collapses to zero and the value
+        // snaps back — which moves the pip back under the finger, and round again. The control
+        // oscillates instead of tracking, several times a second.
+        //
+        // Measured against the track, which does not move, `startLocation` and `location` are both
+        // stable and the translation is simply how far the finger has gone. The vertical bars made
+        // this obvious because their travel is short (a 1×1 tile is ~60pt tall against the media
+        // row's ~100pt wide), so the same finger movement swings a larger share of the range and
+        // the oscillation is correspondingly violent — but the horizontal control had the same
+        // defect and was merely quieter about it.
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(trackSpace))
             .onChanged { value in
                 let origin = dragOrigin ?? displayed
                 if dragOrigin == nil { dragOrigin = origin }
