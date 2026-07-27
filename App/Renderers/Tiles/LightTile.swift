@@ -28,7 +28,7 @@ struct LightTile: View {
                 // this tile already has, an inch away.
                 if on, let pct = s?.brightnessPercent {
                     Spacer(minLength: 6)
-                    PipSlider(percent: pct, accent: accent, axis: .vertical, minimum: 1,
+                    PipSlider(percent: pct, accent: accent, minimum: 1,
                               label: "Brightness",
                               onCommit: { store.setBrightness(entityId, percent: $0) },
                               onTap: { store.toggle(entityId) })
