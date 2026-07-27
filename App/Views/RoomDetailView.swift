@@ -68,17 +68,7 @@ struct RoomDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 7) {
-                    ForEach(room.headerSensors, id: \.entityId) { hs in
-                        let v = store.state(hs.entityId)?.state ?? "—"
-                        let unit = hs.role == .temperature ? "°" : "%"
-                        HavenChip(
-                            systemImage: hs.role == .temperature ? "thermometer.medium" : "humidity.fill",
-                            text: v + unit,
-                            accent: hs.role == .temperature ? HavenColor.domain(.climate) : HavenColor.domain(.cover)
-                        )
-                    }
-                }
+                RoomEnvironmentChips(sensors: room.headerSensors)
             }
         }
     }
