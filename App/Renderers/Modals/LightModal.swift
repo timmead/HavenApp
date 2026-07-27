@@ -3,7 +3,6 @@ import HavenCore
 struct LightModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var dragPercent: Double?      // non-nil only while dragging
     @State private var dragKelvin: Double?       // non-nil only while dragging
 
@@ -24,7 +23,7 @@ struct LightModal: View {
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .light, deviceClass: e?.deviceClass), title: name,
                         subtitle: (s?.isOn ?? false) ? "On" : "Off", accent: accent,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) })) { dismiss() }
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) }))
             if s?.supportsBrightness ?? false {
                 FacetCard(title: "Brightness") {
                     Slider(value: Binding(get: { dragPercent ?? live },
@@ -43,13 +42,15 @@ struct LightModal: View {
                         let current = dragPercent ?? live
                         let step = 5.0
                         let next = direction == .increment ? min(100, current + step) : max(0, current - step)
-                        // Pin the preview to what we just sent, not `nil` — `setBrightness`
-                        // is fire-and-forget with no write into `states`, so clearing this
-                        // would leave `accessibilityValue` reading the stale pre-swipe value
-                        // (and each subsequent swipe re-deriving `next` from that same stale
-                        // value) until HA's echo lands.
-                        dragPercent = next
                         store.setBrightness(entityId, percent: Int(next.rounded()))
+                        // Cleared, not pinned. This used to pin the preview because `setBrightness`
+                        // was fire-and-forget and `live` would otherwise still read the stale
+                        // pre-swipe value — each subsequent swipe re-deriving `next` from it. It now
+                        // writes `LightOptimistic.brightness` into `states` synchronously, so `live`
+                        // has already caught up by this line, and *keeping* the pin would be the new
+                        // bug: a non-nil `dragPercent` makes the slider ignore every later state
+                        // push, including the light being switched off.
+                        dragPercent = nil
                     }
                 }
             }
@@ -91,7 +92,6 @@ struct LightModal: View {
                         .accessibilityHidden(true)     // already spoken as the slider's value
                 }
             }
-            Spacer()
         }
         .onChange(of: s?.isOn ?? false) { _, isOn in
             if !isOn { dragPercent = nil; dragKelvin = nil }

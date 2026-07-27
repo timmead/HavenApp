@@ -191,6 +191,22 @@ public enum WSCommand {
         data(["id": id, "type": "call_service", "domain": "homeassistant", "service": "restart"])
     }
 
+    /// Asks Home Assistant to start a stream for a camera and hand back a playlist URL.
+    ///
+    /// Verified against `home-assistant/core`'s `components/camera/__init__.py`
+    /// (`ws_camera_stream`): the command is `camera/stream`, it takes `entity_id` and an optional
+    /// `format` defaulting to HLS, and it answers `{"url": "/api/hls/…/master_playlist.m3u8"}` —
+    /// a **root-relative, already-signed** path, which is what makes it playable by an `AVPlayer`
+    /// that cannot carry an `Authorization` header.
+    ///
+    /// Same corollary as `cloudStatus`: HA answers any unregistered command with
+    /// `unknown_command`, so a typo in the literal below would be indistinguishable from a camera
+    /// integration that doesn't support streaming — and would silently demote *every* camera to
+    /// the still-image fallback. The exact string is asserted in `CameraStreamTests`.
+    public static func cameraStream(id: Int, entityId: String, format: String = "hls") -> Data {
+        data(["id": id, "type": "camera/stream", "entity_id": entityId, "format": format])
+    }
+
     public static func registryList(id: Int, type: String) -> Data { data(["id": id, "type": type]) }
     public static func subscribeEvents(id: Int, eventType: String) -> Data {
         data(["id": id, "type": "subscribe_events", "event_type": eventType])

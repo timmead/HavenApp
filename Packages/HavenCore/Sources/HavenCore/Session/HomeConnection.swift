@@ -82,6 +82,23 @@ public actor HomeConnection {
         }
     }
 
+    /// Starts a stream for a camera and returns the playlist path Home Assistant minted for it,
+    /// or `nil` if the answer carried no `url`.
+    ///
+    /// Returns the **raw path**, not a resolved `URL`: resolving it is `CameraStream.source`'s job,
+    /// against whichever base URL is live at the moment the player is built. Resolving it here
+    /// would bake in the address this connection happens to be using, which is precisely the
+    /// captured-base-URL bug `HAImageCredentialsProviding` exists to prevent — and an `AVPlayer`
+    /// pointed at the wrong host reports it as a black rectangle and nothing else.
+    ///
+    /// Throws on a failed command (the camera has no stream, the integration refused). Callers
+    /// treat that as "no stream", not as an error to show: the still-image fallback is a working
+    /// live view, just a slower one.
+    public func cameraStreamPath(entityId: String) async throws -> String? {
+        let v = try await client.request { WSCommand.cameraStream(id: $0, entityId: entityId) }
+        return v.asObject?["url"]?.asString
+    }
+
     public func toggleLight(entityId: String) async throws {
         _ = try await client.request { WSCommand.callService(id: $0, domain: "light", service: "toggle", entityId: entityId) }
     }

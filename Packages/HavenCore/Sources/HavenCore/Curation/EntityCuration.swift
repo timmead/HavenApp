@@ -39,9 +39,13 @@ public enum EntityCuration {
     /// a visible regression from today. Domains with no renderer are deliberately *not* listed:
     /// under-promotion leaves them one tap away in room detail, over-promotion rebuilds the
     /// wall of tiles this exists to remove.
+    ///
+    /// `camera` joined the list with D.2 Task 4, when a renderer for it first existed. Before that
+    /// it was deliberately absent under the rule stated above — promoting it would have put a
+    /// `GenericTile` showing the word "idle" on the overview grid where a picture belongs.
     static let primaryDomains: Set<String> = [
         "light", "switch", "input_boolean", "cover", "lock", "climate",
-        "media_player", "scene", "script", "button", "input_button",
+        "media_player", "camera", "scene", "script", "button", "input_button",
     ]
 
     /// Object-id suffixes that mark per-device telemetry rather than a thing in the room.

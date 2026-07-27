@@ -5,7 +5,6 @@ import HavenCore
 struct SensorModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var range: HistoryRange = .day
     @State private var selectedDate: Date?
 
@@ -18,7 +17,7 @@ struct SensorModal: View {
 
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e), subtitle: "", accent: accent) { dismiss() }
+                        title: TileName.of(entityId, e), subtitle: "", accent: accent)
 
             FacetCard {
                 let selected = series.flatMap { nearestPoint(to: selectedDate, in: $0.points) }
@@ -98,7 +97,6 @@ struct SensorModal: View {
                 }
             }
 
-            Spacer()
         }
         .task(id: range) { await store.loadHistory(entityId, range: range) }
         .onChange(of: range) { selectedDate = nil }

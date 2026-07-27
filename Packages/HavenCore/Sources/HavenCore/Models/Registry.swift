@@ -36,9 +36,21 @@ public struct EntityRegistryEntry: Codable, Sendable {
     /// (`CurationTier.hidden`), not a structural one, and it is never overridden by curation's
     /// never-empty-a-room rescue: hiding it was an explicit choice made in HA.
     public let hiddenBy: String?
+    /// HA's `platform` — the integration domain that owns this entity (`"unifiprotect"`,
+    /// `"sonos"`, `"hue"`, …). Verified present on every row of `config/entity_registry/list`
+    /// against Home Assistant's source. This is how `VendorHandoff` identifies a device's vendor
+    /// without guessing from its name or manufacturer string.
+    public let platform: String?
+    /// HA's `unique_id` for this entity, as assigned by its integration. Also verified present on
+    /// every row of `config/entity_registry/list`. Format is entirely up to the owning
+    /// integration — see `VendorHandoff`'s doc comment for why this can't be assumed to match a
+    /// vendor app's own device identifier.
+    public let uniqueId: String?
     public init(entityId: String, areaId: String?, deviceId: String?, name: String?, disabledBy: String? = nil,
-                entityCategory: String? = nil, hiddenBy: String? = nil) {
+                entityCategory: String? = nil, hiddenBy: String? = nil, platform: String? = nil,
+                uniqueId: String? = nil) {
         self.entityId = entityId; self.areaId = areaId; self.deviceId = deviceId; self.name = name
         self.disabledBy = disabledBy; self.entityCategory = entityCategory; self.hiddenBy = hiddenBy
+        self.platform = platform; self.uniqueId = uniqueId
     }
 }

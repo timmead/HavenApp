@@ -23,6 +23,8 @@ struct RoomDetailView: View {
         var climate: [String] = []
         var lights: [String] = []
         var covers: [String] = []
+        var media: [String] = []
+        var cameras: [String] = []
         var other: [String] = []
         var sensors: [String] = []
     }
@@ -36,6 +38,10 @@ struct RoomDetailView: View {
             case .climate: g.climate.append(id)
             case .light: g.lights.append(id)
             case .cover: g.covers.append(id)
+            case .mediaPlayer: g.media.append(id)
+            // Its own bucket, not `.other`: `.other` renders in the 4-column grid, and a camera
+            // has no 1-column size — see `cameraGroup`.
+            case .camera: g.cameras.append(id)
             case .scene, .script, .button, .lock, .switchOutlet, .unknown: g.other.append(id)
             case .sensor, .binarySensor: g.sensors.append(id)
             }
@@ -51,6 +57,8 @@ struct RoomDetailView: View {
                 group("Climate", g.climate, columns: climateColumns)
                 group("Lights", g.lights, rollup: rollups.first { $0.kind == .lights })
                 group("Shades", g.covers, rollup: rollups.first { $0.kind == .covers })
+                mediaGroup(g.media)
+                cameraGroup(g.cameras)
                 group("Scenes & more", g.other)
                 group("Sensors", g.sensors)
             }
@@ -69,6 +77,44 @@ struct RoomDetailView: View {
                             text: v + unit,
                             accent: hs.role == .temperature ? HavenColor.domain(.climate) : HavenColor.domain(.cover)
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    /// The Media group, at full width (4-of-4 columns) — the size the approved design gives the
+    /// artwork-and-transport tile. Its own `VStack`, not `group(_:_:columns:)`: a full-bleed 4×2
+    /// tile is not a `DeviceTileView` in a narrower grid, it is a different tile rendering, and the
+    /// dispatcher deliberately only knows the 1×1 (see `DeviceTileView`).
+    @ViewBuilder
+    private func mediaGroup(_ ids: [String]) -> some View {
+        if !ids.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack { Text("Media").font(.system(size: 14, weight: .bold)); Spacer() }
+                VStack(spacing: 9) {
+                    ForEach(ids, id: \.self) { id in
+                        MediaPlayerTile(entityId: id, size: .large)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The Cameras group, at full width (4-of-4 columns) — the full-bleed 4×2 rendering, which is
+    /// the one the design gives the most space to and the only one that drops the staleness stamp,
+    /// because at this width you can see the scene rather than having to be told about it.
+    ///
+    /// Its own `VStack` for the same structural reason as `mediaGroup`: this is a different tile
+    /// rendering, not a `DeviceTileView` in a narrower grid.
+    @ViewBuilder
+    private func cameraGroup(_ ids: [String]) -> some View {
+        if !ids.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack { Text("Cameras").font(.system(size: 14, weight: .bold)); Spacer() }
+                VStack(spacing: 9) {
+                    ForEach(ids, id: \.self) { id in
+                        CameraTile(entityId: id, size: .wide)
                     }
                 }
             }

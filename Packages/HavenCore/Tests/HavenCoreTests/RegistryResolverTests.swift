@@ -35,6 +35,37 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil, disab
     #expect(home.floors.first?.areas.first?.id == "b")
 }
 
+@Test func homeFloorLeadsTheRealFloors() {
+    let floors = [FloorRegistryEntry(floorId: "up", name: "Upstairs", level: 1, icon: nil),
+                  FloorRegistryEntry(floorId: "base", name: "Basement", level: -1, icon: nil)]
+    let areas = [AreaRegistryEntry(areaId: "a", name: "A", floorId: "up", icon: nil, temperatureEntityId: nil, humidityEntityId: nil),
+                 AreaRegistryEntry(areaId: "b", name: "B", floorId: "base", icon: nil, temperatureEntityId: nil, humidityEntityId: nil)]
+    // One orphan is all it takes to conjure the synthetic floor.
+    let home = RegistryResolver.resolve(floors: floors, areas: areas, devices: [], entities: [ent("sensor.orphan")])
+    #expect(home.floors.map(\.name) == ["Home", "Basement", "Upstairs"])
+}
+
+@Test func homeAbsentWhenEverythingIsFiled() {
+    let floors = [FloorRegistryEntry(floorId: "up", name: "Upstairs", level: 1, icon: nil)]
+    let areas = [AreaRegistryEntry(areaId: "a", name: "A", floorId: "up", icon: nil, temperatureEntityId: nil, humidityEntityId: nil)]
+    let home = RegistryResolver.resolve(floors: floors, areas: areas, devices: [], entities: [ent("light.a", area: "a")])
+    #expect(home.floors.map(\.name) == ["Upstairs"])
+}
+
+/// Equal levels are the *ordinary* case — HA leaves `level` unset on most floors and the resolver
+/// folds nil to 0 — so registry order has to break the tie deterministically. `sorted(by:)` alone
+/// makes no such promise.
+@Test func floorsWithEqualLevelsKeepRegistryOrder() {
+    let floors = [FloorRegistryEntry(floorId: "f1", name: "Loft", level: nil, icon: nil),
+                  FloorRegistryEntry(floorId: "f2", name: "Annex", level: nil, icon: nil),
+                  FloorRegistryEntry(floorId: "f3", name: "Garage", level: nil, icon: nil)]
+    let areas = [AreaRegistryEntry(areaId: "a1", name: "A", floorId: "f1", icon: nil, temperatureEntityId: nil, humidityEntityId: nil),
+                 AreaRegistryEntry(areaId: "a2", name: "B", floorId: "f2", icon: nil, temperatureEntityId: nil, humidityEntityId: nil),
+                 AreaRegistryEntry(areaId: "a3", name: "C", floorId: "f3", icon: nil, temperatureEntityId: nil, humidityEntityId: nil)]
+    let home = RegistryResolver.resolve(floors: floors, areas: areas, devices: [], entities: [ent("sensor.orphan")])
+    #expect(home.floors.map(\.name) == ["Home", "Loft", "Annex", "Garage"])
+}
+
 @Test func unassignedEntitiesBucketed() {
     let entities = [ent("sensor.orphan")]
     let home = RegistryResolver.resolve(floors: [], areas: [], devices: [], entities: entities)

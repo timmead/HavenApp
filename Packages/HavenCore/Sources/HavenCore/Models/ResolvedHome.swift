@@ -1,6 +1,38 @@
+/// The registry fields a renderer needs to identify an entity's owning integration and device,
+/// without holding the full `EntityRegistryEntry` (area/device wiring, curation fields, …) that
+/// produced it. `platform` is the integration domain (`"unifiprotect"`, `"sonos"`); `uniqueId` is
+/// that integration's own identifier for the device. See `VendorHandoff` for what these are used
+/// for and what is and isn't verified about them.
+public struct EntityRegistryInfo: Sendable, Equatable {
+    public let platform: String?
+    public let uniqueId: String?
+    /// HA's `device_id` — which physical device this entity belongs to, or `nil` for the many
+    /// integrations that create entities without one.
+    ///
+    /// Carried here so the camera modal's **Events** card can join a camera to its own motion and
+    /// doorbell sensors on the device rather than on their names: two cameras sharing a name stem
+    /// (`camera.front`, `camera.front_gate`) would otherwise adopt each other's sensors, and a card
+    /// headed "Events" listing another camera's motion is a false statement about the user's home.
+    /// See `CameraEvents`, which uses this as the strong rung of its ladder and falls back to stem
+    /// matching only when it is absent.
+    public let deviceId: String?
+    public init(platform: String?, uniqueId: String?, deviceId: String? = nil) {
+        self.platform = platform; self.uniqueId = uniqueId; self.deviceId = deviceId
+    }
+}
+
 public struct ResolvedHome: Sendable, Equatable {
     public var floors: [ResolvedFloor]
-    public init(floors: [ResolvedFloor]) { self.floors = floors }
+    /// Every enabled entity's registry info, keyed by entity id — flat and area-independent
+    /// because a renderer holding just an entity id (a camera or media player modal) has no
+    /// reason to also carry its area to look this up. Filtered to `disabledBy == nil` entities
+    /// only, matching `RegistryResolver`'s existing filter: a disabled entity never reaches the
+    /// state machine, so it has no renderer to hand this to in the first place.
+    public var registryInfo: [String: EntityRegistryInfo]
+    public init(floors: [ResolvedFloor], registryInfo: [String: EntityRegistryInfo] = [:]) {
+        self.floors = floors
+        self.registryInfo = registryInfo
+    }
 }
 public struct ResolvedFloor: Sendable, Equatable, Identifiable {
     public let id: String; public let name: String; public let level: Int; public var areas: [ResolvedArea]

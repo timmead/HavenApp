@@ -1,11 +1,34 @@
 import SwiftUI
 
-/// Header row for a control modal: icon · name · state subtitle · primary on/off toggle · close button.
-/// The primary on/off ALWAYS lives here — never in the body — for every device type, including composites.
+/// Header row for a control modal: icon · name · state subtitle · primary on/off toggle.
+///
+/// **The primary on/off lives here — never in the body — for every device type that *has* an
+/// on/off**, including composites. One place, one meaning, so the header is trustworthy at a
+/// glance.
+///
+/// Two deliberate exceptions, both recorded here so the rule isn't silently contradicted by a
+/// renderer that looks like it forgot it:
+///
+/// - **A lock puts its action in the body instead** (`LockModal`), as a large explicit button. Not
+///   an oversight and not a styling preference: locking is a consequential action rather than a
+///   state you flip, and a toggle sitting at the top of a sheet is one careless swipe away from
+///   unlocking a door. The header keeps the lock's *state* in its subtitle; what it does not offer
+///   is a one-gesture way to change it.
+/// - **A Sonos speaker substitutes a vendor hand-off** for the toggle (`MediaPlayerModal`), because
+///   it has no meaningful power state at all. A substitution, never an addition — see `accessory`.
+///
+/// There is deliberately **no close button**. Every one of these is presented as a sheet, which
+/// already dismisses by swiping its grabber down or tapping the dimmed area above it; a third way
+/// bought nothing and cost the header the width it now gives back to the title.
 struct ModalHeader: View {
     let systemImage: String; let title: String; let subtitle: String; let accent: Color
     var toggle: Binding<Bool>? = nil
-    var onClose: () -> Void
+    /// Occupies the toggle's place for a device whose primary action genuinely isn't on/off — today
+    /// only a Sonos speaker, which has no meaningful power state and offers a hand-off to its own
+    /// app there instead (see `MediaPlayerModal`). Deliberately an *alternative* to `toggle`, not an
+    /// addition beside it: the slot means one thing per device, which is the property that made the
+    /// header trustworthy in the first place. Passing both is a caller bug, and the toggle wins.
+    var accessory: AnyView? = nil
     var body: some View {
         HStack(spacing: 10) {
             // Grouped as one VoiceOver element ("name, state") — the icon carries no
@@ -27,8 +50,7 @@ struct ModalHeader: View {
             .accessibilityLabel(subtitle.isEmpty ? title : "\(title), \(subtitle)")
             Spacer()
             if let toggle { Toggle("", isOn: toggle).labelsHidden().tint(accent).accessibilityLabel(title) }
-            Button { onClose() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary).frame(width: 28, height: 28).background(.gray.opacity(0.15), in: Circle()) }
-                .accessibilityLabel("Close")
+            else if let accessory { accessory }
         }
     }
 }

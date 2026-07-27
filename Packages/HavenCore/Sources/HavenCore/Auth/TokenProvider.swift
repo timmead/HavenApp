@@ -113,6 +113,23 @@ public actor TokenProvider {
         baseURL = url
     }
 
+    /// The address this provider is currently pointed at — i.e. whatever `setBaseURL(_:)` was last
+    /// given, which is the candidate the most recent token operation targeted.
+    ///
+    /// Exists so that anything else needing to reach the *same* instance over HTTP reads the
+    /// address from here at the moment it makes its request, instead of keeping a copy of its own.
+    /// `AuthenticatedImageLoader` is the caller: without this it would need a second source of
+    /// truth for "where is Home Assistant right now", and the two would disagree the first time
+    /// `AppModel` failed over from the local address to the remote one — silently, since a fetch
+    /// against the wrong host just fails to produce an image.
+    ///
+    /// Be precise about what this is: the address of the last token *attempt*, not a guarantee of
+    /// a live connection. Mid-failover it can name a candidate that is still being probed. That is
+    /// harmless for its current use — `RootView` shows a `ProgressView` while connecting and
+    /// retrying, so nothing that loads images is on screen during that window — but a future
+    /// caller that renders during a connect round should know it is reading an intent, not a fact.
+    public func currentBaseURL() -> URL { baseURL }
+
     public func validAccessToken(now: Date) async throws -> String {
         // Coalesce: if a refresh is already underway, ride it instead of starting another.
         if let inFlight = refreshTask {

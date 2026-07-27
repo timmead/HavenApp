@@ -3,14 +3,13 @@ import HavenCore
 struct ClimateModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let accent = HavenColor.domain(.climate)
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .climate, deviceClass: e?.deviceClass), title: TileName.of(entityId, e),
                         subtitle: s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "", accent: accent,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") })) { dismiss() }
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") }))
             FacetCard {
                 HStack {
                     Button { if let t = s?.targetTemp { store.setClimateTemp(entityId, temp: t - 1) } } label: { Image(systemName: "minus.circle.fill").font(.title) }
@@ -34,7 +33,6 @@ struct ClimateModal: View {
             if let fans = s?.fanModes, fans.count > 1 {
                 FacetCard(title: "Fan") { HavenSegmented(options: fans, selection: Binding(get: { s?.fanMode ?? fans[0] }, set: { store.setFanMode(entityId, mode: $0) }), label: TileName.words, accent: accent) }
             }
-            Spacer()
         }
     }
 

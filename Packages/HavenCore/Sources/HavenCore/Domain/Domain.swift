@@ -1,7 +1,7 @@
 import Foundation
 
 public enum Domain: String, Sendable, Equatable {
-    case light, switchOutlet, cover, lock, climate, scene, script, button, sensor, binarySensor, unknown
+    case light, switchOutlet, cover, lock, climate, mediaPlayer, camera, scene, script, button, sensor, binarySensor, unknown
 
     public static func of(_ entityId: String) -> Domain {
         switch String(entityId.prefix(while: { $0 != "." })) {
@@ -10,6 +10,8 @@ public enum Domain: String, Sendable, Equatable {
         case "cover": return .cover
         case "lock": return .lock
         case "climate": return .climate
+        case "media_player": return .mediaPlayer
+        case "camera": return .camera
         case "scene": return .scene
         case "script": return .script
         case "button", "input_button": return .button
@@ -18,10 +20,14 @@ public enum Domain: String, Sendable, Equatable {
         default: return .unknown
         }
     }
+    /// Whether this domain is something the user *operates*. A camera is deliberately not one: the
+    /// renderer offers viewing and a mute control over the live feed, and nothing that changes the
+    /// state of the home. Treating it as an actuator would put it in reach of the bulk actions and
+    /// roll-ups, which act on things that turn on and off.
     public var isActuator: Bool {
         switch self {
-        case .light, .switchOutlet, .cover, .lock, .climate, .scene, .script, .button: return true
-        case .sensor, .binarySensor, .unknown: return false
+        case .light, .switchOutlet, .cover, .lock, .climate, .mediaPlayer, .scene, .script, .button: return true
+        case .camera, .sensor, .binarySensor, .unknown: return false
         }
     }
     /// The HA *service* domain — always the entity-id prefix, so `input_boolean.x`

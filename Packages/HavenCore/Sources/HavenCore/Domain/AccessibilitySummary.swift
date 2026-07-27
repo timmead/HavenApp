@@ -37,6 +37,37 @@ public enum AccessibilitySummary {
         return "\(name), \(mode), target \(Int(target.rounded()))\(s.unit)"
     }
 
+    /// "Kitchen speaker, playing, So What by Miles Davis". State first (a VoiceOver user gets no
+    /// benefit from the accent colour that says it to everyone else), then what is playing, then
+    /// the volume — which is otherwise legible only from a slider's fill.
+    public static func mediaPlayer(_ name: String, _ s: MediaPlayerState) -> String {
+        guard s.isActive else { return "\(name), \(s.playback.label.lowercased())" }
+        var parts = ["\(name), \(s.playback.label.lowercased())"]
+        if let title = s.title {
+            parts.append(s.secondaryLine.map { "\(title) by \($0)" } ?? title)
+        } else {
+            parts.append("nothing playing")
+        }
+        if s.isMuted { parts.append("muted") }
+        else if let volume = s.volumePercent { parts.append("volume \(volume)%") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// "Front door camera, idle, updated 12 seconds ago". The age is the part a sighted user reads
+    /// off a small grey stamp under the picture and a VoiceOver user otherwise gets no version of
+    /// at all — and it is the difference between a live camera and one that stopped answering ten
+    /// minutes ago, which is the whole reason the stamp exists.
+    ///
+    /// `capturedAt` is `nil` before the first frame lands, and the age is then simply left out
+    /// rather than spoken as "just now" over a placeholder.
+    public static func camera(_ name: String, _ s: CameraState, capturedAt: Date?, now: Date) -> String {
+        var parts = ["\(name), \(s.status.label.lowercased())"]
+        if s.isAvailable, let capturedAt {
+            parts.append(CameraSnapshotAge.spoken(capturedAt: capturedAt, now: now))
+        }
+        return parts.joined(separator: ", ")
+    }
+
     public static func binarySensor(_ name: String, _ s: BinarySensorState) -> String {
         "\(name), \(s.isActive ? "active" : "clear")"
     }
