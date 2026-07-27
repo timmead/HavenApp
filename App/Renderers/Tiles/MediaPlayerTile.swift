@@ -82,12 +82,6 @@ struct MediaPlayerTile: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .onTapGesture { store.presented = entityId }
-                    // The speaker joins the transport row rather than sitting below it. There was
-                    // visible horizontal slack between the title and the buttons — a 2×1 title is
-                    // usually short — and a 24pt glyph is exactly what that slack is good for.
-                    // Moving it up also hands the whole bottom line to the level track, which is
-                    // the part that benefits from every point of width it can get.
-                    muteButton(s, size: 13)
                     playPauseButton(s, size: 22)
                     if s?.features.contains(.nextTrack) ?? false {
                         transportButton("forward.end.fill", label: "Next track", size: 15) {
@@ -97,9 +91,10 @@ struct MediaPlayerTile: View {
                 }
                 // **This occupies space the tile already reserved; it does not claim any.**
                 // `GlassTile` floors its content at 66pt aligned to the top, while the row above is
-                // about 36pt tall — so roughly 30pt has always sat empty at the bottom of a 2×1.
-                // A 4pt track leaves the ideal at 40, well under that floor, so the tile's height
-                // is unchanged whether it is playing or not.
+                // about 36pt tall — so roughly 30pt has always sat empty at the bottom of a 2×1,
+                // which is the gap the device screenshot shows. A 24pt volume strip brings the
+                // ideal to 60, still under that floor, so the tile's height is unchanged whether it
+                // is playing or not.
                 //
                 // Staying under the floor is the point, not a nicety. This file opens by arguing
                 // that a media tile must not change size as a function of state — and a 2×1 that
@@ -108,13 +103,11 @@ struct MediaPlayerTile: View {
                 // something to put in it, never grown into. The title window is untouched either
                 // way, which is what keeps the scrolling-overflow behaviour it exists for.
                 Spacer(minLength: 0)
-                // Omitted, never disabled, on a player that didn't declare `volume_set` — and only
-                // while playing, which is when a level is worth the line.
-                if let s, s.isPlaying, s.features.contains(.volumeSet) {
-                    PipSlider(percent: s.volumePercent ?? 0, accent: accent, isMuted: s.isMuted,
-                              label: "Volume") { percent in
-                        store.setMediaVolume(entityId, percent: percent)
-                    }
+                if s?.isPlaying ?? false {
+                    // `volumeRow` already draws nothing at all for a player that declares neither
+                    // `volumeSet` nor `volumeMute`, so an unsupported device gets empty space rather
+                    // than a dead track — the same omit-don't-disable rule the transport follows.
+                    volumeRow(s)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -225,7 +218,23 @@ struct MediaPlayerTile: View {
     private func volumeRow(_ s: MediaPlayerState?) -> some View {
         if let s, s.isActive, s.features.contains(.volumeSet) || s.features.contains(.volumeMute) {
             HStack(spacing: 7) {
-                muteButton(s, size: 12)
+                if s.features.contains(.volumeMute) {
+                    Button {
+                        store.setMediaMuted(entityId, muted: !s.isMuted)
+                    } label: {
+                        Image(systemName: s.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(s.isMuted ? HavenColor.warning : accent)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(s.isMuted ? "Unmute" : "Mute")
+                } else {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.system(size: 12)).foregroundStyle(accent)
+                        .frame(width: 24, height: 24)
+                        .accessibilityHidden(true)
+                }
                 // Only where the device declared `volume_set` — omitted, never shown disabled, like
                 // every other control here. A player that can mute but not set a level keeps its
                 // mute button and simply has no track beside it.
@@ -249,33 +258,6 @@ struct MediaPlayerTile: View {
     // MARK: - Shared controls
 
     private var accent: Color { HavenColor.domain(.mediaPlayer) }
-
-    /// The speaker glyph: a mute toggle where the device declared `volume_mute`, and a plain
-    /// indicator where it didn't.
-    ///
-    /// Its own helper because the 2×1 puts it in the transport row and the 4×2 keeps it beside the
-    /// level track — two placements, one control, so a change to what muting looks like can't apply
-    /// to only one of them. Nothing at all is drawn for an inactive or unknown player, so an off
-    /// speaker doesn't carry a volume glyph it can't act on.
-    @ViewBuilder
-    private func muteButton(_ s: MediaPlayerState?, size: CGFloat) -> some View {
-        if let s, s.isActive, s.features.contains(.volumeMute) {
-            Button { store.setMediaMuted(entityId, muted: !s.isMuted) } label: {
-                Image(systemName: s.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: size))
-                    .foregroundStyle(s.isMuted ? HavenColor.warning : accent)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(s.isMuted ? "Unmute" : "Mute")
-        } else if let s, s.isActive, s.features.contains(.volumeSet) {
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.system(size: size)).foregroundStyle(accent)
-                .frame(width: 24, height: 24)
-                .accessibilityHidden(true)
-        }
-    }
 
     /// Drawn only where the device declared the matching half of play/pause — an unsupported
     /// control is omitted, never shown disabled. Where neither half exists, the tile still needs
