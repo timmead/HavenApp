@@ -492,21 +492,35 @@ final class HomeStore {
         }
     }
 
-    /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
-    /// (or the load failed) — callers should render an empty/loading state, not crash.
-    func history(_ entityId: String, _ range: HistoryRange) -> HistorySeries? {
-        historyByKey["\(entityId)#\(range)"]
+    /// The cache key for one series.
+    ///
+    /// `attribute` is part of it because a thermostat-only room reads two series off a single
+    /// entity at a single range — `current_temperature` and `current_humidity`. Keyed on entity
+    /// and range alone those collide, and the room's chart plots one series twice under two
+    /// labels, which looks like data rather than like a bug.
+    ///
+    /// Internal rather than private so the cache's separation can be asserted directly; the
+    /// alternative is a test that drives a live connection to prove a dictionary key.
+    static func historyKey(_ entityId: String, _ range: HistoryRange, _ attribute: String?) -> String {
+        "\(entityId)#\(attribute ?? "")#\(range)"
     }
 
-    /// Fetches and caches a history series for `entityId`/`range`. Reuses the cache when
-    /// already populated (a range switch always misses since the key changes); never
-    /// caches a failure, so a transient error doesn't permanently block a later retry.
-    func loadHistory(_ entityId: String, range: HistoryRange) async {
-        let key = "\(entityId)#\(range)"
+    /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
+    /// (or the load failed) — callers should render an empty/loading state, not crash.
+    func history(_ entityId: String, _ range: HistoryRange, attribute: String? = nil) -> HistorySeries? {
+        historyByKey[Self.historyKey(entityId, range, attribute)]
+    }
+
+    /// Fetches and caches a history series for `entityId`/`range`/`attribute`. Reuses the cache
+    /// when already populated (a range or attribute switch always misses, since the key changes);
+    /// never caches a failure, so a transient error doesn't permanently block a later retry.
+    func loadHistory(_ entityId: String, range: HistoryRange, attribute: String? = nil) async {
+        let key = Self.historyKey(entityId, range, attribute)
         guard historyByKey[key] == nil else { return }
         guard let connection else { return }
         do {
-            historyByKey[key] = try await connection.history(entityId: entityId, range: range, now: Date())
+            historyByKey[key] = try await connection.history(entityId: entityId, attribute: attribute,
+                                                             range: range, now: Date())
         } catch {
             // Leave the cache untouched so a later attempt (e.g. reopening the modal) can retry.
         }
