@@ -33,6 +33,14 @@ public struct UpliftedSensor: Sendable, Equatable, Identifiable {
     /// entity id there yields two views with the same identity — SwiftUI drops one pill or thrashes
     /// view identity. A room has at most one sensor per role by construction, so role is unique.
     public var id: Role { role }
+
+    /// The attribute this reading comes from, or nil when it comes from the entity's state.
+    /// The form `HomeConnection.history(entityId:attribute:range:now:)` and
+    /// `HomeStore.loadHistory` take, so callers don't re-switch on `Source` at every call site.
+    public var attributeName: String? {
+        if case .attribute(let name) = source { return name }
+        return nil
+    }
 }
 
 /// One room's nominated sources, as stored in the dashboard document.

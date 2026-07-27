@@ -11,6 +11,10 @@ import HavenCore
 struct RoomEnvironmentChips: View {
     let sensors: [UpliftedSensor]
     var spacing: CGFloat = 7
+    /// What a tap opens, if anything. `nil` leaves the pills inert — which is what the room
+    /// section heading needs: its pills sit inside a `NavigationLink`, and a tap gesture there
+    /// would contend with the link's own recognizer for the same touch.
+    var onTap: (() -> Void)? = nil
     @Environment(HomeStore.self) private var store
 
     var body: some View {
@@ -33,6 +37,10 @@ struct RoomEnvironmentChips: View {
         // (`lineLimit(1)` at the call site). This keeps the pills at their natural width so the
         // shortfall lands on the name instead.
         .fixedSize(horizontal: true, vertical: false)
+        // A real `Button`, not `.onTapGesture` — the latter carries no button trait, so
+        // VoiceOver could not tell a user the pills are operable at all. Same reasoning as
+        // `HavenSegmented`. `.plain` keeps the pills pixel-identical.
+        .modifier(TappableChips(onTap: onTap))
     }
 
     /// The bulb thermometer rather than a round dial — a nit the design spec calls out by name.
@@ -42,5 +50,20 @@ struct RoomEnvironmentChips: View {
 
     private func accent(_ role: UpliftedSensor.Role) -> Color {
         HavenColor.domain(role == .temperature ? .climate : .cover)
+    }
+}
+
+/// Wraps the pills in a `Button` only when there is something to tap, so the inert case adds no
+/// button semantics and no hit-testing of its own.
+private struct TappableChips: ViewModifier {
+    let onTap: (() -> Void)?
+    func body(content: Content) -> some View {
+        if let onTap {
+            Button(action: onTap) { content.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows temperature and humidity over time")
+        } else {
+            content
+        }
     }
 }
