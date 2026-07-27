@@ -9,6 +9,22 @@ struct RootView: View {
     /// sat in `.retrying` indefinitely with no way to open the one screen holding the custom
     /// remote URL field — the exact user that feature exists for, locked out of the fix at the only
     /// moment they need it. `DashboardView` keeps its own entry point; this is the second one.
+    ///
+    /// **Nothing in `Tests/HavenAppTests` covers this, and the reason is worth recording so the next
+    /// person doesn't spend the afternoon rediscovering it.** The obvious test — host `RootView` in
+    /// a `UIWindow` and look for a "Connection settings" control — cannot work under
+    /// `xcodebuild test`. SwiftUI draws its text rather than vending `UILabel`s, so the only public
+    /// way to read it back is the accessibility tree, and SwiftUI builds no accessibility nodes
+    /// unless an assistive technology is attached to the process. That happens to be true on a
+    /// simulator sitting in the foreground of Simulator.app, and is false on a headless device
+    /// booted by `xcodebuild` — so the probe passed where it was written and returned an empty set
+    /// everywhere else (window attached, scene foreground-active, view in the window, zero labels).
+    ///
+    /// A `phaseOffersConnectionSettings` predicate was deliberately *not* written in its place:
+    /// a second copy of this decision that a change to the `switch` below could silently
+    /// contradict is how the URL-adoption fix shipped with 107 green tests over a helper. If this
+    /// is to be covered, the way is to make the control and the rule one production type both entry
+    /// points use, so there is one expression to test rather than a duplicate to keep in step.
     @State private var showingConnectionSettings = false
 
     var body: some View {

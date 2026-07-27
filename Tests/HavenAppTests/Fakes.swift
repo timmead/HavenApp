@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 import HavenCore
 @testable import HavenApp
 
@@ -44,13 +43,4 @@ func makeTestDefaults(_ name: String = #function) -> UserDefaults {
     let defaults = UserDefaults(suiteName: suite)!
     defaults.removePersistentDomain(forName: suite)
     return defaults
-}
-
-/// The environment `RootView` needs, supplied the same way `HavenAppApp` supplies it, so what the
-/// probe renders is the real screen and not a stand-in.
-struct RootViewHarness: View {
-    let model: AppModel
-    var body: some View {
-        RootView().environment(model)
-    }
 }
