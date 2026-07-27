@@ -20,6 +20,22 @@ private func respondOnly(_ conn: FakeWebSocketConnection, to expectedType: Strin
     }
 }
 
+/// An authenticated `HomeConnection` whose every request is answered with `result`.
+private func connectedHistoryHome(result: String) async throws
+    -> (HomeConnection, FakeWebSocketConnection) {
+    let conn = FakeWebSocketConnection()
+    let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#)
+    await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await conn.setOnSend { data in
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = obj["id"] as? Int else { return }
+        await conn.enqueueIncoming(#"{"id":\#(id),"type":"result","success":true,"result":\#(result)}"#)
+    }
+    return (HomeConnection(client: client), conn)
+}
+
 @Test func historyServiceDay() async throws {
     let conn = FakeWebSocketConnection(); let client = HAWebSocketClient(connection: conn)
     await conn.enqueueIncoming(#"{"type":"auth_required"}"#); await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
@@ -60,4 +76,52 @@ private func respondOnly(_ conn: FakeWebSocketConnection, to expectedType: Strin
     let frame = obj(Data(sent.last!.utf8))
     #expect(frame["type"] as? String == "recorder/statistics_during_period")
     #expect(frame["period"] != nil)
+}
+
+/// An attribute source needs the attributes, so this request must *not* carry the
+/// `no_attributes`/`minimal_response` flags the state path uses — with them, HA sends no `a`
+/// key and every row is dropped, giving a permanently empty chart with no error anywhere.
+@Test func attributeHistoryRequestsAttributes() async throws {
+    let (home, conn) = try await connectedHistoryHome(
+        result: #"{"climate.lr":[{"s":"heat","a":{"current_temperature":20.5},"lu":1751328000.0}]}"#)
+    let series = try await home.history(entityId: "climate.lr", attribute: "current_temperature",
+                                        range: .day, now: Date(timeIntervalSince1970: 1751331600))
+    #expect(series.points.first?.value == 20.5)
+
+    let frames = await conn.sentTexts().compactMap {
+        try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+    }
+    let request = try #require(frames.first { $0["type"] as? String == "history/history_during_period" })
+    #expect(request["no_attributes"] as? Bool == false)
+    #expect(request["minimal_response"] as? Bool == false)
+}
+
+/// The state path is unchanged — every existing caller (SensorModal) still gets the compact
+/// response it has always had.
+@Test func stateHistoryStillRequestsTheCompactResponse() async throws {
+    let (home, conn) = try await connectedHistoryHome(
+        result: #"{"sensor.t":[{"s":"21.5","lu":1751328000.0}]}"#)
+    _ = try await home.history(entityId: "sensor.t", range: .day,
+                               now: Date(timeIntervalSince1970: 1751331600))
+    let frames = await conn.sentTexts().compactMap {
+        try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+    }
+    let request = try #require(frames.first { $0["type"] as? String == "history/history_during_period" })
+    #expect(request["no_attributes"] as? Bool == true)
+    #expect(request["minimal_response"] as? Bool == true)
+}
+
+/// Long-term statistics are keyed by entity and derived from its *state*, so no attribute has
+/// them at any range. Firing the request anyway would spend a round trip to be told `{}`, and
+/// — worse — `fromStatistics` would read the *entity's* statistics if the entity happened to
+/// have some, plotting an unrelated number as the room's temperature.
+@Test func attributeHistoryBeyondADayIsEmptyWithoutARequest() async throws {
+    let (home, conn) = try await connectedHistoryHome(result: #"{}"#)
+    for range in HistoryRange.allCases where range.usesStatistics {
+        let series = try await home.history(entityId: "climate.lr", attribute: "current_temperature",
+                                            range: range, now: Date(timeIntervalSince1970: 1751331600))
+        #expect(series.points.isEmpty)
+        #expect(series.min == nil)
+    }
+    #expect(await conn.sentTexts().allSatisfy { !$0.contains("statistics_during_period") })
 }

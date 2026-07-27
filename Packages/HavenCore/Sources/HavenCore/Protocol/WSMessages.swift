@@ -237,9 +237,22 @@ public enum WSCommand {
         data(["id": id, "type": "call_service", "domain": domain, "service": service,
               "target": ["entity_id": entityId], "service_data": serviceData.mapValues(plain)])
     }
-    public static func historyDuringPeriod(id: Int, entityId: String, startISO: String, endISO: String) -> Data {
-        data(["id": id, "type": "history/history_during_period", "start_time": startISO, "end_time": endISO,
-              "entity_ids": [entityId], "minimal_response": true, "no_attributes": true])
+    /// - Parameter includeAttributes: fetch each row's attributes, for a value that lives in one
+    ///   rather than in the entity's state (a thermostat's `current_temperature`). Defaults to
+    ///   `false`, which is the compact response every state-sourced caller already relies on:
+    ///   `minimal_response` collapses unchanged states and `no_attributes` drops the payload
+    ///   entirely, and both are a large saving on a day of a chatty sensor.
+    ///
+    ///   `significant_changes_only` is left at HA's default of `true` even for attributes,
+    ///   because `climate` is in the recorder's `SIGNIFICANT_DOMAINS`
+    ///   (`recorder/history/const.py`) — entities in those domains keep every row precisely
+    ///   because their attributes carry the information. Sending `false` would only add rows we
+    ///   would then plot identically.
+    public static func historyDuringPeriod(id: Int, entityId: String, startISO: String,
+                                           endISO: String, includeAttributes: Bool = false) -> Data {
+        data(["id": id, "type": "history/history_during_period", "start_time": startISO,
+              "end_time": endISO, "entity_ids": [entityId],
+              "minimal_response": !includeAttributes, "no_attributes": !includeAttributes])
     }
     public static func statisticsDuringPeriod(id: Int, statisticId: String, startISO: String, endISO: String, period: String) -> Data {
         data(["id": id, "type": "recorder/statistics_during_period", "start_time": startISO, "end_time": endISO,
