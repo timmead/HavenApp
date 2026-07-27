@@ -706,11 +706,13 @@ git commit -m "fix(app): key the history cache by attribute, not just entity and
 
 ### Task 5: The history card
 
-**Split this into two gates.** Steps 1, 3 and 4 (the `attributeName` accessor, the tappable
-chips, the sheet presentation) are independently verifiable — a tap opens *something* — and a
-reviewer can accept that plumbing while rejecting the chart. Steps 2, 5 and 6 are the chart. If
-you are running this task-by-task with review between tasks, stop and commit after Step 4 with a
-placeholder body (`Text("Chart")`) in the view, then do Step 2.
+**Steps are ordered by dependency — follow them in order.** Steps 1–3 are plumbing that
+compiles and runs on its own: the `attributeName` accessor, the tappable chips, and a sheet
+whose view body is a placeholder. Step 4 replaces the placeholder with the chart. That split is
+also the review gate — a reviewer can accept the plumbing (a tap opens *something*) while
+rejecting the chart — so if you are running this task-by-task, build and commit after Step 3.
+
+`attributeName` is defined in Step 1 because the Step 4 view will not compile without it.
 
 **Files:**
 - Create: `App/Views/RoomEnvironmentHistoryView.swift`
@@ -727,7 +729,21 @@ structure deliberately — `FacetCard`, `HavenSegmented` for the range, `.chartX
 `selectedDate`, `nearestPoint(to:in:)` snapping, and `.task(id: range)` to load. Matching it is the
 point; a second, differently-behaved chart in the same app is the failure mode.
 
-- [ ] **Step 1: Make the chips tappable**
+- [ ] **Step 1: Add the attribute accessor the view depends on**
+
+In `Packages/HavenCore/Sources/HavenCore/Model/RoomEnvironment.swift`, add to `UpliftedSensor`:
+
+```swift
+    /// The attribute this reading comes from, or nil when it comes from the entity's state.
+    /// The form `HomeConnection.history(entityId:attribute:range:now:)` and
+    /// `HomeStore.loadHistory` take, so callers don't re-switch on `Source` at every call site.
+    public var attributeName: String? {
+        if case .attribute(let name) = source { return name }
+        return nil
+    }
+```
+
+- [ ] **Step 2: Make the chips tappable**
 
 In `App/Views/RoomEnvironmentChips.swift`, add the property and wrap the row:
 
@@ -766,9 +782,49 @@ private struct TappableChips: ViewModifier {
 }
 ```
 
-- [ ] **Step 2: Write the history view**
+- [ ] **Step 3: Present it from room detail**
 
-Create `App/Views/RoomEnvironmentHistoryView.swift`:
+In `App/Views/RoomDetailView.swift`, add the state near the other `@State`/properties:
+
+```swift
+    @State private var showingEnvironmentHistory = false
+```
+
+Replace the toolbar chips line with:
+
+```swift
+                RoomEnvironmentChips(sensors: room.headerSensors) {
+                    showingEnvironmentHistory = true
+                }
+```
+
+And attach the sheet to the `ScrollView`, beside `.navigationTitle`:
+
+```swift
+        .sheet(isPresented: $showingEnvironmentHistory) {
+            RoomEnvironmentHistoryView(roomName: room.name, sensors: room.headerSensors)
+        }
+```
+
+Create `App/Views/RoomEnvironmentHistoryView.swift` with a placeholder body for now, so this
+step builds and can be committed on its own:
+
+```swift
+import SwiftUI
+import HavenCore
+
+struct RoomEnvironmentHistoryView: View {
+    let roomName: String
+    let sensors: [UpliftedSensor]
+    var body: some View { Text(roomName) }
+}
+```
+
+Then run `xcodegen generate` and build. Commit: `feat(app): open a room history sheet from the pills`.
+
+- [ ] **Step 4: Write the history view**
+
+Replace the placeholder body in `App/Views/RoomEnvironmentHistoryView.swift` with:
 
 ```swift
 import SwiftUI
@@ -986,44 +1042,6 @@ struct RoomEnvironmentHistoryView: View {
         range == .day ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day()
     }
 }
-```
-
-- [ ] **Step 3: Add the attribute accessor it depends on**
-
-In `Packages/HavenCore/Sources/HavenCore/Model/RoomEnvironment.swift`, add to `UpliftedSensor`:
-
-```swift
-    /// The attribute this reading comes from, or nil when it comes from the entity's state.
-    /// The form `HomeConnection.history(entityId:attribute:range:now:)` and
-    /// `HomeStore.loadHistory` take, so callers don't re-switch on `Source` at every call site.
-    public var attributeName: String? {
-        if case .attribute(let name) = source { return name }
-        return nil
-    }
-```
-
-- [ ] **Step 4: Present it from room detail**
-
-In `App/Views/RoomDetailView.swift`, add the state near the other `@State`/properties:
-
-```swift
-    @State private var showingEnvironmentHistory = false
-```
-
-Replace the toolbar chips line with:
-
-```swift
-                RoomEnvironmentChips(sensors: room.headerSensors) {
-                    showingEnvironmentHistory = true
-                }
-```
-
-And attach the sheet to the `ScrollView`, beside `.navigationTitle`:
-
-```swift
-        .sheet(isPresented: $showingEnvironmentHistory) {
-            RoomEnvironmentHistoryView(roomName: room.name, sensors: room.headerSensors)
-        }
 ```
 
 - [ ] **Step 5: Build**
