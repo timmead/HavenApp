@@ -136,3 +136,73 @@ import Testing
     let home = RegistryResolver.resolve(floors: [], areas: [], devices: [], entities: entities)
     #expect(home.registryInfo["camera.disabled"] == nil)
 }
+
+/// The area registry's own `temperature_entity_id` / `humidity_entity_id` — the second rung of
+/// `RoomEnvironmentResolver`'s ladder, and the only one that reflects a choice the user made in
+/// Home Assistant itself.
+///
+/// Nothing asserted this before, which mattered more than it looked: both fields ride
+/// `HACoding.decoder`'s `.convertFromSnakeCase` with no explicit `CodingKeys`, so a change to that
+/// strategy would decode them to nil and quietly demote every registry-nominated room to a
+/// heuristic pick — with no error anywhere. The payload is `AreaEntry.json_fragment` from Home
+/// Assistant's own source, which is what `websocket_list_areas` sends.
+@Test func areaRegistryEntryDecodesItsNominatedTemperatureAndHumidityEntities() throws {
+    let json = """
+    [
+      {
+        "aliases": [],
+        "area_id": "living_room",
+        "created_at": 1753600000.0,
+        "floor_id": "ground",
+        "humidity_entity_id": "sensor.living_room_humidity",
+        "icon": "mdi:sofa",
+        "labels": [],
+        "modified_at": 1753600000.0,
+        "name": "Living Room",
+        "picture": null,
+        "temperature_entity_id": "sensor.living_room_temperature"
+      },
+      {
+        "aliases": [],
+        "area_id": "hallway",
+        "created_at": 1753600000.0,
+        "floor_id": null,
+        "humidity_entity_id": null,
+        "icon": null,
+        "labels": [],
+        "modified_at": 1753600000.0,
+        "name": "Hallway",
+        "picture": null,
+        "temperature_entity_id": null
+      }
+    ]
+    """.data(using: .utf8)!
+
+    let areas = try HACoding.decoder.decode([AreaRegistryEntry].self, from: json)
+    let living = try #require(areas.first { $0.areaId == "living_room" })
+    #expect(living.temperatureEntityId == "sensor.living_room_temperature")
+    #expect(living.humidityEntityId == "sensor.living_room_humidity")
+    #expect(living.floorId == "ground")
+
+    // The overwhelmingly common case: an area nobody ever nominated anything for. This is why the
+    // resolver has an auto-pick rung at all.
+    let hallway = try #require(areas.first { $0.areaId == "hallway" })
+    #expect(hallway.temperatureEntityId == nil)
+    #expect(hallway.humidityEntityId == nil)
+}
+
+/// And end-to-end: a registry nomination must survive `resolve` → `RoomEnvironmentResolver` and
+/// come out as the room's temperature source.
+@Test func anAreasNominatedTemperatureEntityReachesTheRoomHeading() {
+    let areas = [AreaRegistryEntry(areaId: "living", name: "Living", floorId: nil, icon: nil,
+                                   temperatureEntityId: "sensor.chosen", humidityEntityId: nil)]
+    let entities = ["sensor.chosen", "sensor.other"].map {
+        EntityRegistryEntry(entityId: $0, areaId: "living", deviceId: nil, name: nil)
+    }
+    let home = RegistryResolver.resolve(floors: [], areas: areas, devices: [], entities: entities)
+    let env = RoomEnvironmentResolver.resolve(
+        home: home, sources: ["sensor.other": RoomEnvironmentSource(deviceClass: "temperature")])
+    // Beats the auto-pick even though the auto-pick had a perfectly good candidate and the
+    // nominated entity isn't one (no live state for it here) — it is an explicit human statement.
+    #expect(env["living"]?.temperature?.entityId == "sensor.chosen")
+}

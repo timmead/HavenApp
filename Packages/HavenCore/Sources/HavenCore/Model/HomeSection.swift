@@ -1,11 +1,5 @@
 public enum SectionKind: Sendable, Equatable { case room }
 
-public struct UpliftedSensor: Sendable, Equatable {
-    public enum Role: Sendable, Equatable { case temperature, humidity }
-    public let role: Role
-    public let entityId: String
-}
-
 public struct RoomSection: Sendable, Equatable, Identifiable {
     public let id: String
     public let name: String
@@ -39,12 +33,25 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
 }
 
 public enum SectionBuilder {
-    public static func rooms(from home: ResolvedHome) -> [RoomSection] {
+    /// Builds the room sections for a home.
+    ///
+    /// - Parameter environment: each area's resolved temperature/humidity nomination, keyed by area
+    ///   id — see `RoomEnvironmentResolver`. Required rather than defaulted: an omitted environment
+    ///   means every room silently loses its pills, which is precisely the failure this parameter
+    ///   exists to make impossible to introduce by accident.
+    public static func rooms(from home: ResolvedHome,
+                             environment: [String: RoomEnvironment]) -> [RoomSection] {
         home.floors.flatMap(\.areas).map { area in
-            var header: [UpliftedSensor] = []
-            if let t = area.temperatureEntityId { header.append(.init(role: .temperature, entityId: t)) }
-            if let h = area.humidityEntityId { header.append(.init(role: .humidity, entityId: h)) }
-            let uplifted = Set(header.map(\.entityId))
+            let header = environment[area.id]?.headerSensors ?? []
+            // An uplifted reading is shown in the heading instead of as a tile — but only when the
+            // heading has taken over the whole entity. A `.attribute` source has not: the pill
+            // reads one attribute off a thermostat, and the thermostat itself is still a control
+            // the room needs a tile for. Dropping it would remove the climate tile from every
+            // thermostat-only room.
+            let uplifted = Set(header.compactMap { sensor -> String? in
+                guard case .state = sensor.source else { return nil }
+                return sensor.entityId
+            })
             let devices = area.entityIds.filter { !uplifted.contains($0) }.map { DeviceRef.entity($0) }
             return RoomSection(id: area.id, name: area.name, areaId: area.id, headerSensors: header,
                                deviceRefs: devices, tiers: area.tiers)
