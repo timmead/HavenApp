@@ -204,9 +204,18 @@ final class HomeStore {
         Task { try? await connection.mediaPreviousTrack(id) }
     }
 
+    /// Sets the level, and clears mute when a volume change implies it.
+    ///
+    /// Whether it implies it is `MediaPlayerState.volumeChangeShouldUnmute`, in HavenCore with
+    /// tests — not decided here. The short version: dragging a volume control on a muted speaker
+    /// otherwise changes a number and produces no audible difference at all, which reads as a
+    /// broken slider. `volume_mute` goes first so the level lands on an already-unmuted player
+    /// rather than the two racing.
     func setMediaVolume(_ id: String, percent: Int) {
         guard let current = states[id] else { return }
-        optimisticMedia(id, MediaPlayerOptimistic.volume(current, percent: percent)) { c in
+        let unmuting = MediaPlayerState(current).volumeChangeShouldUnmute
+        optimisticMedia(id, MediaPlayerOptimistic.volume(current, percent: percent, unmuting: unmuting)) { c in
+            if unmuting { try await c.setMediaMuted(id, muted: false) }
             try await c.setMediaVolume(id, percent: percent)
         }
     }

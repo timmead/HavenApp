@@ -166,3 +166,36 @@ private func mp(_ st: String, _ a: [String: JSONValue] = [:]) -> EntityState {
     #expect(AccessibilitySummary.mediaPlayer("Kitchen", MediaPlayerState(mp("off"))) == "Kitchen, off")
     #expect(AccessibilitySummary.mediaPlayer("Kitchen", MediaPlayerState(mp("unavailable"))) == "Kitchen, unavailable")
 }
+
+// MARK: - Volume vs mute
+
+/// Dragging a volume control on a muted speaker must clear the mute, because the alternative is a
+/// control that visibly does nothing: the level changes, nothing is heard, and the slider reads as
+/// broken rather than as a mute the user had forgotten about.
+@Test func aVolumeChangeOnAMutedPlayerAlsoUnmutes() {
+    let muted = MediaPlayerState(mp("playing", [
+        "is_volume_muted": .bool(true), "volume_level": .double(0.4),
+        "supported_features": .int(4 | 8),               // volumeSet | volumeMute
+    ]))
+    #expect(muted.volumeChangeShouldUnmute)
+}
+
+/// Only where the device declared `volume_mute`. Sending `volume_mute` to a player that never said
+/// it accepts one is the guess every control here refuses to make.
+@Test func aPlayerWithoutMuteSupportIsNeverSentAnUnmute() {
+    let noMuteSupport = MediaPlayerState(mp("playing", [
+        "is_volume_muted": .bool(true), "volume_level": .double(0.4),
+        "supported_features": .int(4),                   // volumeSet only
+    ]))
+    #expect(!noMuteSupport.volumeChangeShouldUnmute)
+}
+
+/// And nothing here ever *mutes* — this decides only what a volume change implies, in one
+/// direction. An already-unmuted player is left entirely alone, so the mute button keeps meaning
+/// exactly what it says.
+@Test func aVolumeChangeOnAnUnmutedPlayerImpliesNothing() {
+    let unmuted = MediaPlayerState(mp("playing", [
+        "volume_level": .double(0.4), "supported_features": .int(4 | 8),
+    ]))
+    #expect(!unmuted.volumeChangeShouldUnmute)
+}

@@ -88,6 +88,25 @@ private func onScreenElapsed(_ e: EntityState, at now: Date) -> Double? {
     #expect(MediaPlayerState(MediaPlayerOptimistic.volume(playing(), percent: -20)).volumePercent == 0)
 }
 
+/// A volume change on a muted player sends `volume_mute(false)` *and* `volume_set`, so both halves
+/// must land optimistically together. Writing only the level would leave the slider filling in while
+/// the mute glyph on the same row still read "muted" until Home Assistant's echo arrived — two
+/// controls in one row disagreeing, which is the bug class this whole type exists for.
+@Test func optimisticVolumeCanClearMuteInTheSameWrite() {
+    let muted = MediaPlayerOptimistic.mute(playing(), muted: true)
+    let after = MediaPlayerOptimistic.volume(muted, percent: 55, unmuting: true)
+    #expect(MediaPlayerState(after).volumePercent == 55)
+    #expect(!MediaPlayerState(after).isMuted)
+}
+
+/// The default is unchanged, and deliberately so: an ordinary level change on an unmuted player
+/// must not touch `is_volume_muted` at all.
+@Test func optimisticVolumeLeavesMuteAloneByDefault() {
+    let muted = MediaPlayerOptimistic.mute(playing(), muted: true)
+    #expect(MediaPlayerState(MediaPlayerOptimistic.volume(muted, percent: 55)).isMuted)
+    #expect(!MediaPlayerState(MediaPlayerOptimistic.volume(playing(), percent: 55)).isMuted)
+}
+
 @Test func optimisticMuteLeavesTheLevelAlone() {
     // Home Assistant's mute is independent of level; zeroing the level here would make un-muting
     // restore the wrong volume.

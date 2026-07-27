@@ -39,9 +39,17 @@ public enum MediaPlayerOptimistic {
     /// `volume_set`. Percent in, `volume_level` (0…1) out — the same round-trip
     /// `MediaPlayerState.volumePercent` reads back, so a slider released at 37 stays at 37 instead
     /// of snapping to whatever rounding the two conversions would otherwise disagree on.
-    public static func volume(_ e: EntityState, percent: Int) -> EntityState {
+    ///
+    /// - Parameter unmuting: also clears `is_volume_muted`, for the case
+    ///   `MediaPlayerState.volumeChangeShouldUnmute` describes — a volume change on a muted player
+    ///   sends `volume_mute(false)` alongside `volume_set`, so both halves of that pair must land
+    ///   optimistically together. Writing only the level would leave the slider filling in while
+    ///   the mute glyph beside it still read "muted" until Home Assistant's echo arrived: two
+    ///   controls on one row disagreeing, which is this file's whole subject.
+    public static func volume(_ e: EntityState, percent: Int, unmuting: Bool = false) -> EntityState {
         var next = e
         next.attributes["volume_level"] = .double(Double(max(0, min(100, percent))) / 100)
+        if unmuting { next.attributes["is_volume_muted"] = .bool(false) }
         return next
     }
 

@@ -163,6 +163,24 @@ public struct MediaPlayerState: Sendable, Equatable {
     /// while playing and Play otherwise, and each of those is gated by `canPause`/`canPlay`.
     public var showsPlayPause: Bool { canPlay || canPause }
 
+    /// Whether setting a volume level should *also* clear mute.
+    ///
+    /// It should, and the reason is that the alternative is a control that visibly does nothing:
+    /// dragging a volume slider on a muted speaker changes `volume_level` and produces no sound and
+    /// no audible difference whatsoever, which reads as a broken slider rather than as a mute the
+    /// user forgot about. Reaching for the volume is an unambiguous request to hear something.
+    ///
+    /// Gated on the device declaring `volumeMute`, because on a player without it there is no mute
+    /// to clear and sending `volume_mute` would be a call the device never said it accepts — the
+    /// same omit-don't-guess rule every control here follows.
+    ///
+    /// **This does not weaken the mute button.** Mute remains a control of its own that means
+    /// exactly what it says; this only decides what a *volume change* implies, and only in the one
+    /// direction — nothing here ever mutes.
+    public var volumeChangeShouldUnmute: Bool {
+        isMuted && features.contains(.volumeMute)
+    }
+
     private static func text(_ v: JSONValue?) -> String? {
         guard let s = v?.asString else { return nil }
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)

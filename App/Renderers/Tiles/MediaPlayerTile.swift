@@ -206,9 +206,14 @@ struct MediaPlayerTile: View {
         }
     }
 
-    /// A compact level readout plus a mute button. A slider this small is a mis-tap waiting to
-    /// happen next to a tap that opens the modal, so the fine control stays in the modal and the
-    /// tile carries the one binary action.
+    /// A mute button plus a draggable level control, shared by the 2×1 and the 4×2 so the two
+    /// behave alike.
+    ///
+    /// This was a static readout, on the grounds that a slider this small is a mis-tap waiting to
+    /// happen next to a tap that opens the modal. That concern was real and is answered rather than
+    /// dropped: `PipSlider` puts the gesture on the pip alone and drives the value from the drag's
+    /// *translation*, so a touch that doesn't travel cannot change anything — see its doc comment.
+    /// The fine control still exists in the modal too; this is the one you can reach from the grid.
     @ViewBuilder
     private func volumeRow(_ s: MediaPlayerState?) -> some View {
         if let s, s.isActive, s.features.contains(.volumeSet) || s.features.contains(.volumeMute) {
@@ -230,8 +235,22 @@ struct MediaPlayerTile: View {
                         .frame(width: 24, height: 24)
                         .accessibilityHidden(true)
                 }
-                HorizontalLevelBar(percent: s.isMuted ? 0 : (s.volumePercent ?? 0), color: accent)
-                    .accessibilityHidden(true)      // spoken as part of the tile's own label
+                // Only where the device declared `volume_set` — omitted, never shown disabled, like
+                // every other control here. A player that can mute but not set a level keeps its
+                // mute button and simply has no track beside it.
+                if s.features.contains(.volumeSet) {
+                    // The pip sits at the **real** level while muted rather than at zero. Muting in
+                    // Home Assistant is independent of level — `MediaPlayerOptimistic.mute` goes out
+                    // of its way to leave `volume_level` alone so un-muting restores the right
+                    // volume — so parking the pip at zero would contradict the model and, worse,
+                    // make a drag start from a value the speaker was never at.
+                    PipSlider(percent: s.volumePercent ?? 0,
+                              accent: accent,
+                              isMuted: s.isMuted,
+                              label: "Volume") { percent in
+                        store.setMediaVolume(entityId, percent: percent)
+                    }
+                }
             }
         }
     }
@@ -348,23 +367,5 @@ private struct ScrollingText: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
-    }
-}
-
-/// The horizontal sibling of `LevelBar`, for the 4×2 tile's volume readout. Separate rather than a
-/// parameter on `LevelBar` because the vertical one is 4pt wide by construction and every existing
-/// caller depends on that.
-private struct HorizontalLevelBar: View {
-    let percent: Int
-    let color: Color
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(HavenColor.levelTrack)
-                Capsule().fill(color)
-                    .frame(width: geo.size.width * CGFloat(max(0, min(100, percent))) / 100)
-            }
-        }
-        .frame(height: 4)
     }
 }
