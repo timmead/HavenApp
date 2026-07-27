@@ -1093,6 +1093,14 @@ Assistant before considering the feature done:
 9. **VoiceOver.** The pills announce as a button with the "Shows temperature and humidity over
    time" hint. The room section's pills stay non-interactive, and tapping the room heading still
    navigates rather than opening a sheet.
+10. **A room where both sensors are nominated but only one has recorded data.** `DualAxisScale`
+    needs both *series* to have points, not merely both sensors to exist, so it returns nil here
+    and the one series with data plots unprojected with no trailing axis. Confirm that reads as a
+    deliberate single-series chart rather than a broken dual-axis one. (Found by the Task 5
+    implementer; not covered by steps 1–9.)
+11. **Every range, not four of them.** `HistoryRange` has five cases — Day, Week, Month, 3M, Year.
+    Step 4 says "Day through Year", which reads as four. Exercise all five, and check the
+    segmented control's labels still fit on the smallest supported device.
 
 ## Out of Scope
 
