@@ -143,22 +143,25 @@ struct RoomEnvironmentHistoryView: View {
     /// `DualAxisScale` would label a leading axis with a domain nothing is plotted against.
     @ViewBuilder
     private func chart(tempPoints: [HistoryPoint], humidPoints: [HistoryPoint]) -> some View {
-        let tempSeries = seriesFor(temperature)
-        let humidSeries = seriesFor(humidity)
-        let scale = (temperature != nil && humidity != nil)
-            ? DualAxisScale(primary: tempSeries, secondary: humidSeries)
+        // Each axis's range comes from `EnvironmentAxisBounds` — a fixed band for ordinary indoor
+        // values, grown outward in whole steps only when the data leaves it. Fitting the axis to
+        // the data instead (what this used to do) made a room that drifted half a degree fill the
+        // whole chart, and relabelled the axis every time the data moved.
+        let tempDomain = temperature.flatMap { axisDomain(for: $0) }
+        let humidDomain = humidity.flatMap { axisDomain(for: $0) }
+
+        // A projection only when *both* series are actually plotted. One series is drawn against
+        // its own axis directly; routing it through a projection would label a leading axis with
+        // a domain nothing is plotted against.
+        let scale = (!tempPoints.isEmpty && !humidPoints.isEmpty)
+            ? tempDomain.flatMap { t in humidDomain.map { DualAxisScale(primary: t, secondary: $0) } }
             : nil
-        // The single-series fallback domain — for a room with only one sensor, or for the rarer
-        // shape where both are nominated but only one currently holds data (exactly the case
-        // that makes `DualAxisScale` return nil). Goes through `DualAxisScale.domain(for:)`
-        // rather than a second, hand-rolled copy of its flat-series padding: this file used to
-        // carry its own inlined `0.5`, which is precisely the kind of silent drift HavenCore's
-        // own doc comment on that arithmetic warns about.
-        let fallbackDomain = DualAxisScale.domain(for: tempPoints.isEmpty ? humidSeries : tempSeries) ?? 0...1
 
         // Pinned once and used twice — by the area fill's floor and by the Y scale below. They
         // have to be the same value: see the `yStart` comment on the `AreaMark`.
-        let domain = scale?.primaryDomain ?? fallbackDomain
+        let domain = scale?.primaryDomain
+            ?? (tempPoints.isEmpty ? humidDomain : tempDomain)
+            ?? 0...1
 
         Chart {
             ForEach(tempPoints, id: \.time) { p in
@@ -174,7 +177,15 @@ struct RoomEnvironmentHistoryView: View {
                          yStart: .value("Floor", domain.lowerBound),
                          yEnd: .value("Temperature", p.value))
                     .interpolationMethod(.catmullRom)
-                    .foregroundStyle(temperatureAccent.opacity(0.18))
+                    // A gradient, not a flat wash, because the axis no longer hugs the data. A
+                    // fitted axis made this fill a thin ribbon under the line; against a fixed
+                    // 15–30°C band a 24°C room fills roughly two-thirds of the chart, and at a
+                    // flat 18% opacity that is a slab of colour competing with the line it is
+                    // meant to support. Fading to clear keeps the temperature series visually
+                    // weighted without turning the plot into a block.
+                    .foregroundStyle(.linearGradient(
+                        colors: [temperatureAccent.opacity(0.22), temperatureAccent.opacity(0.02)],
+                        startPoint: .top, endPoint: .bottom))
                 // `series:` is load-bearing, not decoration: Swift Charts joins LineMarks into
                 // one continuous path by `series:` (or `foregroundStyle(by:)`) alone — the
                 // `.value("Temperature", …)` / `.value("Humidity", …)` labels below only name the
@@ -210,10 +221,13 @@ struct RoomEnvironmentHistoryView: View {
         // proves none of this; only pinning the domain does.
         .chartYScale(domain: domain)
         .chartYAxis {
-            AxisMarks(position: .leading)
-            if let scale {
+            // Stepped rather than automatic, so the leading axis reads 15/20/25/30 instead of
+            // whatever Swift Charts picks for a range it did not choose. The step comes from the
+            // same band that set the domain, so labels stay round when the axis grows.
+            AxisMarks(position: .leading, values: leadingTicks(in: domain))
+            if let scale, let humidStep = humidity.flatMap({ axisStep(for: $0) }) {
                 AxisMarks(position: .trailing,
-                          values: scale.secondaryTicks(count: 4).map(\.position)) { axis in
+                          values: scale.secondaryTicks(step: humidStep).map(\.position)) { axis in
                     AxisValueLabel {
                         // Labelled by inverting the projection: the position is temperature
                         // space, the number printed is humidity space.
@@ -251,6 +265,35 @@ struct RoomEnvironmentHistoryView: View {
               let series = store.history(sensor.entityId, range, attribute: sensor.attributeName)
         else { return HistorySeries(points: []) }
         return series
+    }
+
+    /// The unit a sensor is currently reporting in — which is also what decides *which* band
+    /// applies. An entity that is currently unavailable reports none, and falls back to a
+    /// data-fitted axis; see `EnvironmentAxisBounds.domain(role:unit:series:)`.
+    private func unit(for sensor: UpliftedSensor) -> String {
+        EnvironmentReading.unit(sensor, state: store.state(sensor.entityId))
+    }
+
+    /// The axis range for one sensor: its band, grown outward in whole steps to fit the data.
+    private func axisDomain(for sensor: UpliftedSensor) -> ClosedRange<Double>? {
+        EnvironmentAxisBounds.domain(role: sensor.role, unit: unit(for: sensor),
+                                     series: seriesFor(sensor))
+    }
+
+    /// The tick spacing that keeps `sensor`'s axis labels round, or nil for a unit with no band.
+    private func axisStep(for sensor: UpliftedSensor) -> Double? {
+        EnvironmentAxisBounds.band(role: sensor.role, unit: unit(for: sensor))?.step
+    }
+
+    /// Leading-axis tick values — the temperature sensor's step when temperature is what's plotted
+    /// there, otherwise humidity's, since a humidity-only room draws humidity against the leading
+    /// axis. A unit with no band has a data-fitted domain and so no round step to impose; quarters
+    /// of the range are as good an answer as any and keep the axis from being unlabelled.
+    private func leadingTicks(in domain: ClosedRange<Double>) -> [Double] {
+        let leading = (temperature.map { !points(for: $0).isEmpty } == true) ? temperature : humidity
+        let step = leading.flatMap { axisStep(for: $0) }
+            ?? (domain.upperBound - domain.lowerBound) / 4
+        return EnvironmentAxisBounds.ticks(in: domain, step: step)
     }
 
     private func scrubText(_ sensor: UpliftedSensor, _ point: HistoryPoint) -> String {

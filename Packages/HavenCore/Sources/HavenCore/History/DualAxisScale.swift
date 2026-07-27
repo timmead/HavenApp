@@ -20,13 +20,27 @@ public struct DualAxisScale: Sendable, Equatable {
     /// own units. Arbitrary, and only ever used when the alternative is a zero-width domain.
     private static let flatSeriesPadding = 0.5
 
-    /// `nil` unless *both* series have plottable data — a chart with one series uses its own
-    /// axis directly and must never route through a projection.
-    public init?(primary: HistorySeries, secondary: HistorySeries) {
-        guard let pMin = primary.min, let pMax = primary.max,
-              let sMin = secondary.min, let sMax = secondary.max else { return nil }
-        primaryDomain = Self.domain(pMin, pMax)
-        secondaryDomain = Self.domain(sMin, sMax)
+    /// Projects between two already-decided axis ranges.
+    ///
+    /// Deliberately takes domains rather than the series they came from: *what range an axis
+    /// should cover* is a policy question involving the reading's role, its unit and what counts
+    /// as an ordinary indoor value (see `EnvironmentAxisBounds`), whereas this type is the
+    /// arithmetic that maps one range onto another. Keeping them apart is what lets the bands be
+    /// retuned without touching a line of the projection.
+    ///
+    /// A degenerate range is widened rather than rejected: dividing by a zero-width domain yields
+    /// NaN positions, and Swift Charts silently declines to draw those — a blank card for a room
+    /// with perfectly good data. Callers normally pass ranges that cannot be degenerate, so this
+    /// is a floor under a caller mistake rather than an expected path.
+    public init(primary: ClosedRange<Double>, secondary: ClosedRange<Double>) {
+        primaryDomain = Self.widened(primary)
+        secondaryDomain = Self.widened(secondary)
+    }
+
+    private static func widened(_ range: ClosedRange<Double>) -> ClosedRange<Double> {
+        range.lowerBound < range.upperBound
+            ? range
+            : (range.lowerBound - flatSeriesPadding)...(range.lowerBound + flatSeriesPadding)
     }
 
     private static func domain(_ lo: Double, _ hi: Double) -> ClosedRange<Double> {
@@ -60,16 +74,17 @@ public struct DualAxisScale: Sendable, Equatable {
             + fraction * (secondaryDomain.upperBound - secondaryDomain.lowerBound)
     }
 
-    /// Evenly spaced trailing-axis labels: each carries the position to draw it at (primary
+    /// Trailing-axis labels at round values: each carries the position to draw it at (primary
     /// space, which is what the chart plots against) and the value to print (secondary space,
     /// which is what the reader came for).
-    public func secondaryTicks(count: Int) -> [(position: Double, value: Double)] {
-        let steps = Swift.max(count, 2) - 1
-        return (0...steps).map { step in
-            let value = secondaryDomain.lowerBound
-                + (Double(step) / Double(steps))
-                * (secondaryDomain.upperBound - secondaryDomain.lowerBound)
-            return (position: project(value), value: value)
-        }
+    ///
+    /// Driven by a *step* rather than a count, because a count cannot survive the axis growing.
+    /// Five evenly spaced ticks across 30–70% read 30/40/50/60/70; the same five across a range
+    /// grown to 20–70 read 20/32.5/45/57.5/70. Stepping instead means the labels stay round
+    /// whatever the range turns out to be — and roundness is most of what makes an axis look
+    /// deliberate rather than computed.
+    public func secondaryTicks(step: Double) -> [(position: Double, value: Double)] {
+        EnvironmentAxisBounds.ticks(in: secondaryDomain, step: step)
+            .map { (position: project($0), value: $0) }
     }
 }
