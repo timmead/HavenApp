@@ -45,15 +45,28 @@ public enum RegistryResolver {
             areasByFloor[fid, default: []].append(a)
         }
 
-        var floorModels: [ResolvedFloor] = floors.compactMap { f in
+        // Real floors in level order, ties broken by registry order. The tiebreak is not a nicety:
+        // `f.level ?? 0` collapses every floor HA left unlevelled onto 0, so ties are the ordinary
+        // case rather than an edge one, and `sorted(by:)` is documented as unstable — without it two
+        // unlevelled floors could swap places between two identical registry loads, which the pager
+        // would show as the house rearranging itself.
+        var floorModels: [ResolvedFloor] = floors.compactMap { f -> ResolvedFloor? in
             guard let list = areasByFloor[f.floorId], !list.isEmpty else { return nil }
             return ResolvedFloor(id: f.floorId, name: f.name, level: f.level ?? 0,
                                  areas: list.sorted { $0.name < $1.name })
         }
+        .enumerated()
+        .sorted { ($0.element.level, $0.offset) < ($1.element.level, $1.offset) }
+        .map(\.element)
+
+        // "Home" leads. It holds everything HA never filed onto a floor, which makes it the page a
+        // user lands on and pages back to — the leftmost one, not the one past the top of the house.
+        // Position is the array's now, not `level`'s; `Int.min` is only there so that an incidental
+        // re-sort by level somewhere else would still agree with the order chosen here.
         if let noFloorAreas = areasByFloor[noFloorId], !noFloorAreas.isEmpty {
-            floorModels.append(ResolvedFloor(id: noFloorId, name: "Home", level: Int.max,
-                                             areas: noFloorAreas.sorted { $0.name < $1.name }))
+            floorModels.insert(ResolvedFloor(id: noFloorId, name: "Home", level: Int.min,
+                                             areas: noFloorAreas.sorted { $0.name < $1.name }), at: 0)
         }
-        return ResolvedHome(floors: floorModels.sorted { $0.level < $1.level }, registryInfo: registryInfo)
+        return ResolvedHome(floors: floorModels, registryInfo: registryInfo)
     }
 }
