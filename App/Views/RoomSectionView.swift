@@ -23,17 +23,12 @@ struct RoomSectionView: View {
             // (and likely lose to) an enclosing NavigationLink's own tap recognizer.
             NavigationLink(value: room.id) {
                 HStack {
-                    Text(room.name).font(.system(size: 17, weight: .bold))
-                    Spacer()
-                    ForEach(room.headerSensors, id: \.entityId) { hs in
-                        let v = store.state(hs.entityId)?.state ?? "—"
-                        let unit = hs.role == .temperature ? "°" : "%"
-                        HavenChip(
-                            systemImage: hs.role == .temperature ? "thermometer.medium" : "humidity.fill",
-                            text: v + unit,
-                            accent: hs.role == .temperature ? HavenColor.domain(.climate) : HavenColor.domain(.cover)
-                        )
-                    }
+                    // The name yields before the readings do: it truncates, they don't (see
+                    // `RoomEnvironmentChips`). A long room name is still recognisable clipped; a
+                    // temperature is not.
+                    Text(room.name).font(.system(size: 17, weight: .bold)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    RoomEnvironmentChips(sensors: room.headerSensors, spacing: 8)
                 }
                 .contentShape(Rectangle())
             }

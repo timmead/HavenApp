@@ -8,6 +8,7 @@ import HavenCore
 struct RoomDetailView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
+    @State private var showingEnvironmentHistory = false
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
     // The Climate group renders in its own 2-column grid — a half-width tile is exactly a
     // 2-of-4 span, matching the approved mockups. (`.gridCellColumns(2)` is inert inside a
@@ -68,18 +69,13 @@ struct RoomDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 7) {
-                    ForEach(room.headerSensors, id: \.entityId) { hs in
-                        let v = store.state(hs.entityId)?.state ?? "—"
-                        let unit = hs.role == .temperature ? "°" : "%"
-                        HavenChip(
-                            systemImage: hs.role == .temperature ? "thermometer.medium" : "humidity.fill",
-                            text: v + unit,
-                            accent: hs.role == .temperature ? HavenColor.domain(.climate) : HavenColor.domain(.cover)
-                        )
-                    }
+                RoomEnvironmentChips(sensors: room.headerSensors) {
+                    showingEnvironmentHistory = true
                 }
             }
+        }
+        .sheet(isPresented: $showingEnvironmentHistory) {
+            RoomEnvironmentHistoryView(roomName: room.name, sensors: room.headerSensors)
         }
     }
 

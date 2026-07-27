@@ -105,3 +105,58 @@ import Foundation
     #expect(series(#"{"sensor.p":null}"#).points.isEmpty)
     #expect(series(#"{"other.entity":[{"s":"1","lu":1.0}]}"#).points.isEmpty)
 }
+
+/// A thermostat carries the room's temperature in `current_temperature`, not in its state —
+/// its state is "heat"/"cool"/"off". Verified against HA's `row_to_compressed_state`: with
+/// `no_attributes: false` every row gets a full `a` dictionary, so there is no carry-forward
+/// to do here.
+@Test func parseAttributeHistoryReadsANamedAttribute() {
+    let json = #"""
+    {"climate.lr":[
+      {"s":"heat","a":{"current_temperature":20.5,"current_humidity":44},"lu":1751328000.0},
+      {"s":"heat","a":{"current_temperature":21.0,"current_humidity":45},"lu":1751331600.0}]}
+    """#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromHistory(v, entityId: "climate.lr", attribute: "current_temperature")
+    #expect(s.points.count == 2)
+    #expect(s.points.first?.value == 20.5)
+    #expect(s.points.first?.time == Date(timeIntervalSince1970: 1751328000))
+    #expect(s.max == 21.0)
+}
+
+/// Each role reads its own attribute off the same rows — otherwise a thermostat-only room
+/// plots the same line twice.
+@Test func parseAttributeHistoryDistinguishesAttributes() {
+    let json = #"""
+    {"climate.lr":[{"s":"heat","a":{"current_temperature":20.5,"current_humidity":44},"lu":1.0}]}
+    """#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    #expect(HistoryParsing.fromHistory(v, entityId: "climate.lr", attribute: "current_humidity")
+        .points.first?.value == 44)
+}
+
+/// A row whose attribute is missing, null or non-numeric is dropped rather than plotted as
+/// zero — an unavailable thermostat would otherwise draw a cliff to 0°C.
+@Test func parseAttributeHistoryDropsRowsWithoutAUsableValue() {
+    let json = #"""
+    {"climate.lr":[
+      {"s":"heat","a":{"current_temperature":20.5},"lu":1.0},
+      {"s":"unavailable","a":{},"lu":2.0},
+      {"s":"heat","a":{"current_temperature":null},"lu":3.0},
+      {"s":"heat","lu":4.0},
+      {"s":"heat","a":{"current_temperature":"warm"},"lu":5.0}]}
+    """#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let s = HistoryParsing.fromHistory(v, entityId: "climate.lr", attribute: "current_temperature")
+    #expect(s.points.count == 1)
+    #expect(s.points.first?.value == 20.5)
+}
+
+/// An entity with no rows at all yields an empty series with nil min/max — the invariant
+/// `HistorySeries` already documents, and what chart code branches on.
+@Test func parseAttributeHistoryOfAnAbsentEntityIsEmpty() {
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(#"{}"#.utf8))
+    let s = HistoryParsing.fromHistory(v, entityId: "climate.lr", attribute: "current_temperature")
+    #expect(s.points.isEmpty)
+    #expect(s.min == nil)
+}
