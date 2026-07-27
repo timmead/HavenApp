@@ -123,4 +123,28 @@ public enum HistoryParsing {
         }
         return HistorySeries(points: pts)
     }
+
+    /// Parses `history/history_during_period` rows for a value carried in an *attribute* rather
+    /// than in the entity's state — a thermostat's `current_temperature`, whose state is
+    /// "heat"/"cool"/"off".
+    ///
+    /// Requires the request to have been made with `no_attributes: false` (see
+    /// `WSCommand.historyDuringPeriod(includeAttributes:)`); rows fetched without it carry no
+    /// `a` key at all and every one of them is dropped here.
+    ///
+    /// Every row carries a *full* attribute dictionary — verified against HA's
+    /// `row_to_compressed_state`, which sets it unconditionally when `no_attributes` is false —
+    /// so there is deliberately no carry-forward of the last-seen value. A row without a usable
+    /// number is dropped rather than held over, because an unavailable thermostat should leave a
+    /// gap in the line, not a plateau at its last reading.
+    public static func fromHistory(_ result: JSONValue, entityId: String,
+                                   attribute: String) -> HistorySeries {
+        let arr = result.asObject?[entityId]?.asArray ?? []
+        let pts = arr.compactMap { row -> HistoryPoint? in
+            guard let o = row.asObject, let lu = o["lu"]?.asDouble,
+                  let val = o["a"]?.asObject?[attribute]?.asDouble, val.isFinite else { return nil }
+            return HistoryPoint(time: Date(timeIntervalSince1970: lu), value: val)
+        }
+        return HistorySeries(points: pts)
+    }
 }
