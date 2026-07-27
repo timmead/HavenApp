@@ -220,22 +220,19 @@ final class AppModel {
     }
 
     func signIn() async {
-        let raw = serverURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Tolerate a missing scheme (users often type just "homeassistant.local:8123").
-        let hasScheme = raw.range(of: "^https?://", options: [.regularExpression, .caseInsensitive]) != nil
-        let normalized = hasScheme ? raw : "http://\(raw)"
-        guard !raw.isEmpty,
-              let url = URL(string: normalized),
-              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-              let host = url.host(), !host.isEmpty else {
-            phase = .error("Enter a valid URL like http://homeassistant.local:8123"); return
+        // `ServerURL.normalize` is a pure function in HavenCore so it can be tested — its inline
+        // predecessor rewrote a mistyped scheme into a valid URL for a host the user never named,
+        // and nothing here could have caught that.
+        let url: URL
+        switch ServerURL.normalize(serverURLText) {
+        case .success(let normalized): url = normalized
+        case .failure(let reason): phase = .error(reason.message); return
         }
         // Read before the write below replaces it, for the host comparison after
         // `forgetDiscoveredURLs()`.
         let previousBase = savedBaseURL()
-        serverURLText = normalized
+        serverURLText = url.absoluteString
         baseURL = url
-        defaults.set(url.absoluteString, forKey: DefaultsKeys.baseURL)
         // Whatever was discovered/remembered belonged to whichever instance was previously
         // signed into (possibly a different host) — never let it leak into this instance's
         // candidate list.
@@ -257,6 +254,13 @@ final class AppModel {
             let t = try await oauth.login(baseURL: url, web: web, http: http)
             havenLog.info("token exchange OK (hasRefresh=\(t.refreshToken != nil, privacy: .public))")
             try tokens.save(t)
+            // Persisted *here*, not before the OAuth call above. An address is only worth
+            // remembering once it has actually authenticated: written earlier, a mistyped host
+            // became the saved base URL for every subsequent launch, and the user had to notice
+            // and retype it correctly to escape a server they had never successfully reached.
+            // `serverURLText` still holds what they typed, so a failed attempt stays on screen to
+            // be corrected — it just doesn't outlive the attempt.
+            defaults.set(url.absoluteString, forKey: DefaultsKeys.baseURL)
             beginSession(at: url)
             await startConnecting()
         } catch {

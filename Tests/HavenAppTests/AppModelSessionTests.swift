@@ -197,8 +197,33 @@ import HavenCore
         guard case .error(let message) = app.phase else {
             Issue.record("expected .error, got \(app.phase)"); return
         }
-        #expect(message.contains("valid URL"))
+        // Asserted on the *shape* of the message rather than its wording: the copy is
+        // `ServerURL.Invalid.message`'s to own and is covered case-by-case in `ServerURLTests`.
+        // Pinning the exact sentence here would mean every wording change breaks a test about
+        // persistence, which is what this one is actually for.
+        #expect(!message.isEmpty)
         #expect(defaults.string(forKey: "baseURL") == nil)
+    }
+
+    /// The address is now persisted only *after* OAuth succeeds. Previously it was written before
+    /// the network call, so a mistyped host became the saved base URL for every later launch and
+    /// the user had to notice and retype it to escape a server they had never reached.
+    ///
+    /// Driven through a scheme this app can't speak, so it fails at validation without any
+    /// possibility of a network call — see the note on `signIn` above about not driving past the
+    /// guard with a parseable URL.
+    @Test func aRejectedAddressNeverBecomesTheSavedServer() async {
+        let (app, defaults, _) = model()
+        defaults.set("http://previously-working.local:8123", forKey: "baseURL")
+
+        app.serverURLText = "ftp://homeassistant.local:8123"
+        await app.signIn()
+
+        guard case .error = app.phase else {
+            Issue.record("expected .error, got \(app.phase)"); return
+        }
+        // The address that *did* work is still there — a failed attempt doesn't clear it either.
+        #expect(defaults.string(forKey: "baseURL") == "http://previously-working.local:8123")
     }
 
     @Test func anEmptyAddressIsRefused() async {
