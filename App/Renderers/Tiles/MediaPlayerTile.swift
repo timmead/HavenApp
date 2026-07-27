@@ -64,25 +64,53 @@ struct MediaPlayerTile: View {
 
     private func wide(_ s: MediaPlayerState?, name: String) -> some View {
         GlassTile(active: s?.isPlaying ?? false, accent: accent) {
-            HStack(spacing: 8) {
-                // Deliberately no artwork at this size — the approved design gives the artwork's
-                // place to the title, because at two columns a thumbnail and an ellipsised track
-                // name answer "what's playing?" less well than the whole track name does.
-                ScrollingText(
-                    text: s?.title ?? name,
-                    secondary: s?.secondaryLine,
-                    windowHeight: 30
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { store.presented = entityId }
-                playPauseButton(s, size: 22)
-                if s?.features.contains(.nextTrack) ?? false {
-                    transportButton("forward.end.fill", label: "Next track", size: 15) {
-                        store.mediaNextTrack(entityId)
+            // `spacing: 0` with a `Spacer` between the two rows, rather than a spaced `VStack`:
+            // a `VStack(spacing: 6)` over three children adds *two* 6pt gaps, which would push the
+            // ideal height to 72 and grow the tile past the floor — the exact state-dependent
+            // resize the note below rules out. Here the gap is whatever slack is left over, so the
+            // ideal is 60, the floor of 66 wins, and the height is identical in both states.
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    // Deliberately no artwork at this size — the approved design gives the artwork's
+                    // place to the title, because at two columns a thumbnail and an ellipsised track
+                    // name answer "what's playing?" less well than the whole track name does.
+                    ScrollingText(
+                        text: s?.title ?? name,
+                        secondary: s?.secondaryLine,
+                        windowHeight: 30
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.presented = entityId }
+                    playPauseButton(s, size: 22)
+                    if s?.features.contains(.nextTrack) ?? false {
+                        transportButton("forward.end.fill", label: "Next track", size: 15) {
+                            store.mediaNextTrack(entityId)
+                        }
                     }
                 }
+                // **This occupies space the tile already reserved; it does not claim any.**
+                // `GlassTile` floors its content at 66pt aligned to the top, while the row above is
+                // about 36pt tall — so roughly 30pt has always sat empty at the bottom of a 2×1,
+                // which is the gap the device screenshot shows. A 24pt volume strip brings the
+                // ideal to 60, still under that floor, so the tile's height is unchanged whether it
+                // is playing or not.
+                //
+                // Staying under the floor is the point, not a nicety. This file opens by arguing
+                // that a media tile must not change size as a function of state — and a 2×1 that
+                // grew when playback started would resize every other tile sharing its grid row,
+                // on every song. So the space is *reserved* and merely filled when there is
+                // something to put in it, never grown into. The title window is untouched either
+                // way, which is what keeps the scrolling-overflow behaviour it exists for.
+                Spacer(minLength: 0)
+                if s?.isPlaying ?? false {
+                    // `volumeRow` already draws nothing at all for a player that declares neither
+                    // `volumeSet` nor `volumeMute`, so an unsupported device gets empty space rather
+                    // than a dead track — the same omit-don't-disable rule the transport follows.
+                    volumeRow(s)
+                }
             }
+            .frame(maxWidth: .infinity)
         }
     }
 
