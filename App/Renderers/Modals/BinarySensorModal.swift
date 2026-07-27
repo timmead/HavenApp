@@ -13,7 +13,6 @@ struct BinarySensorModal: View {
                         title: TileName.of(entityId, e),
                         subtitle: (s?.isActive ?? false) ? "Active" : "Clear",
                         accent: (s?.isActive ?? false) ? HavenColor.warning : .gray)
-            Spacer()
         }
     }
 }

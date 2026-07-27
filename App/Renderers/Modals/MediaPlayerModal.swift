@@ -14,22 +14,18 @@ struct MediaPlayerModal: View {
         let s = e.map(MediaPlayerState.init)
         let name = TileName.of(entityId, e)
         let accent = HavenColor.domain(.mediaPlayer)
+        // A plain stack with no `ScrollView` and no `Spacer`: scrolling is `DeviceModalView`'s, and
+        // this body must be able to report its *ideal* height so the sheet can size a detent to it.
+        // Anything greedy here — a scroll view, a trailing spacer — reports the height it was given
+        // instead of the height it wants, and the measurement degenerates into "whatever the detent
+        // already was". That is what left a Sonos player's source row clipped below a fixed
+        // `.medium`.
         VStack(spacing: 12) {
             header(s, name: name, deviceClass: e?.deviceClass, accent: accent)
-            ScrollView {
-                VStack(spacing: 12) {
-                    nowPlaying(s, name: name, deviceClass: e?.deviceClass, accent: accent)
-                    transport(s, accent: accent)
-                    volume(s, accent: accent)
-                    source(s, accent: accent)
-                }
-            }
-            // No trailing `Spacer` after the `ScrollView` — unlike the other modals, whose bodies
-            // are plain stacks. Two flexible siblings in one `VStack` split the height between
-            // them, which at the `.medium` detent squashes the scroll view to roughly its content's
-            // ideal size and parks the rest as blank space below. The scroll view is the flexible
-            // element here; it fills what the header leaves.
-            .scrollBounceBehavior(.basedOnSize)
+            nowPlaying(s, name: name, deviceClass: e?.deviceClass, accent: accent)
+            transport(s, accent: accent)
+            volume(s, accent: accent)
+            source(s, accent: accent)
         }
     }
 

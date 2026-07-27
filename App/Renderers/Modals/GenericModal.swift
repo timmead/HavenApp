@@ -16,7 +16,6 @@ struct GenericModal: View {
                     }
                 }
             }
-            Spacer()
         }
     }
 

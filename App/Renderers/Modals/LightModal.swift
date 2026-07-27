@@ -92,7 +92,6 @@ struct LightModal: View {
                         .accessibilityHidden(true)     // already spoken as the slider's value
                 }
             }
-            Spacer()
         }
         .onChange(of: s?.isOn ?? false) { _, isOn in
             if !isOn { dragPercent = nil; dragKelvin = nil }

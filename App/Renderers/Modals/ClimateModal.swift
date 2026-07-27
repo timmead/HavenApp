@@ -33,7 +33,6 @@ struct ClimateModal: View {
             if let fans = s?.fanModes, fans.count > 1 {
                 FacetCard(title: "Fan") { HavenSegmented(options: fans, selection: Binding(get: { s?.fanMode ?? fans[0] }, set: { store.setFanMode(entityId, mode: $0) }), label: TileName.words, accent: accent) }
             }
-            Spacer()
         }
     }
 

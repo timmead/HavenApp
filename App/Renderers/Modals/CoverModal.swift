@@ -45,7 +45,6 @@ struct CoverModal: View {
                 Button("Stop") { store.stopCover(entityId) }.frame(maxWidth: .infinity)
                 Button("Close") { store.closeCover(entityId) }.frame(maxWidth: .infinity)
             }.buttonStyle(.bordered).tint(accent) }
-            Spacer()
         }
         .onChange(of: s?.isOpen ?? false) { _, _ in dragPercent = nil }
     }

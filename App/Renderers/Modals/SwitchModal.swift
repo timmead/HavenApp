@@ -8,7 +8,6 @@ struct SwitchModal: View {
         VStack {
             ModalHeader(systemImage: IconMap.symbol(domain: .switchOutlet, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: on ? "On" : "Off", accent: HavenColor.domain(.switchOutlet),
                         toggle: Binding(get: { on }, set: { store.setSwitch(entityId, on: $0) }))
-            Spacer()
         }
     }
 }

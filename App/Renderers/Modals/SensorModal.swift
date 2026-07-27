@@ -97,7 +97,6 @@ struct SensorModal: View {
                 }
             }
 
-            Spacer()
         }
         .task(id: range) { await store.loadHistory(entityId, range: range) }
         .onChange(of: range) { selectedDate = nil }

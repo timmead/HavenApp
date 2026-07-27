@@ -36,15 +36,12 @@ struct CameraModal: View {
         let s = e.map(CameraState.init)
         let name = TileName.of(entityId, e)
         let accent = HavenColor.domain(.camera)
+        // No `ScrollView` here — that belongs to `DeviceModalView`, which needs this body's *ideal*
+        // height to size the sheet's detent. See `MediaPlayerModal` for the same note.
         VStack(spacing: 12) {
             header(s, name: name, accent: accent)
-            ScrollView {
-                VStack(spacing: 12) {
-                    feed(s, accent: accent)
-                    events(accent: accent)
-                }
-            }
-            .scrollBounceBehavior(.basedOnSize)
+            feed(s, accent: accent)
+            events(accent: accent)
         }
         // Everything about the stream's life hangs off this one key, so there is exactly one place
         // that starts a player and one that stops it.
