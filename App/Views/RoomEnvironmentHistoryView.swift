@@ -13,7 +13,6 @@ struct RoomEnvironmentHistoryView: View {
     let roomName: String
     let sensors: [UpliftedSensor]
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var range: HistoryRange = .day
     @State private var selectedDate: Date?
 
@@ -24,27 +23,26 @@ struct RoomEnvironmentHistoryView: View {
     private var humidityAccent: Color { HavenColor.domain(.cover) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    FacetCard {
-                        readoutRow
-                        chartOrPlaceholder
-                        HavenSegmented(options: HistoryRange.allCases, selection: $range,
-                                       label: { $0.label }, accent: temperatureAccent)
-                        unavailableNote
-                    }
-                }
-                .padding()
-            }
-            .navigationTitle(roomName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
+        // Sized to its content like every other sheet in the app, rather than the full-screen
+        // `NavigationStack` this started as — see `FittedSheet`. The room name is a plain heading
+        // here rather than a navigation title because there is nothing to navigate: this sheet
+        // has one screen, and a `NavigationStack` for it bought a nav bar, a "Done" button
+        // duplicating the drag-to-dismiss every other modal uses, and a sheet that always took
+        // the whole display.
+        //
+        // No trailing `Spacer()`, deliberately: one would report whatever height it was offered
+        // and defeat the measurement entirely.
+        VStack(alignment: .leading, spacing: 12) {
+            Text(roomName).font(.system(size: 17, weight: .bold))
+            FacetCard {
+                readoutRow
+                chartOrPlaceholder
+                HavenSegmented(options: HistoryRange.allCases, selection: $range,
+                               label: { $0.label }, accent: temperatureAccent)
+                unavailableNote
             }
         }
+        .fittedSheet()
         .task(id: range) {
             for sensor in sensors {
                 await store.loadHistory(sensor.entityId, range: range, attribute: sensor.attributeName)
@@ -158,9 +156,23 @@ struct RoomEnvironmentHistoryView: View {
         // own doc comment on that arithmetic warns about.
         let fallbackDomain = DualAxisScale.domain(for: tempPoints.isEmpty ? humidSeries : tempSeries) ?? 0...1
 
+        // Pinned once and used twice — by the area fill's floor and by the Y scale below. They
+        // have to be the same value: see the `yStart` comment on the `AreaMark`.
+        let domain = scale?.primaryDomain ?? fallbackDomain
+
         Chart {
             ForEach(tempPoints, id: \.time) { p in
-                AreaMark(x: .value("Time", p.time), y: .value("Temperature", p.value))
+                // `yStart` is load-bearing. A plain `AreaMark(x:y:)` fills from the value down to
+                // **zero**, not to the bottom of the chart — and this chart's Y domain is pinned
+                // to the data's own range (roughly 24…27°C for a room), so zero sits far outside
+                // it. The fill then runs hundreds of points past the plot rect and, unclipped,
+                // paints straight down the sheet below the chart. Anchoring it to the domain's
+                // own floor bounds it to the plot area by construction rather than by relying on
+                // clipping, and makes the shaded region mean something: temperature above the
+                // bottom of the visible scale.
+                AreaMark(x: .value("Time", p.time),
+                         yStart: .value("Floor", domain.lowerBound),
+                         yEnd: .value("Temperature", p.value))
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(temperatureAccent.opacity(0.18))
                 // `series:` is load-bearing, not decoration: Swift Charts joins LineMarks into
@@ -196,7 +208,7 @@ struct RoomEnvironmentHistoryView: View {
         // `primaryDomain` can be *wider* than anything actually drawn, putting the outermost
         // ticks outside the inferred domain, where Swift Charts drops them silently. Compiling
         // proves none of this; only pinning the domain does.
-        .chartYScale(domain: scale?.primaryDomain ?? fallbackDomain)
+        .chartYScale(domain: domain)
         .chartYAxis {
             AxisMarks(position: .leading)
             if let scale {
