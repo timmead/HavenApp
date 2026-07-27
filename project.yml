@@ -18,7 +18,14 @@ targets:
     # Generate a *shared* scheme. Without this the only scheme is one Xcode autocreates into
     # xcuserdata, which `xcodegen generate` wipes — so `xcodebuild -scheme HavenApp` fails on a
     # fresh clone, in CI, or any time regeneration happens before the project is opened in Xcode.
-    scheme: {}
+    #
+    # `testTargets` is what makes `xcodebuild test -scheme HavenApp` actually run the app-layer
+    # suite. A test target that exists but is not in the scheme's test action is worse than no
+    # target at all: `xcodebuild test` reports TEST SUCCEEDED having executed nothing, which is
+    # precisely the silent-green failure this target exists to end.
+    scheme:
+      testTargets:
+        - HavenAppTests
     sources: [App]
     dependencies:
       - package: HavenCore
@@ -44,3 +51,28 @@ targets:
         # (docs/superpowers/specs/2026-07-26-havenapp-connection-model-design.md §4.1).
         CODE_SIGN_ENTITLEMENTS: App/Resources/HavenApp.entitlements
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HAVEN_WIFI_INFO"
+
+  # The app-layer test suite. Everything in `App/` — `AppModel`'s state machine, the routing that
+  # decides which screen is on screen, the camera lifecycles — was previously unverifiable, and
+  # three separate defects shipped through that gap with `swift test` green and `xcodebuild`
+  # succeeding. HavenCore's own 508 tests cannot cover any of it: they run against a package that
+  # knows nothing about SwiftUI, `AppModel` or `UserDefaults` as this app uses them.
+  #
+  # Hosted by the app (`TEST_HOST`/`BUNDLE_LOADER`) rather than a standalone logic bundle, because
+  # the code under test *is* the app: `@testable import HavenApp` only links against an app target
+  # that loads the tests into its own process. That is also why the suite must run on a simulator
+  # destination — an iOS app cannot be hosted anywhere else.
+  HavenAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/HavenAppTests]
+    dependencies:
+      - target: HavenApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.haven.HavenAppTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/HavenApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HavenApp"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        # HavenCore is linked once, by the app. Adding it here as well would put two copies of the
+        # module in one process.

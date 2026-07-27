@@ -11,7 +11,8 @@ import HavenCore
 /// Everything that could be got wrong is decided in HavenCore, under test: which URL a path
 /// resolves to, whether the token may be attached, what is cached, and how an outcome maps to
 /// something to draw. What lives here is glue only — a `.task` and a phase for the body to switch
-/// on — because `App/` has no test target.
+/// on. The one piece of real logic that used to live here — the self-paced refresh cycle — is now
+/// `AuthenticatedImageRefreshCycle` below, precisely so it can be tested (`SnapshotRefreshCycleTests`).
 ///
 /// The load is started by `.task(id:)`, which is doing real work and not merely idiomatic: it
 /// cancels when the view disappears and again whenever the id changes, so a fast scroll through a
@@ -49,6 +50,47 @@ struct AuthenticatedImageRefresh: Equatable, Hashable {
     /// image is not worth keeping current. It is part of `.task`'s id, so flipping it stops the
     /// loop structurally rather than through a flag the loop has to remember to check.
     var isActive: Bool = true
+}
+
+/// The self-paced snapshot cycle, lifted out of `AuthenticatedImage` so it can be tested.
+///
+/// It is *only* the loop — no image, no phase, no loader — because the loop is where the defect
+/// was. The first version drove refreshes from an external counter that a sibling task bumped on a
+/// fixed clock; because the counter was part of `.task`'s id, every tick cancelled whatever fetch
+/// was in flight, and wherever a round trip reliably exceeded the interval no fetch ever completed.
+/// The property that makes that impossible — **the next fetch is started by the previous one
+/// finishing, and nothing else ever interrupts one** — is exactly what a test can hold this to, and
+/// could not hold a `View`'s private method to.
+///
+/// The clock and the wait are injected so a test can run the whole cycle with no wall-clock time
+/// and no races. Production passes neither and gets the real ones.
+/// `@MainActor` because both the loop and everything it drives already are — `AuthenticatedImage`
+/// is a `View`. Isolating it here rather than hopping keeps the injected closures on one actor, so
+/// Swift 6 can see there is no sharing to race over.
+@MainActor
+enum AuthenticatedImageRefreshCycle {
+    static func run(
+        _ refresh: AuthenticatedImageRefresh,
+        now: () -> Date = { Date() },
+        sleep: (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
+        load: () async -> Void
+    ) async {
+        guard refresh.isActive else { return }
+        while !Task.isCancelled {
+            let started = now()
+            // Awaited to completion. There is no tick that could cancel this, because there is no
+            // tick: the only thing that ends the cycle is the enclosing task being cancelled, which
+            // is checked *after* the load rather than being able to abandon one mid-flight.
+            await load()
+            if Task.isCancelled { return }
+            // How long to wait is HavenCore's decision (`SnapshotRefresh.delay`, under test) — a
+            // fetch slower than the interval degrades to a lower frame rate instead of collapsing
+            // the cycle.
+            let delay = SnapshotRefresh.delay(interval: refresh.interval,
+                                              duration: now().timeIntervalSince(started))
+            await sleep(delay)
+        }
+    }
 }
 
 struct AuthenticatedImage<Content: View>: View {
@@ -116,15 +158,7 @@ struct AuthenticatedImage<Content: View>: View {
             await load(policy: .useCache)
             return
         }
-        guard refresh.isActive else { return }
-        while !Task.isCancelled {
-            let started = Date()
-            await load(policy: .reload)
-            if Task.isCancelled { return }
-            let delay = SnapshotRefresh.delay(interval: refresh.interval,
-                                              duration: Date().timeIntervalSince(started))
-            try? await Task.sleep(for: .seconds(delay))
-        }
+        await AuthenticatedImageRefreshCycle.run(refresh) { await load(policy: .reload) }
     }
 
     private func load(policy: AuthenticatedImageLoader.CachePolicy) async {

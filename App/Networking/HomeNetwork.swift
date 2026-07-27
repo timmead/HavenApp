@@ -60,9 +60,16 @@ final class HomeNetwork {
     private let manager = CLLocationManager()
     private var authorizationObserver: LocationAuthorizationObserver?
 
-    init() {
+    /// Where `homeSSID` is persisted. Injectable for the same reason `CustomRemoteURLStore`'s is:
+    /// the property worth testing is *which slot gets written*, and a test that wrote to
+    /// `.standard` would reach into the running app's own domain. Defaults to `.standard`, so
+    /// nothing outside a test sees a difference.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         authorization = manager.authorizationStatus
-        homeSSID = UserDefaults.standard.string(forKey: Self.homeSSIDKey)
+        homeSSID = defaults.string(forKey: Self.homeSSIDKey)
         let observer = LocationAuthorizationObserver { [weak self] status in
             Task { @MainActor in self?.authorization = status }
         }
@@ -145,7 +152,7 @@ final class HomeNetwork {
     func rememberCurrentNetworkAsHome() async {
         guard let ssid = await currentSSID(), !ssid.isEmpty else { return }
         guard ssid != homeSSID else { return }
-        UserDefaults.standard.set(ssid, forKey: Self.homeSSIDKey)
+        defaults.set(ssid, forKey: Self.homeSSIDKey)
         homeSSID = ssid
         havenLog.info("captured the home Wi-Fi network")
     }
@@ -153,7 +160,7 @@ final class HomeNetwork {
     /// Cleared on sign-out with everything else that describes how to reach the old instance, and
     /// reachable directly from the settings screen as the explicit "forget this network" action.
     func forgetHomeNetwork() {
-        UserDefaults.standard.removeObject(forKey: Self.homeSSIDKey)
+        defaults.removeObject(forKey: Self.homeSSIDKey)
         homeSSID = nil
     }
 }

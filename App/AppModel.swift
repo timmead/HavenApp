@@ -42,7 +42,10 @@ final class AppModel {
     /// denied — the expected choice, and never prompted for during onboarding). Neither holds any
     /// ordering logic; that lives in `ConnectionPreference`, in HavenCore, with tests.
     let pathObserver = NetworkPathObserver()
-    let homeNetwork = HomeNetwork()
+    /// Assigned in `init` rather than inline so it shares this model's injected `UserDefaults` —
+    /// `forgetDiscoveredURLs()` clears the captured home SSID through it, and a test of that
+    /// clearing has to be able to see the slot.
+    let homeNetwork: HomeNetwork
 
     /// What `cloud/status` last said about this instance's Nabu Casa remote access, or `nil` if
     /// we haven't asked yet (or have signed out). Purely a rendering input — the classification
@@ -67,12 +70,22 @@ final class AppModel {
     /// assigned from what the store returned.
     private(set) var customRemoteURL: URL?
 
-    private let tokens: TokenStore = KeychainTokenStore()
+    /// Everything `AppModel` persists that isn't a secret. **Injectable**, and the injection is the
+    /// whole reason this class became testable: every URL-adoption decision below is a write to one
+    /// of `DefaultsKeys`' slots, so "did we adopt that address?" can only be asked where the storage
+    /// is. Hard-wired to `.standard`, a test either asserts nothing or scribbles on the running
+    /// app's own domain. Defaults to `.standard`, so shipped behaviour is unchanged.
+    ///
+    /// Same rationale, and same shape, as `CustomRemoteURLStore`'s and `DiscoveredURLMigration`'s
+    /// own injectable defaults in HavenCore — this simply extends it to the last holder of the
+    /// decision, which is where the security fix that no test executed actually lived.
+    private let defaults: UserDefaults
+    private let tokens: TokenStore
     private let oauth = OAuthClient()
     private let http = URLSessionHTTP()
     private let web = WebAuthPresenter()
     private let policy = ReconnectPolicy()
-    private let customRemoteURLStore = CustomRemoteURLStore()
+    private let customRemoteURLStore: CustomRemoteURLStore
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
 
@@ -116,13 +129,23 @@ final class AppModel {
     /// background and later flip `phase` back to `.ready` after a `signOut()`.
     private var connectTask: Task<Void, Never>?
 
-    init() {
+    /// The two injected dependencies are the ones that reach outside the process: persisted
+    /// preferences and the Keychain. Both default to the real thing, and both exist so a test can
+    /// exercise the adoption and sign-out paths without touching either the developer's own
+    /// defaults domain or their saved Home Assistant session. Nothing else is injectable — the
+    /// OAuth client and the WebSocket transport are still constructed inline, which is why no test
+    /// drives `connect()` end to end (see `HavenAppTests`).
+    init(defaults: UserDefaults = .standard, tokens: TokenStore = KeychainTokenStore()) {
+        self.defaults = defaults
+        self.tokens = tokens
+        self.customRemoteURLStore = CustomRemoteURLStore(defaults: defaults)
+        self.homeNetwork = HomeNetwork(defaults: defaults)
         // Runs here — once per launch, gated to once per device by its own flag — and deliberately
         // NOT inside `connect()`. Its predecessor (`purgeDiscoveredURLs()`) was called at the top
         // of every iteration of `connect()`'s `while true` loop, which with adoption re-enabled
         // would delete the URL learned at the end of one round before the next round reads it:
         // "remote access never works", no error anywhere. See `DiscoveredURLMigration`.
-        DiscoveredURLMigration.runIfNeeded(in: .standard)
+        DiscoveredURLMigration.runIfNeeded(in: defaults)
         // Read once here rather than on every candidate round: the store is the only writer and
         // `saveCustomRemoteURL`/`clearCustomRemoteURL` keep this in step with it. Note the
         // migration above deliberately does not touch this key — see `CustomRemoteURLStore`.
@@ -212,7 +235,7 @@ final class AppModel {
         let previousBase = savedBaseURL()
         serverURLText = normalized
         baseURL = url
-        UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.baseURL)
+        defaults.set(url.absoluteString, forKey: DefaultsKeys.baseURL)
         // Whatever was discovered/remembered belonged to whichever instance was previously
         // signed into (possibly a different host) — never let it leak into this instance's
         // candidate list.
@@ -250,7 +273,7 @@ final class AppModel {
         // stale token back after we've already moved on (see TokenProvider.invalidate()).
         await tokenProvider?.invalidate()
         tokens.clear()
-        UserDefaults.standard.removeObject(forKey: DefaultsKeys.baseURL)
+        defaults.removeObject(forKey: DefaultsKeys.baseURL)
         forgetDiscoveredURLs()
         // Cleared here and **not** in `forgetDiscoveredURLs()`, which `signIn()` also calls. The
         // user typed this address; it must not vanish because a refresh token expired, sent them
@@ -304,7 +327,10 @@ final class AppModel {
     /// (`*.ui.nabu.casa` always remote, remote always `https`/`wss`, no duplicates); what order
     /// they are tried in is `ConnectionPreference.candidates`, from the SSID match and the network
     /// path class. Both are pure functions in HavenCore with tests — no ordering decision is made
-    /// here, because `App/` has no test target and a decision made here is unverifiable.
+    /// here. `App/` now has a test target (`Tests/HavenAppTests`), but it cannot host a fake
+    /// transport for this loop — `NWWebSocketConnection` is constructed inline below and
+    /// `OAuthClient` is a concrete struct — so nothing exercises `connect()` end to end and the
+    /// rule stands: ordering decisions belong in HavenCore, where they are tested.
     ///
     /// Discovered URLs are read fresh at the top of each round (rather than hoisted out of the
     /// loop) so that a URL learned by a *previous* round's successful-then-dropped connection is
@@ -403,7 +429,7 @@ final class AppModel {
                         try await store.bootstrap()
                         if Task.isCancelled { await c.disconnect(); return }
                         havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
-                        UserDefaults.standard.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
+                        defaults.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
                         // The UI must become usable now, not after `fetchInstanceConfig` below:
                         // `request(_:)` (and so `get_config`) is deliberately unbounded — a server
                         // that authenticates and bootstraps fine but never answers `get_config`
@@ -495,7 +521,7 @@ final class AppModel {
                         // failure. Deliberately runs on *every* connection, local or remote: the
                         // classification is safe to know either way, and gating the probe itself
                         // on the connection class would put a security decision here, in code with
-                        // no test target, instead of in the one function that owns it.
+                        // no coverage of this loop, instead of in the one function that owns it.
                         //
                         // **Last, deliberately.** `HAWebSocketClient.request` has no deadline (see
                         // the `phase = .ready` comment above), so every unbounded call added here
@@ -606,7 +632,7 @@ final class AppModel {
     }
 
     private func savedBaseURL() -> URL? {
-        UserDefaults.standard.string(forKey: DefaultsKeys.baseURL).flatMap(URL.init(string:))
+        defaults.string(forKey: DefaultsKeys.baseURL).flatMap(URL.init(string:))
     }
 
     /// A plain read of persisted state, with no validation — deliberately.
@@ -614,12 +640,12 @@ final class AppModel {
     /// Everything under these keys was written by `rememberDiscoveredURLs` below, which adopts
     /// only what `DiscoveredCandidateURLs.validating` returned for a `.local` connection. The
     /// trust decision therefore already happened, once, at the write boundary, in a pure function
-    /// with tests. Re-deciding it here — where nothing can test it — is how the earlier rounds
+    /// with tests. Re-deciding it here — where nothing did test it — is how the earlier rounds
     /// ended up with a read-side gate keyed on `isNabuCasaHost`: untested, and wrong in exactly
     /// the way the C-1 finding described. Values written by builds that predate the current rule
     /// are handled once by `DiscoveredURLMigration`, not re-litigated on every read.
-    private func storedURL(_ key: String) -> URL? {
-        UserDefaults.standard.string(forKey: key).flatMap(URL.init(string:))
+    func storedURL(_ key: String) -> URL? {
+        defaults.string(forKey: key).flatMap(URL.init(string:))
     }
 
     /// The write boundary. `config` came straight off the wire, and whatever is persisted here
@@ -629,8 +655,11 @@ final class AppModel {
     /// zone. Over a `.remote` connection `validating` adopts nothing, and this writes nothing;
     /// discovery only ever flows inward. `AppModel` holds no adoption logic of its own — it hands
     /// both raw values and the connection class to the pure function and stores the result.
-    private func rememberDiscoveredURLs(_ config: HAInstanceConfig, learnedOver: ConnectionClass) {
-        let d = UserDefaults.standard
+    /// Internal rather than private **so a test can call it.** This is the write boundary the
+    /// security fix lived at, and it went two rounds unexercised while a helper predicate had 107
+    /// green tests; `AppModelURLAdoptionTests` now asserts on the storage slots after each call.
+    func rememberDiscoveredURLs(_ config: HAInstanceConfig, learnedOver: ConnectionClass) {
+        let d = defaults
         let validated = DiscoveredCandidateURLs.validating(
             rawInternalURL: config.internalURL,
             rawExternalURL: config.externalURL,
@@ -672,7 +701,8 @@ final class AppModel {
     ///
     /// It can also *clear* that slot, when `storedRemoteURLIsSuperseded` says a stored Nabu Casa URL
     /// has outlived its subscription — see below and review finding M-4.
-    private func rememberNabuCasaRemoteAccess(
+    /// Internal rather than private for the same reason as `rememberDiscoveredURLs` — see there.
+    func rememberNabuCasaRemoteAccess(
         _ status: Result<HACloudStatus, WSError>,
         learnedOver: ConnectionClass
     ) {
@@ -690,7 +720,7 @@ final class AppModel {
         if NabuCasaRemoteAccessDetector.storedRemoteURLIsSuperseded(
             storedURL(DefaultsKeys.discoveredExternalURL), by: outcome, learnedOver: learnedOver
         ) {
-            UserDefaults.standard.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
+            defaults.removeObject(forKey: DefaultsKeys.discoveredExternalURL)
             havenLog.info("cloud/status → \(String(describing: outcome), privacy: .public); the stored Nabu Casa remote URL no longer works and was removed")
         }
         guard let url = NabuCasaRemoteAccessDetector.adoptableRemoteURL(
@@ -703,7 +733,7 @@ final class AppModel {
             havenLog.info("cloud/status → \(String(describing: outcome), privacy: .public); no remote URL adopted (connection classified \(learnedOver == .local ? "local" : "remote", privacy: .public))")
             return
         }
-        UserDefaults.standard.set(url.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
+        defaults.set(url.absoluteString, forKey: DefaultsKeys.discoveredExternalURL)
         havenLog.info("cloud/status → Nabu Casa remote access at \(url.absoluteString, privacy: .public), adopted")
     }
 
@@ -725,8 +755,11 @@ final class AppModel {
         customRemoteURL = nil
     }
 
-    private func forgetDiscoveredURLs() {
-        let d = UserDefaults.standard
+    /// Internal rather than private so `AppModelURLAdoptionTests` can check that *every* slot
+    /// describing the previous instance goes, together — a survivor here is a candidate URL for one
+    /// Home Assistant carried into a session with a different one.
+    func forgetDiscoveredURLs() {
+        let d = defaults
         // Describes the previous instance's cloud account, not this one's — carrying it across
         // would render a stale (and possibly contradictory) remote-access state for a home it
         // says nothing about.

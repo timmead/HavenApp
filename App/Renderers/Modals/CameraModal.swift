@@ -294,18 +294,18 @@ struct CameraModal: View {
     /// NVR-reboot case the availability re-key exists for) blanked a working feed to "Connecting…"
     /// for however long `camera/stream` took to answer, once per transition.
     private func start(_ s: CameraState?) async {
-        guard let s else { replace(with: .unavailable, player: nil); return }
-        // `nil` is every way this can fail to produce a URL — never asked, command errored, socket
-        // dropped — and `CameraStream.source` turns all of them into the still fallback rather than
-        // into an error, because the still is a working live view, just a slower one.
-        let path = CameraStream.shouldRequestStream(s) ? await store.cameraStreamPath(entityId) : nil
-        if Task.isCancelled { return }
-        guard let baseURL = await app.currentBaseURL() else {
-            replace(with: .unavailable, player: nil)
-            return
-        }
-        if Task.isCancelled { return }
-        let resolved = CameraStream.source(hlsPath: path, state: s, baseURL: baseURL)
+        let plan = await CameraPlaybackPlan.resolve(
+            state: s,
+            isCancelled: { Task.isCancelled },
+            streamPath: { await store.cameraStreamPath(entityId) },
+            baseURL: { await app.currentBaseURL() }
+        )
+        // **The whole point of the plan being a value.** `.cancelled` is the one outcome that
+        // touches nothing at all — no player is constructed, `source` is left as it was, and
+        // `replace` is never called. Every construction of an `AVPlayer` in this file is inside the
+        // `.show` branch below, which is what makes "a player is never created after teardown" a
+        // property a test can hold this to rather than a promise spread across four `guard`s.
+        guard case .show(let resolved) = plan else { return }
         guard case .hls(let url) = resolved else {
             replace(with: resolved, player: nil)
             return
@@ -387,6 +387,54 @@ struct CameraModal: View {
         guard holdsAudioSession else { return }
         holdsAudioSession = false
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+}
+
+// MARK: - What to play
+
+/// The outcome of `CameraModal.start`'s resolution, as a value.
+///
+/// Lifted out of the view so the cancellation rule can be tested, because it is a *security and
+/// battery* rule rather than a cosmetic one. `HAWebSocketClient.request` is a bare continuation
+/// with no cancellation handling, so cancelling the modal's task does not cancel the in-flight
+/// `camera/stream` command — Home Assistant answers whenever its stream worker is ready (a second
+/// or more for a Protect camera) and the function then resumes. Without a check after every
+/// `await`, a user who opened a camera and swiped the sheet away before it resolved got an
+/// `AVPlayer` **created and started after `onDisappear` had already run**: no owner, no path to
+/// being stopped, and pulling HLS segments from a camera inside their home from that moment on.
+///
+/// `.cancelled` therefore means *change nothing* — not "show unavailable", which would blank a feed
+/// on the way out, and emphatically not "carry on and build the player".
+enum CameraPlaybackPlan: Equatable {
+    /// The task was cancelled part-way through resolving. Touch nothing.
+    case cancelled
+    /// What to put on screen. `.hls` is the only case that gets a player.
+    case show(CameraStreamSource)
+
+    /// Resolves what to play. Every input that reaches outside this function is a parameter, so a
+    /// test can make cancellation land in each of the two windows that matter — after
+    /// `camera/stream` answers, and after the base URL is read.
+    ///
+    /// The base URL is read *here*, at the moment the player is about to be built, rather than
+    /// captured when the modal opened: the app fails over between its local and remote addresses
+    /// mid-session, and a playlist resolved against the wrong host plays as a black rectangle with
+    /// no error anywhere.
+    @MainActor
+    static func resolve(
+        state: CameraState?,
+        isCancelled: () -> Bool,
+        streamPath: () async -> String?,
+        baseURL: () async -> URL?
+    ) async -> CameraPlaybackPlan {
+        guard let state else { return .show(.unavailable) }
+        // `nil` is every way this can fail to produce a URL — never asked, command errored, socket
+        // dropped — and `CameraStream.source` turns all of them into the still fallback rather than
+        // into an error, because the still is a working live view, just a slower one.
+        let path = CameraStream.shouldRequestStream(state) ? await streamPath() : nil
+        if isCancelled() { return .cancelled }
+        guard let baseURL = await baseURL() else { return .show(.unavailable) }
+        if isCancelled() { return .cancelled }
+        return .show(CameraStream.source(hlsPath: path, state: state, baseURL: baseURL))
     }
 }
 
