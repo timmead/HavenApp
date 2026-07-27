@@ -3,7 +3,6 @@ import HavenCore
 struct CoverModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var dragPercent: Double?      // non-nil only while dragging
 
     var body: some View {
@@ -13,7 +12,7 @@ struct CoverModal: View {
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: (s?.isOpen ?? false) ? "Open" : "Closed", accent: accent,
                         toggle: Binding(get: { s?.isOpen ?? false },
-                                        set: { _ in store.openCloseCover(entityId) })) { dismiss() }
+                                        set: { _ in store.openCloseCover(entityId) }))
             if s?.supportsPosition ?? false {
                 FacetCard(title: "Position") {
                     Slider(value: Binding(get: { dragPercent ?? live },

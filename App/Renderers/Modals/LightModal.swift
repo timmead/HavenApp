@@ -3,7 +3,6 @@ import HavenCore
 struct LightModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var dragPercent: Double?      // non-nil only while dragging
     @State private var dragKelvin: Double?       // non-nil only while dragging
 
@@ -24,7 +23,7 @@ struct LightModal: View {
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .light, deviceClass: e?.deviceClass), title: name,
                         subtitle: (s?.isOn ?? false) ? "On" : "Off", accent: accent,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) })) { dismiss() }
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) }))
             if s?.supportsBrightness ?? false {
                 FacetCard(title: "Brightness") {
                     Slider(value: Binding(get: { dragPercent ?? live },

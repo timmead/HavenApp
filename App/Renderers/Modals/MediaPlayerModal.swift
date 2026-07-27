@@ -5,7 +5,6 @@ import HavenCore
 struct MediaPlayerModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     /// Non-nil only while dragging the volume slider.
     @State private var dragVolume: Double?
@@ -54,13 +53,13 @@ struct MediaPlayerModal: View {
         let icon = IconMap.symbol(domain: .mediaPlayer, deviceClass: deviceClass)
         if isSonos, let url = handoffURL {
             ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent,
-                        accessory: AnyView(handoffButton(url, accent: accent))) { dismiss() }
+                        accessory: AnyView(handoffButton(url, accent: accent)))
         } else if s?.features.supportsPower ?? false {
             ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent,
                         toggle: Binding(get: { s?.isActive ?? false },
-                                        set: { store.setMediaPower(entityId, on: $0) })) { dismiss() }
+                                        set: { store.setMediaPower(entityId, on: $0) }))
         } else {
-            ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent) { dismiss() }
+            ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent)
         }
     }
 

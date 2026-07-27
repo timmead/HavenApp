@@ -13,7 +13,6 @@ struct CameraModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
     /// What we resolved to play, or `nil` while still asking. The three states are drawn
@@ -95,9 +94,9 @@ struct CameraModal: View {
         let subtitle = [s?.status.label, s?.brand].compactMap { $0 }.joined(separator: " · ")
         if let url = handoffURL {
             ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent,
-                        accessory: AnyView(handoffButton(url, accent: accent))) { dismiss() }
+                        accessory: AnyView(handoffButton(url, accent: accent)))
         } else {
-            ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent) { dismiss() }
+            ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent)
         }
     }
 

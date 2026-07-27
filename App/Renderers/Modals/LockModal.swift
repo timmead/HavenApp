@@ -3,7 +3,6 @@ import HavenCore
 struct LockModal: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
         let e = store.state(entityId); let s = e.map(LockState.init)
         let locked = s?.isLocked ?? false; let jammed = s?.isJammed ?? false
@@ -15,7 +14,7 @@ struct LockModal: View {
         VStack {
             ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle,
                         accent: jammed ? HavenColor.warning : HavenColor.domain(.lock),
-                        toggle: toggleBinding) { dismiss() }
+                        toggle: toggleBinding)
             Spacer()
         }
     }
