@@ -40,7 +40,7 @@ struct ConnectionSettingsView: View {
     /// The last save attempt's rejection, or `nil`. The text comes from
     /// `CustomRemoteURLError.message` in HavenCore and is rendered verbatim — same arrangement as
     /// `RemoteAccessOfferModel.failureMessage`, and for the same reason: "`http://` is rejected with
-    /// an actionable explanation" is a behaviour, and `App/` has no test target.
+    /// an actionable explanation" is a behaviour, and no test drives this screen's text fields.
     @State private var customRemoteError: String?
 
     var body: some View {

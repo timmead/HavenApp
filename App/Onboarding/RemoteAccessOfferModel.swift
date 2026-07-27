@@ -13,7 +13,7 @@ import HavenCore
 /// together with it, and a `confirmPendingMutation()` that is the only path in the app to the
 /// mutation. See `OnboardingModel` for the pattern this mirrors, and
 /// `NabuCasaRemoteAccessOffer`/`RemoteAccessEnableOutcome` in HavenCore for every actual decision —
-/// nothing below decides anything; `App/` has no test target.
+/// nothing below decides anything, and nothing in `Tests/HavenAppTests` covers this file.
 @MainActor @Observable
 final class RemoteAccessOfferModel {
     /// What `cloud/status` last said there is to offer, or `nil` if there's nothing (subscription

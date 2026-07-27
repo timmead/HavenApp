@@ -15,7 +15,8 @@ import HavenCore
 ///
 /// Deliberately holds **no ordering logic**. It converts an `NWPath` into the `NetworkPathClass`
 /// that `ConnectionPreference` — a pure, unit-tested function in HavenCore — makes decisions from.
-/// `App/` has no test target, so a decision made here would be a claim nobody exercises.
+/// Nothing here is exercised by `Tests/HavenAppTests` — a decision made in this file would be a
+/// claim nobody checks, so no decision is made in it.
 @MainActor @Observable
 final class NetworkPathObserver {
     /// The current interface class. Starts at `.other`, which is the correct "no signal yet" value:
