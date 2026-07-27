@@ -89,3 +89,33 @@ private func series(_ values: [Double]) -> HistorySeries {
         #expect(scale.primaryDomain.contains(scale.project(value)))
     }
 }
+
+/// `DualAxisScale.domain(for:)` is the single-series counterpart of `init?`'s per-series
+/// padding — the entry point a one-axis chart uses instead of reimplementing the flat-series
+/// guard itself. A normal series keeps its own min/max exactly, with no padding applied.
+@Test func domainForANormalSeriesIsItsOwnRange() {
+    #expect(DualAxisScale.domain(for: series([20, 24])) == 20...24)
+}
+
+/// Same flat-series padding as the two-series case, and centred on the flat value rather than
+/// pinned to an edge — a room whose one sensor hasn't moved gets a line through the middle of a
+/// visible band, not a zero-height scale.
+@Test func domainForAFlatSeriesIsPaddedAndCentred() {
+    let domain = DualAxisScale.domain(for: series([50, 50]))!
+    #expect(domain.lowerBound < domain.upperBound)
+    let centre = (domain.lowerBound + domain.upperBound) / 2
+    #expect(abs(centre - 50) < 1e-9)
+}
+
+/// A single point is the same degenerate case as a flat series (min == max), so it must be
+/// padded the same way rather than yielding a zero-width domain.
+@Test func domainForASinglePointSeriesIsPadded() {
+    let domain = DualAxisScale.domain(for: series([21]))!
+    #expect(domain.lowerBound < domain.upperBound)
+}
+
+/// No data, no domain — the caller (the view) is the one that decides what a missing domain
+/// falls back to; this just refuses to fabricate one.
+@Test func domainForAnEmptySeriesIsNil() {
+    #expect(DualAxisScale.domain(for: series([])) == nil)
+}

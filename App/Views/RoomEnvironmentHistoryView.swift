@@ -53,9 +53,20 @@ struct RoomEnvironmentHistoryView: View {
         .onChange(of: range) { selectedDate = nil }
     }
 
-    /// Live values on the left, scrub readout on the right — the `SensorModal` arrangement, and
-    /// for its reason: both groups share one `.firstTextBaseline` row so that starting to scrub
-    /// cannot change the row's height and shift the chart underneath the finger doing it.
+    /// Live values on the left, scrub readout on the right. Unlike `SensorModal`'s version of
+    /// this layout — which gets away with a plain `.firstTextBaseline` `HStack` because its
+    /// readout is a single line of small text sitting inside 30pt text's baseline envelope — this
+    /// readout is one line *per sensor*, and a `VStack` reports `.firstTextBaseline` from its
+    /// *first* subview only. With two sensors, the second caption line hangs entirely below that
+    /// shared baseline, so inserting the column only while scrubbing (`if let selectedDate`)
+    /// would grow the row the instant a selection registers, shifting the chart under the finger
+    /// that just landed on it.
+    ///
+    /// So the readout column is always present, at a fixed one-line-per-sensor height — one
+    /// `Text` per sensor whether or not there's a selection, and whether or not that sensor has a
+    /// point at the selected date — and only its opacity toggles with `selectedDate`. That is
+    /// what actually guarantees the property that matters here: the row's height cannot change
+    /// between scrubbing and not, because the same subviews are always laid out.
     private var readoutRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             ForEach(sensors) { sensor in
@@ -68,18 +79,25 @@ struct RoomEnvironmentHistoryView: View {
                 }
             }
             Spacer(minLength: 4)
-            if let selectedDate {
-                VStack(alignment: .trailing, spacing: 1) {
-                    ForEach(sensors) { sensor in
-                        if let point = nearestPoint(to: selectedDate, in: points(for: sensor)) {
-                            Text(scrubText(sensor, point))
-                                .font(.caption)
-                                .foregroundStyle(accent(sensor.role))
-                        }
-                    }
+            VStack(alignment: .trailing, spacing: 1) {
+                ForEach(sensors) { sensor in
+                    Text(scrubLine(for: sensor))
+                        .font(.caption)
+                        .foregroundStyle(accent(sensor.role))
                 }
             }
+            .opacity(selectedDate == nil ? 0 : 1)
+            .accessibilityHidden(selectedDate == nil)
         }
+    }
+
+    /// The scrub readout's text for one sensor, or a placeholder when there's no selection or no
+    /// point near it — always one line, never an absent one, so the readout column's height is
+    /// fixed regardless of what's actually being scrubbed to.
+    private func scrubLine(for sensor: UpliftedSensor) -> String {
+        guard let selectedDate, let point = nearestPoint(to: selectedDate, in: points(for: sensor))
+        else { return "—" }
+        return scrubText(sensor, point)
     }
 
     @ViewBuilder
@@ -106,9 +124,18 @@ struct RoomEnvironmentHistoryView: View {
     /// `DualAxisScale` would label a leading axis with a domain nothing is plotted against.
     @ViewBuilder
     private func chart(tempPoints: [HistoryPoint], humidPoints: [HistoryPoint]) -> some View {
+        let tempSeries = seriesFor(temperature)
+        let humidSeries = seriesFor(humidity)
         let scale = (temperature != nil && humidity != nil)
-            ? DualAxisScale(primary: seriesFor(temperature), secondary: seriesFor(humidity))
+            ? DualAxisScale(primary: tempSeries, secondary: humidSeries)
             : nil
+        // The single-series fallback domain — for a room with only one sensor, or for the rarer
+        // shape where both are nominated but only one currently holds data (exactly the case
+        // that makes `DualAxisScale` return nil). Goes through `DualAxisScale.domain(for:)`
+        // rather than a second, hand-rolled copy of its flat-series padding: this file used to
+        // carry its own inlined `0.5`, which is precisely the kind of silent drift HavenCore's
+        // own doc comment on that arithmetic warns about.
+        let fallbackDomain = DualAxisScale.domain(for: tempPoints.isEmpty ? humidSeries : tempSeries) ?? 0...1
 
         Chart {
             ForEach(tempPoints, id: \.time) { p in
@@ -148,7 +175,7 @@ struct RoomEnvironmentHistoryView: View {
         // `primaryDomain` can be *wider* than anything actually drawn, putting the outermost
         // ticks outside the inferred domain, where Swift Charts drops them silently. Compiling
         // proves none of this; only pinning the domain does.
-        .chartYScale(domain: scale?.primaryDomain ?? autoDomain(tempPoints + humidPoints))
+        .chartYScale(domain: scale?.primaryDomain ?? fallbackDomain)
         .chartYAxis {
             AxisMarks(position: .leading)
             if let scale {
@@ -176,15 +203,6 @@ struct RoomEnvironmentHistoryView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    /// The domain for the single-series case, where there is no `DualAxisScale` to supply one.
-    /// Mirrors `DualAxisScale`'s own flat-series padding so a room whose temperature has not
-    /// moved gets a line through the middle rather than a zero-height scale.
-    private func autoDomain(_ points: [HistoryPoint]) -> ClosedRange<Double> {
-        let values = points.map(\.value)
-        guard let lo = values.min(), let hi = values.max() else { return 0...1 }
-        return lo < hi ? lo...hi : (lo - 0.5)...(lo + 0.5)
     }
 
     private func accent(_ role: UpliftedSensor.Role) -> Color {

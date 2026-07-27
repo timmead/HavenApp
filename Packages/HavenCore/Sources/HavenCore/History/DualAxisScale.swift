@@ -33,6 +33,17 @@ public struct DualAxisScale: Sendable, Equatable {
         lo < hi ? lo...hi : (lo - flatSeriesPadding)...(lo + flatSeriesPadding)
     }
 
+    /// The padded domain for a *single* series — for a chart with only one axis, which has no
+    /// `DualAxisScale` to project through and so would otherwise have no source for this at all.
+    /// Goes through the same `domain(_:_:)` and `flatSeriesPadding` as `init?` uses for each of
+    /// its two series, rather than leaving a caller to reimplement the flat-series padding a
+    /// second time: that arithmetic's edge case (a series that hasn't moved) is exactly the one
+    /// this type exists to contain in one place. `nil` when the series has no plottable data.
+    public static func domain(for series: HistorySeries) -> ClosedRange<Double>? {
+        guard let lo = series.min, let hi = series.max else { return nil }
+        return domain(lo, hi)
+    }
+
     /// A secondary-axis value, as a Y position on the primary axis.
     public func project(_ secondaryValue: Double) -> Double {
         let fraction = (secondaryValue - secondaryDomain.lowerBound)
