@@ -77,10 +77,11 @@ struct PipSlider: View {
 
     private let pip: CGFloat = 10
     private let thickness: CGFloat = 4
-    /// The pip's touch target, in both orientations — a 10pt pip is not a target, and on a 4pt
-    /// track this is six times the width of the thing it grabs. Which of the two dimensions runs
-    /// *along* the track is what the axis decides; see `alongExtent`.
-    private let hitSize = CGSize(width: 26, height: 24)
+    /// The pip's invisible touch target — square, so it is equally generous whichever way the
+    /// track runs, and 24pt because that is Apple's minimum comfortable target and also exactly
+    /// the gap beside the media tile's mute button, so the overhang reaches that button's edge
+    /// without crossing it.
+    private let hitSize = CGSize(width: 24, height: 24)
     /// Below this much travel a touch is a tap, not a drag. It only ever chooses between `onTap`
     /// and `onCommit` — the *value* is translation-driven either way, so this threshold can never
     /// be the reason a tap does or doesn't change something.
@@ -97,32 +98,29 @@ struct PipSlider: View {
             let travel = max(0, length - pip)
             let filled = max(pip / 2, fraction * travel + pip / 2)
             ZStack(alignment: axis == .horizontal ? .leading : .bottom) {
-                Capsule().fill(HavenColor.levelTrack)
-                Capsule().fill(fill)
-                    .frame(width: axis == .horizontal ? filled : nil,
-                           height: axis == .vertical ? filled : nil)
-                Circle()
-                    .fill(fill)
-                    .frame(width: pip, height: pip)
-                    .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
-                    .frame(width: hitSize.width, height: hitSize.height)
-                    .contentShape(Rectangle())
-                    // Clamped to the control's own bounds *along* the track: the touch target is far
-                    // larger than the pip, so at either end an unclamped offset would put its edge
-                    // outside the track — far enough, on the media tile, to eat the edge of the mute
-                    // button 7pt away. Across the track it is deliberately not clamped, because a
-                    // 4pt-wide bar has nowhere to put a 26pt target; that overhang is precisely why
-                    // `onTap` exists.
-                    .offset(x: axis == .horizontal ? alongOffset(travel: travel, length: length) : 0,
-                            y: axis == .vertical ? -alongOffset(travel: travel, length: length) : 0)
-                    .gesture(drag(travel: travel))
+                bar(HavenColor.levelTrack, along: nil)
+                bar(fill, along: filled)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // **The pip is an overlay, not a stack child, and that is the whole trick.** An overlay
+            // is sized by what it sits on and may overflow it without ever being consulted about
+            // that view's size — so a 10pt pip and a 24pt grab region cost a 4pt track exactly
+            // nothing in layout.
+            //
+            // Getting this wrong is what made the light and shade bars render as fat blobs a third
+            // of a tile wide: as a `ZStack` child, the pip's touch frame was the widest thing in
+            // the stack, the track capsules had no cross-axis size of their own, and so they
+            // stretched to fill it. Hence `bar(_:along:)` below pinning `thickness` explicitly —
+            // the drawn track's width is now stated, not inherited from whatever else is in the
+            // stack.
+            .overlay(alignment: axis == .horizontal ? .leading : .bottom) {
+                pipHandle(travel: travel)
+            }
         }
-        // The control occupies exactly the space the static bar it replaces did — 4pt wide for the
-        // vertical one, 24pt tall for the horizontal one — so no tile's layout or height changes.
+        // Exactly the footprint of the static bar this replaces: a 4pt-wide column, or a 4pt-tall
+        // strip. No tile's layout width or height changes because this control is in it.
         .frame(width: axis == .vertical ? thickness : nil,
-               height: axis == .horizontal ? hitSize.height : nil)
+               height: axis == .horizontal ? thickness : nil)
         // Not `.accessibilityHidden` — these were static readouts the tile's own label already
         // described, and that was right for a readout. A *control* a VoiceOver user cannot reach or
         // change is worse than an unlabelled one.
@@ -135,13 +133,38 @@ struct PipSlider: View {
         }
     }
 
-    /// How much of the touch target runs along the track — its width when the track is horizontal,
-    /// its height when vertical.
-    private var alongExtent: CGFloat { axis == .horizontal ? hitSize.width : hitSize.height }
+    /// One of the two capsules. `along` is the extent in the direction of travel — `nil` for the
+    /// full-length track, a measured value for the fill. **The cross-axis extent is always
+    /// `thickness`**, stated rather than inherited: a capsule left flexible across the axis takes
+    /// its width from whatever else shares its stack, which is exactly how the bars ended up as
+    /// wide as the pip's touch target.
+    private func bar(_ color: Color, along: CGFloat?) -> some View {
+        Capsule().fill(color)
+            .frame(width: axis == .horizontal ? along : thickness,
+                   height: axis == .vertical ? along : thickness)
+    }
 
-    /// Offset of the pip's touch target along the track, in points from the filled end.
-    private func alongOffset(travel: CGFloat, length: CGFloat) -> CGFloat {
-        min(max(0, fraction * travel - (alongExtent - pip) / 2), max(0, length - alongExtent))
+    /// The pip, plus its invisible grab region.
+    ///
+    /// The region is `Color.clear` in an overlay on the pip for the same reason the pip is an
+    /// overlay on the track: it must be generous to the finger and invisible to the layout. A
+    /// touch target the size of the drawn pip would be 10pt, which is not a target; a drawn pip the
+    /// size of the target would be the blob this replaced.
+    private func pipHandle(travel: CGFloat) -> some View {
+        Circle()
+            .fill(fill)
+            .frame(width: pip, height: pip)
+            .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: hitSize.width, height: hitSize.height)
+                    .contentShape(Rectangle())
+                    .gesture(drag(travel: travel))
+            }
+            // No clamping needed any more: `travel` is `length - pip`, so the drawn pip stays
+            // inside the track by construction at both ends.
+            .offset(x: axis == .horizontal ? fraction * travel : 0,
+                    y: axis == .vertical ? -fraction * travel : 0)
     }
 
     /// The level is spoken either way — it is what an adjustment changes, and a value of just
