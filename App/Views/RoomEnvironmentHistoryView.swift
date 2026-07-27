@@ -115,13 +115,21 @@ struct RoomEnvironmentHistoryView: View {
                 AreaMark(x: .value("Time", p.time), y: .value("Temperature", p.value))
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(temperatureAccent.opacity(0.18))
-                LineMark(x: .value("Time", p.time), y: .value("Temperature", p.value))
+                // `series:` is load-bearing, not decoration: Swift Charts joins LineMarks into
+                // one continuous path by `series:` (or `foregroundStyle(by:)`) alone — the
+                // `.value("Temperature", …)` / `.value("Humidity", …)` labels below only name the
+                // encoding for axes and legends, they do not separate series. Drop this and the
+                // two lines silently stitch into a single zig-zag connecting the end of one
+                // series to the start of the other.
+                LineMark(x: .value("Time", p.time), y: .value("Temperature", p.value),
+                         series: .value("Series", "temperature"))
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(temperatureAccent)
             }
             ForEach(humidPoints, id: \.time) { p in
                 LineMark(x: .value("Time", p.time),
-                         y: .value("Humidity", scale?.project(p.value) ?? p.value))
+                         y: .value("Humidity", scale?.project(p.value) ?? p.value),
+                         series: .value("Series", "humidity"))
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(humidityAccent)
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
