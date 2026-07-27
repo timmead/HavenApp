@@ -104,6 +104,96 @@ private final class TestContinuationBox<T: Sendable>: @unchecked Sendable {
         #expect(ConnectionClass.observed(peerAddress: address, dialledRemoteCandidate: false) == .local)
     }
 
+    /// **Cancellation has to reach the continuation, not wait for the socket to resolve it.**
+    ///
+    /// `receive()` is deliberately unbounded — a healthy connection may legitimately sit silent for
+    /// minutes between server-pushed frames. That makes cancellation the only way out, and until
+    /// this was wired up there wasn't one: `HAWebSocketClient.disconnect()` cancelled its receive
+    /// loop, the task stayed parked inside `receiveMessage`, and only the socket close eventually
+    /// dislodged it. Tolerable when there was one socket for the life of the app; not now that
+    /// every reconnect leaves another behind.
+    ///
+    /// In-process loopback WebSocket listener that accepts the connection and then says nothing —
+    /// the silent-but-healthy socket, exactly. No Home Assistant is contacted. There is no
+    /// wall-clock assertion here on purpose: without cancellation propagating, this test does not
+    /// return at all, and the time limit is what reports it.
+    @Test(.timeLimit(.minutes(1)))
+    func cancellingATaskParkedInReceiveResolvesItPromptly() async throws {
+        let (listener, port) = try await Self.startSilentWebSocketListener(label: "test.ws-cancel.listener")
+        defer { listener.cancel() }
+        let conn = NWWebSocketConnection(url: URL(string: "ws://localhost:\(port)/api/websocket")!)
+        defer { conn.close() }
+        try await conn.connect()
+
+        let reader = Task { try await conn.receive() }
+        // Long enough that the continuation is installed and `receiveMessage` is outstanding — the
+        // interesting race. (The other ordering, cancelling before the continuation exists, is the
+        // test below.)
+        try await Task.sleep(for: .milliseconds(50))
+        reader.cancel()
+        await #expect(throws: (any Error).self) { _ = try await reader.value }
+    }
+
+    /// The other half of the same race: a task cancelled *before* it ever reaches the continuation.
+    /// `onCancel` can run before — or during — the `withCheckedThrowingContinuation` body, so a
+    /// cancellation that arrives that early has to be remembered and honoured when the continuation
+    /// shows up, or the caller waits forever on a continuation nothing will resume.
+    @Test(.timeLimit(.minutes(1)))
+    func aReceiveStartedOnAnAlreadyCancelledTaskDoesNotHang() async throws {
+        let (listener, port) = try await Self.startSilentWebSocketListener(label: "test.ws-precancel.listener")
+        defer { listener.cancel() }
+        let conn = NWWebSocketConnection(url: URL(string: "ws://localhost:\(port)/api/websocket")!)
+        defer { conn.close() }
+        try await conn.connect()
+
+        // The gate is held open with a *non-throwing* continuation, which is deliberate: anything
+        // cancellation-aware (`Task.sleep`, say) would absorb the cancellation itself and the test
+        // would pass without `receive()` ever being asked the question.
+        let gate = Gate()
+        let reader = Task {
+            await gate.wait()
+            return try await conn.receive()
+        }
+        reader.cancel()
+        await gate.open()   // `receive()` is now entered on an already-cancelled task
+        await #expect(throws: (any Error).self) { _ = try await reader.value }
+    }
+
+    /// A one-shot latch that ignores cancellation — see its one use above.
+    private actor Gate {
+        private var isOpen = false
+        private var waiter: CheckedContinuation<Void, Never>?
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiter = $0 }
+        }
+        func open() {
+            isOpen = true
+            if let w = waiter { waiter = nil; w.resume() }
+        }
+    }
+
+    /// A listener that completes the WebSocket handshake and then sends nothing at all.
+    private static func startSilentWebSocketListener(label: String) async throws -> (NWListener, UInt16) {
+        let parameters = NWParameters.tcp
+        parameters.defaultProtocolStack.applicationProtocols.insert(NWProtocolWebSocket.Options(), at: 0)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: label)
+        listener.newConnectionHandler = { $0.start(queue: queue) }
+        let port: UInt16 = try await withCheckedThrowingContinuation { c in
+            let box = TestContinuationBox(c)
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready: box.resume(returning: listener.port?.rawValue ?? 0)
+                case .failed(let error): box.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+        return (listener, port)
+    }
+
     @Test func remoteEndpointReportsAResolvedAddressEvenWhenDialledByName() async throws {
         let listener = try NWListener(using: .tcp, on: .any)
         defer { listener.cancel() }
