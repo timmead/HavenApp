@@ -16,6 +16,15 @@ import SwiftUI
 /// **Measuring only works if the content does not end in a `Spacer()`.** A `Spacer` reports
 /// whatever height it is offered, so a sheet containing one measures exactly as tall as it already
 /// is, and the measurement becomes an elaborate way of changing nothing.
+///
+/// ## Why measure at all, on iOS 26
+///
+/// `presentationSizing(.fitted)` (iOS 18+) looks like it should make this whole type unnecessary,
+/// and on iPad and macOS it would. It sizes a presentation *window*, which is why its siblings are
+/// `.form` and `.page` — concepts an iPhone sheet does not have. An iPhone sheet is edge-to-edge
+/// and its height comes from its detents, so `presentationDetents` remains the mechanism, and
+/// there is still no first-class fit-to-content detent. Measuring the content and handing the
+/// result to `.height(_:)` is the current answer, not a workaround for a missing one.
 struct FittedSheet: ViewModifier {
     /// A sheet with nothing but a header would otherwise present as a sliver, and a sheet too
     /// short to grab is worse than one slightly too tall.
@@ -60,21 +69,22 @@ struct FittedSheet: ViewModifier {
             // Padding first, so the measurement includes it — the sheet has to fit the padded
             // content, not the content alone, or every sheet comes up 32pt short.
             .padding(16)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
-                        // Grow-only: a control that appears and disappears with state (a media
-                        // player's source row arriving on connect) would otherwise resize the
-                        // sheet under the user's finger mid-interaction.
-                        guard height > (contentHeight ?? 0) else { return }
-                        contentHeight = height
-                        // Move the selection onto the newly-fitted detent, unless the user has
-                        // already dragged up to `.large`. `detent` is seeded `.medium`, which
-                        // stops being a member of `detents` the moment a height is known, and a
-                        // selection that isn't in the set leaves the sheet at an arbitrary size.
-                        if detent != .large { detent = .height(clamped(height)) }
-                    }
-                }
+            // `onGeometryChange` rather than a `GeometryReader` in a `.background`: the reader
+            // shape puts a whole extra view behind the content purely to read a number, and needs
+            // its own `onChange(of:initial:)` to turn a continuously-available proxy into an
+            // event. This states the derived value (`CGFloat`, `Equatable`) directly, so SwiftUI
+            // only calls back when the height actually changes.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                // Grow-only: a control that appears and disappears with state (a media player's
+                // source row arriving on connect) would otherwise resize the sheet under the
+                // user's finger mid-interaction.
+                guard height > (contentHeight ?? 0) else { return }
+                contentHeight = height
+                // Move the selection onto the newly-fitted detent, unless the user has already
+                // dragged up to `.large`. `detent` is seeded `.medium`, which stops being a
+                // member of `detents` the moment a height is known, and a selection that isn't in
+                // the set leaves the sheet at an arbitrary size.
+                if detent != .large { detent = .height(clamped(height)) }
             }
             // Still needed even though the sheet is fitted: `maximum` deliberately stops it
             // growing, and `.large` is not unlimited either, so content taller than the screen
