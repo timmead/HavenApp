@@ -20,7 +20,7 @@ struct CoverTile: View {
                 // for and leaves the control on screen.
                 if let pos = s?.positionPercent {
                     Spacer(minLength: 6)
-                    PipSlider(percent: pos, accent: accent, axis: .vertical,
+                    PipSlider(percent: pos, accent: accent,
                               label: "Position",
                               onCommit: { store.setCoverPosition(entityId, percent: $0) },
                               onTap: { store.openCloseCover(entityId) })

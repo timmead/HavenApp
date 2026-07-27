@@ -1,10 +1,18 @@
 import SwiftUI
 
-/// A compact draggable level control for a **tile**: a hairline track with a small pip on it.
+/// A vertical draggable level control for a **tile**: a hairline column with a small pip on it.
 ///
-/// It exists because the tiles cannot use the full-size `Slider` the modals do — that control is
-/// taller than a tile's whole volume row, and far wider than the 4pt strip down the side of a 1×1 —
-/// but the *contract* is deliberately identical to the light modal's brightness slider, so the two
+/// ## Why this is custom, when the horizontal case is not
+///
+/// The media tiles' volume row is a stock `Slider`, as the media modal's has always been — a
+/// horizontal slider is something SwiftUI ships, and reimplementing one bought nothing but the
+/// chance to get gesture handling wrong. This control is the case where there is no such option:
+/// SwiftUI has **no vertical `Slider`**, and the obvious substitute of rotating one does not fit
+/// either, because `Slider`'s thumb alone is about 28pt across. The thing this draws is a 4pt-wide
+/// strip down the side of a 1×1 tile. There is nothing native that renders as that, so the strip is
+/// drawn and dragged by hand.
+///
+/// The *contract* is still deliberately identical to the light modal's brightness slider, so the two
 /// cannot drift:
 ///
 /// - a local `dragPercent` holds the preview and is the only thing that moves during a drag;
@@ -13,11 +21,14 @@ import SwiftUI
 /// - `.accessibilityAdjustableAction` performs the same commit, so the control is operable without
 ///   the gesture at all.
 ///
+/// The track fills from the bottom, matching the static level bars it replaced — 0 at the bottom,
+/// 100 at the top, so "more" is "up" as it is on any physical dimmer.
+///
 /// ## Why the gesture is on the pip and not on the track
 ///
 /// A tile is already covered by gestures that matter more: a tap that toggles or opens the modal,
 /// and a long press. A track-wide, tap-to-set slider inside one would mean a stray tap silently
-/// changing the volume of a speaker in another room — which is why the tiles carried *static*
+/// changing the brightness of a light in another room — which is why the tiles carried *static*
 /// readouts until now. So the drag target is the pip alone, and the value is driven by the
 /// **translation of the drag**, not by the absolute position of the finger.
 ///
@@ -26,7 +37,7 @@ import SwiftUI
 /// zero change. There is no minimum-distance heuristic to tune and no jump-to-finger to suppress —
 /// the value simply cannot move unless the finger does. Dragging is also unbounded by the track's
 /// length, so the user can carry on past either end to pin 0 or 100 rather than having to release
-/// precisely on a short strip.
+/// precisely on a 60pt strip.
 ///
 /// ## `onTap`, and the moving dead zone it exists to prevent
 ///
@@ -39,24 +50,11 @@ import SwiftUI
 ///
 /// So a touch that ends with negligible travel is forwarded to `onTap`, and the tiles pass the same
 /// action their own tap performs. The hole closes: tapping the pip does exactly what tapping
-/// anywhere else on the tile does. Callers that want the control inert to taps — the media tiles,
-/// whose volume row was never tap-to-open — simply leave it `nil`.
+/// anywhere else on the tile does.
 struct PipSlider: View {
-    enum Axis {
-        /// A horizontal track that fills from the leading edge. 0 at the left, 100 at the right.
-        case horizontal
-        /// A vertical track that fills from the bottom, matching the level bars it replaces —
-        /// 0 at the bottom, 100 at the top, so "more" is "up" as it is on any physical dimmer.
-        case vertical
-    }
-
     /// The live value, 0…100, from the entity. Ignored while a drag is in flight.
     let percent: Int
     let accent: Color
-    var axis: Axis = .horizontal
-    /// Draws the control in its inactive treatment and adds "muted" to the spoken value. The pip
-    /// still sits at the **real** level rather than at zero.
-    var isMuted: Bool = false
     /// The lowest value a drag may commit. `1` for a light, where committing 0 would ask Home
     /// Assistant to turn it off and make this control's own affordance vanish from under the
     /// finger; `0` everywhere else.
@@ -77,11 +75,10 @@ struct PipSlider: View {
 
     private let pip: CGFloat = 10
     private let thickness: CGFloat = 4
-    /// The pip's invisible touch target — square, so it is equally generous whichever way the
-    /// track runs, and 24pt because that is Apple's minimum comfortable target and also exactly
-    /// the gap beside the media tile's mute button, so the overhang reaches that button's edge
-    /// without crossing it.
-    private let hitSize = CGSize(width: 24, height: 24)
+    /// The pip's invisible touch target — square, and 24pt because that is Apple's minimum
+    /// comfortable target. It is six times the drawn track's width, which is exactly why it has to
+    /// be an overlay; see `body`.
+    private let hitSize: CGFloat = 24
     /// Below this much travel a touch is a tap, not a drag. It only ever chooses between `onTap`
     /// and `onCommit` — the *value* is translation-driven either way, so this threshold can never
     /// be the reason a tap does or doesn't change something.
@@ -92,17 +89,14 @@ struct PipSlider: View {
 
     private var displayed: Double { dragPercent ?? Double(max(0, min(100, percent))) }
     private var fraction: CGFloat { CGFloat(displayed) / 100 }
-    /// Dimmed while muted: the level is still true, it just isn't doing anything right now.
-    private var fill: Color { isMuted ? HavenColor.warning.opacity(0.55) : accent }
 
     var body: some View {
         GeometryReader { geo in
-            let length = axis == .horizontal ? geo.size.width : geo.size.height
-            let travel = max(0, length - pip)
+            let travel = max(0, geo.size.height - pip)
             let filled = max(pip / 2, fraction * travel + pip / 2)
-            ZStack(alignment: axis == .horizontal ? .leading : .bottom) {
+            ZStack(alignment: .bottom) {
                 bar(HavenColor.levelTrack, along: nil)
-                bar(fill, along: filled)
+                bar(accent, along: filled)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // **The pip is an overlay, not a stack child, and that is the whole trick.** An overlay
@@ -112,42 +106,37 @@ struct PipSlider: View {
             //
             // Getting this wrong is what made the light and shade bars render as fat blobs a third
             // of a tile wide: as a `ZStack` child, the pip's touch frame was the widest thing in
-            // the stack, the track capsules had no cross-axis size of their own, and so they
-            // stretched to fill it. Hence `bar(_:along:)` below pinning `thickness` explicitly —
-            // the drawn track's width is now stated, not inherited from whatever else is in the
-            // stack.
-            .overlay(alignment: axis == .horizontal ? .leading : .bottom) {
+            // the stack, the track capsules had no width of their own, and so they stretched to
+            // fill it. Hence `bar(_:along:)` below pinning `thickness` explicitly — the drawn
+            // track's width is now stated, not inherited from whatever else is in the stack.
+            .overlay(alignment: .bottom) {
                 pipHandle(travel: travel)
             }
             // The fixed reference the drag is measured against. It sits on the track — which never
             // moves — rather than on the pip, which does.
             .coordinateSpace(.named(trackSpace))
         }
-        // Exactly the footprint of the static bar this replaces: a 4pt-wide column, or a 4pt-tall
-        // strip. No tile's layout width or height changes because this control is in it.
-        .frame(width: axis == .vertical ? thickness : nil,
-               height: axis == .horizontal ? thickness : nil)
+        // Exactly the footprint of the static bar this replaces: a 4pt-wide column. No tile's
+        // layout width changes because this control is in it.
+        .frame(width: thickness)
         // Not `.accessibilityHidden` — these were static readouts the tile's own label already
         // described, and that was right for a readout. A *control* a VoiceOver user cannot reach or
         // change is worse than an unlabelled one.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .accessibilityValue(spokenValue)
+        .accessibilityValue("\(Int(displayed.rounded()))%")
         .accessibilityAdjustableAction { direction in
             let next = direction == .increment ? min(100, displayed + 5) : max(Double(minimum), displayed - 5)
             commit(next)
         }
     }
 
-    /// One of the two capsules. `along` is the extent in the direction of travel — `nil` for the
-    /// full-length track, a measured value for the fill. **The cross-axis extent is always
-    /// `thickness`**, stated rather than inherited: a capsule left flexible across the axis takes
-    /// its width from whatever else shares its stack, which is exactly how the bars ended up as
-    /// wide as the pip's touch target.
+    /// One of the two capsules. `along` is the height — `nil` for the full-length track, a measured
+    /// value for the fill. **The width is always `thickness`**, stated rather than inherited: a
+    /// capsule left flexible across the axis takes its width from whatever else shares its stack,
+    /// which is exactly how the bars ended up as wide as the pip's touch target.
     private func bar(_ color: Color, along: CGFloat?) -> some View {
-        Capsule().fill(color)
-            .frame(width: axis == .horizontal ? along : thickness,
-                   height: axis == .vertical ? along : thickness)
+        Capsule().fill(color).frame(width: thickness, height: along)
     }
 
     /// The pip, plus its invisible grab region.
@@ -158,26 +147,18 @@ struct PipSlider: View {
     /// size of the target would be the blob this replaced.
     private func pipHandle(travel: CGFloat) -> some View {
         Circle()
-            .fill(fill)
+            .fill(accent)
             .frame(width: pip, height: pip)
             .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
             .overlay {
                 Color.clear
-                    .frame(width: hitSize.width, height: hitSize.height)
+                    .frame(width: hitSize, height: hitSize)
                     .contentShape(Rectangle())
                     .gesture(drag(travel: travel))
             }
-            // No clamping needed any more: `travel` is `length - pip`, so the drawn pip stays
-            // inside the track by construction at both ends.
-            .offset(x: axis == .horizontal ? fraction * travel : 0,
-                    y: axis == .vertical ? -fraction * travel : 0)
-    }
-
-    /// The level is spoken either way — it is what an adjustment changes, and a value of just
-    /// "Muted" would leave a VoiceOver user adjusting a number they can't hear.
-    private var spokenValue: String {
-        let level = "\(Int(displayed.rounded()))%"
-        return isMuted ? "\(level), muted" : level
+            // No clamping needed: `travel` is `height - pip`, so the drawn pip stays inside the
+            // track by construction at both ends.
+            .offset(y: -fraction * travel)
     }
 
     private func drag(travel: CGFloat) -> some Gesture {
@@ -193,19 +174,17 @@ struct PipSlider: View {
         // oscillates instead of tracking, several times a second.
         //
         // Measured against the track, which does not move, `startLocation` and `location` are both
-        // stable and the translation is simply how far the finger has gone. The vertical bars made
-        // this obvious because their travel is short (a 1×1 tile is ~60pt tall against the media
-        // row's ~100pt wide), so the same finger movement swings a larger share of the range and
-        // the oscillation is correspondingly violent — but the horizontal control had the same
-        // defect and was merely quieter about it.
+        // stable and the translation is simply how far the finger has gone. A short track makes the
+        // defect violent rather than merely present — a 1×1 tile is only ~60pt tall, so the same
+        // finger movement swings a large share of the range — which is why it is worth stating in
+        // a comment that outlives whoever next edits this line.
         DragGesture(minimumDistance: 0, coordinateSpace: .named(trackSpace))
             .onChanged { value in
                 let origin = dragOrigin ?? displayed
                 if dragOrigin == nil { dragOrigin = origin }
                 guard travel > 0 else { return }
-                // Vertical is inverted: dragging *up* is a negative translation and more level.
-                let moved = axis == .horizontal ? value.translation.width : -value.translation.height
-                let delta = Double(moved / travel) * 100
+                // Dragging *up* is a negative translation and more level, hence the negation.
+                let delta = Double(-value.translation.height / travel) * 100
                 dragPercent = min(100, max(Double(minimum), origin + delta))
             }
             .onEnded { value in
@@ -226,11 +205,10 @@ struct PipSlider: View {
     private func commit(_ value: Double) {
         onCommit(Int(value.rounded()))
         // Cleared immediately, and that is safe because every command behind this control writes
-        // its optimistic state into `states` synchronously (`MediaPlayerOptimistic`,
-        // `LightOptimistic`, `CoverOptimistic`), so `percent` has already caught up by the time this
-        // line runs. Without that, clearing here would be exactly the snap-back D spec §10b item 2
-        // describes — which is why those three helpers are a prerequisite for this control rather
-        // than a nicety alongside it.
+        // its optimistic state into `states` synchronously (`LightOptimistic`, `CoverOptimistic`),
+        // so `percent` has already caught up by the time this line runs. Without that, clearing
+        // here would be exactly the snap-back D spec §10b item 2 describes — which is why those
+        // helpers are a prerequisite for this control rather than a nicety alongside it.
         dragPercent = nil
     }
 }

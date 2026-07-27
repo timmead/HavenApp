@@ -21,6 +21,9 @@ struct MediaPlayerTile: View {
     let entityId: String
     var size: MediaTileSize = .small
     @Environment(HomeStore.self) private var store
+    /// Non-nil only while dragging the volume slider — the preview the drag moves, so no command
+    /// goes out until the finger lifts. Exactly `MediaPlayerModal.dragVolume`.
+    @State private var dragVolume: Double?
 
     var body: some View {
         let e = store.state(entityId)
@@ -206,14 +209,25 @@ struct MediaPlayerTile: View {
         }
     }
 
-    /// A mute button plus a draggable level control, shared by the 2×1 and the 4×2 so the two
-    /// behave alike.
+    /// A mute button plus a volume slider, shared by the 2×1 and the 4×2 so the two behave alike.
     ///
-    /// This was a static readout, on the grounds that a slider this small is a mis-tap waiting to
-    /// happen next to a tap that opens the modal. That concern was real and is answered rather than
-    /// dropped: `PipSlider` puts the gesture on the pip alone and drives the value from the drag's
-    /// *translation*, so a touch that doesn't travel cannot change anything — see its doc comment.
-    /// The fine control still exists in the modal too; this is the one you can reach from the grid.
+    /// It is a **stock `Slider`**, deliberately: this row is horizontal and ~100pt wide, which is a
+    /// shape SwiftUI already ships a control for, and `MediaPlayerModal` has always drawn its volume
+    /// this way. Writing a second one by hand bought nothing but the chance to get gesture handling
+    /// wrong. (`PipSlider` still exists for the light and shade tiles, where the control is a 4pt
+    /// vertical strip and there is no native equivalent at all — see its doc comment.)
+    ///
+    /// Two things the stock control does not give away for free and this keeps:
+    ///
+    /// - **the command goes out once, on release**, via `onEditingChanged` — never per frame, which
+    ///   would be a WebSocket call per pixel of travel;
+    /// - the adjustable action **commits**. `Slider`'s own increment/decrement drives the binding,
+    ///   which here only moves `dragVolume` and would never send anything at all.
+    ///
+    /// The mis-tap worry that kept this a static readout — a slider next to a tap that opens the
+    /// modal — does not arise here, because nothing in either tile size makes the volume row
+    /// tap-to-open. `wide()` puts that gesture on the title alone and `large()` on the artwork and
+    /// the text; the row has no tile gesture underneath it, so the slider is not a hole in one.
     @ViewBuilder
     private func volumeRow(_ s: MediaPlayerState?) -> some View {
         if let s, s.isActive, s.features.contains(.volumeSet) || s.features.contains(.volumeMute) {
@@ -239,19 +253,52 @@ struct MediaPlayerTile: View {
                 // every other control here. A player that can mute but not set a level keeps its
                 // mute button and simply has no track beside it.
                 if s.features.contains(.volumeSet) {
-                    // The pip sits at the **real** level while muted rather than at zero. Muting in
-                    // Home Assistant is independent of level — `MediaPlayerOptimistic.mute` goes out
-                    // of its way to leave `volume_level` alone so un-muting restores the right
-                    // volume — so parking the pip at zero would contradict the model and, worse,
-                    // make a drag start from a value the speaker was never at.
-                    PipSlider(percent: s.volumePercent ?? 0,
-                              accent: accent,
-                              isMuted: s.isMuted,
-                              label: "Volume") { percent in
-                        store.setMediaVolume(entityId, percent: percent)
-                    }
+                    // The thumb sits at the **real** level while muted rather than at zero. Muting
+                    // in Home Assistant is independent of level — `MediaPlayerOptimistic.mute` goes
+                    // out of its way to leave `volume_level` alone so un-muting restores the right
+                    // volume — so parking it at zero would contradict the model and, worse, make a
+                    // drag start from a value the speaker was never at. The muted *treatment* is
+                    // therefore the tint alone: dimmed because it isn't doing anything right now,
+                    // not moved, because the number is still true.
+                    volumeSlider(s)
                 }
             }
+        }
+    }
+
+    /// The volume control itself, written to match `MediaPlayerModal.volume` line for line — same
+    /// preview state, same commit-on-release, same adjustable action — so the two cannot drift.
+    private func volumeSlider(_ s: MediaPlayerState) -> some View {
+        let live = Double(s.volumePercent ?? 0)
+        return Slider(value: Binding(get: { dragVolume ?? live }, set: { dragVolume = $0 }),
+                      in: 0...100,
+                      onEditingChanged: { editing in
+                          if !editing, let v = dragVolume {
+                              store.setMediaVolume(entityId, percent: Int(v.rounded()))
+                              // Safe to clear immediately: `setMediaVolume` writes the optimistic
+                              // `volume_level` into `states` synchronously, so `live` has already
+                              // caught up by the time this line runs. Without that this would be
+                              // the snap-back D spec §10b item 2 describes.
+                              dragVolume = nil
+                          }
+                      })
+        // **The row's height is stated, not inherited, and the tile depends on it.** A `Slider`'s
+        // intrinsic height is about 33pt; the mute button beside it is 24, which is what `wide()`
+        // above budgeted for when it argued that the volume strip brings the 2×1's ideal height to
+        // 60 and so stays under `GlassTile`'s 66pt floor. Let the slider size itself and the ideal
+        // goes to ~69, the floor stops winning, and the tile grows the moment playback starts —
+        // exactly the state-dependent resize this file opens by ruling out. The 28pt thumb
+        // overhangs this frame by a couple of points and is not clipped, which is only a drawing
+        // detail; the layout is 24.
+        .frame(height: 24)
+        .tint(s.isMuted ? HavenColor.warning.opacity(0.55) : accent)
+        .accessibilityLabel("Volume")
+        .accessibilityValue(s.isMuted ? "Muted" : "\(Int((dragVolume ?? live).rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            let current = dragVolume ?? live
+            let next = direction == .increment ? min(100, current + 5) : max(0, current - 5)
+            store.setMediaVolume(entityId, percent: Int(next.rounded()))
+            dragVolume = nil
         }
     }
 
