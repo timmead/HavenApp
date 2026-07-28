@@ -15,9 +15,17 @@ struct SensorModal: View {
         let accent = HavenColor.domain(.sensor)
         let unit = s?.unit ?? ""
 
+        // `SensorState.value` is the raw state string, so an unreachable sensor rendered the
+        // literal word "unavailable" at 30pt where its number goes, with its unit still beside it
+        // — a reading that isn't one, stated more loudly than any real value. Named in the
+        // subtitle instead, and the value falls back to the em-dash it already uses for "no data".
+        let unavailable = e?.state == "unavailable"
+        let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e), subtitle: "", accent: accent)
+                        title: TileName.of(entityId, e),
+                        subtitle: unavailable ? "Unavailable" : (unknown ? "Unknown" : ""),
+                        accent: unavailable ? .secondary : accent)
 
             FacetCard {
                 let selected = series.flatMap { nearestPoint(to: selectedDate, in: $0.points) }
@@ -29,8 +37,11 @@ struct SensorModal: View {
                 // readout beside it (not beneath it) can't grow the row and cause the
                 // chart/segmented-control/stats below to shift when scrubbing starts.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(s?.value ?? "—").font(.system(size: 30, weight: .bold))
-                    Text(s?.unit ?? "").foregroundStyle(.secondary)
+                    Text((unavailable || unknown) ? "—" : (s?.value ?? "—"))
+                        .font(.system(size: 30, weight: .bold))
+                    // The unit is suppressed with the value: "— °C" claims a scale for a reading
+                    // that does not exist.
+                    Text((unavailable || unknown) ? "" : (s?.unit ?? "")).foregroundStyle(.secondary)
 
                     Spacer()
 

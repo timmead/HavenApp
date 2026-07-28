@@ -20,10 +20,24 @@ struct LightModal: View {
             let mid = Double(r.lowerBound + r.upperBound) / 2
             return (s?.isOn ?? false) ? Double(s?.colorTempKelvin ?? Int(mid)) : mid
         }
+        // `isOn` reads `false` for an `unavailable` state string exactly as it would for a light
+        // that is genuinely switched off, so left alone this header said "Off" about a bulb Home
+        // Assistant cannot reach — the state claim the tile beside it was struck through to avoid.
+        //
+        // `unavailable` and `unknown` are read apart rather than folded into `isUnavailable`: an
+        // unreachable light cannot be commanded, while an `unknown` one is reachable and simply
+        // has not reported yet, so its toggle stays live. `HomeStore.optimistic` makes the same
+        // distinction on the command side, and the toggle must agree with it or it would flip and
+        // spring back having sent nothing.
+        let unavailable = e?.state == "unavailable"
+        let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .light, deviceClass: e?.deviceClass), title: name,
-                        subtitle: (s?.isOn ?? false) ? "On" : "Off", accent: accent,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) }))
+                        subtitle: unavailable ? "Unavailable"
+                            : (unknown ? "Unknown" : ((s?.isOn ?? false) ? "On" : "Off")),
+                        accent: unavailable ? .secondary : accent,
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) }),
+                        toggleEnabled: !unavailable)
             if s?.supportsBrightness ?? false {
                 FacetCard(title: "Brightness") {
                     Slider(value: Binding(get: { dragPercent ?? live },

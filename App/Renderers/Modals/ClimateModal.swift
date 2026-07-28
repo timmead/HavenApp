@@ -6,10 +6,23 @@ struct ClimateModal: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let accent = HavenColor.domain(.climate)
+        // `ClimateState.isOn` already excludes `unavailable`/`unknown`, so this header did not
+        // claim a *mode* for an unreachable thermostat — but it fell through to "Off", which is
+        // the same false claim in different words. Named explicitly instead.
+        //
+        // `unavailable` and `unknown` are read apart because only the former cannot be commanded;
+        // the toggle has to agree with `HomeStore`'s command guard or it flips and springs back
+        // having sent nothing.
+        let unavailable = e?.state == "unavailable"
+        let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
-            ModalHeader(systemImage: IconMap.symbol(domain: .climate, deviceClass: e?.deviceClass), title: TileName.of(entityId, e),
-                        subtitle: s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "", accent: accent,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") }))
+            ModalHeader(systemImage: IconMap.symbol(domain: .climate, deviceClass: e?.deviceClass),
+                        title: TileName.of(entityId, e),
+                        subtitle: unavailable ? "Unavailable"
+                            : (unknown ? "Unknown" : (s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "")),
+                        accent: unavailable ? .secondary : accent,
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") }),
+                        toggleEnabled: !unavailable)
             FacetCard {
                 HStack {
                     Button { if let t = s?.targetTemp { store.setClimateTemp(entityId, temp: t - 1) } } label: { Image(systemName: "minus.circle.fill").font(.title) }
