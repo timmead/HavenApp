@@ -34,6 +34,23 @@ final class AppModel {
         case retrying(attempt: Int, isReconnect: Bool)
         case ready
         case error(String)
+
+        /// Whether the app is actively trying to reach Home Assistant right now.
+        ///
+        /// Exhaustive on purpose, with no `default`: this is the input to the quiet period before
+        /// `RootView` says anything about connecting, and a new phase that quietly fell through to
+        /// "not connecting" would either flash a screen it shouldn't or hide one it should show.
+        /// The compiler asks the question instead.
+        ///
+        /// Lives on the phase rather than as a predicate in the view for the reason recorded on
+        /// `RootView.showingConnectionSettings`: a second copy of a decision that a change to the
+        /// `switch` could silently contradict is how this project has been bitten before.
+        var isConnectionInProgress: Bool {
+            switch self {
+            case .connecting, .retrying: return true
+            case .loggedOut, .ready, .error: return false
+            }
+        }
     }
     var phase: Phase = .loggedOut
     var serverURLText = "http://homeassistant.local:8123"

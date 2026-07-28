@@ -27,9 +27,38 @@ struct RootView: View {
     /// points use, so there is one expression to test rather than a duplicate to keep in step.
     @State private var showingConnectionSettings = false
 
+    /// How long a connection may be in progress before this view says anything about it.
+    ///
+    /// A healthy connect completes in well under a second (measured: ~730ms to a bootstrapped
+    /// dashboard on a local network), so without a quiet period the connecting spinner appears and
+    /// vanishes in a blink on every launch — motion that reads as a glitch and tells the user
+    /// nothing they can use. Three seconds is comfortably past a normal connect and comfortably
+    /// short of the point where silence would itself look broken.
+    ///
+    /// It is also `ReconnectPolicy`'s first backoff, which is the useful coincidence: if the first
+    /// round fails, this screen arrives at roughly the moment the second round begins, so its
+    /// appearance lines up with something actually having gone wrong.
+    private static let quietPeriod: Duration = .seconds(3)
+
+    /// Whether a connection has been in progress long enough to be worth mentioning.
+    @State private var connectingIsWorthMentioning = false
+
     var body: some View {
         content
             .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
+            // Keyed on *whether* a connection is in progress, not on the phase — so the timer runs
+            // from when connecting began and keeps running across `.connecting` → `.retrying`.
+            // Restarting it per phase would mean a connection that failed a round and moved on had
+            // its quiet period begin again, and the screen would never appear at all.
+            .task(id: model.phase.isConnectionInProgress) {
+                guard model.phase.isConnectionInProgress else {
+                    connectingIsWorthMentioning = false
+                    return
+                }
+                try? await Task.sleep(for: Self.quietPeriod)
+                guard !Task.isCancelled else { return }
+                connectingIsWorthMentioning = true
+            }
     }
 
     @ViewBuilder
@@ -37,6 +66,11 @@ struct RootView: View {
         switch model.phase {
         case .loggedOut, .error:
             LoginView(showingConnectionSettings: $showingConnectionSettings)
+        case _ where !connectingIsWorthMentioning && model.phase.isConnectionInProgress:
+            // Deliberately empty, and deliberately not a spinner. The whole point is that a connect
+            // this quick should be invisible: on a cold launch this reads as the app still coming
+            // up, which is what is actually happening.
+            Color(.systemBackground).ignoresSafeArea()
         case .connecting: ProgressView("Connecting…")
         case .retrying(let attempt, let isReconnect):
             VStack(spacing: 16) {
