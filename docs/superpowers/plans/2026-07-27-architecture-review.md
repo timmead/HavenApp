@@ -328,8 +328,8 @@ Working through the list below. `git log main..refactor/foundation-review` has t
 | **P4** tile chrome | **Done.** `TileEmphasis` (Core, tested) + `TileLabel`; no tile hand-writes the guard now |
 | **P6** move `FlowRow`/`PlayerLayerView` | **Done.** CameraModal 543 → 467 lines |
 | **P1** connection seam | **Done.** `PeerObservableConnection` + injected factory; six loop tests |
-| **P2** HomeStore split | **Started.** Blocker removed (see P2's update); `BulkActionRunner` extracted |
-| **P3** navigation state | **Not started.** See below |
+| **P2** HomeStore split | **Done.** All three seams out; HomeStore 760 → 553 lines |
+| **P3** navigation state | **Done.** `Navigation`, owned by `DashboardView` |
 
 **P4 got real visual verification, which the plan said it needed and assumed it could not have.**
 Xcode's preview canvas renders without a Home Assistant, so `App/Renderers/TileGallery.swift`
@@ -343,32 +343,46 @@ first already succeeded, so the code under test never ran and the test passed wh
 nothing. This is the second session running in which that has happened, which promotes it from an
 anecdote to a house rule — **a new test is not finished until you have watched it fail.**
 
-### Still open
+### Everything on this list is now done
 
-- **P3 (navigation state).** Untouched. `presented` is still on `HomeStore`. The work is
-  mechanical but wide — 11 tile files, plus the gallery, `DashboardView` and `HomeStore.reset` —
-  and it relocates a real coupling rather than removing one: something must still close the sheet
-  on sign-out, which would become `AppModel`'s job alongside its existing `store.reset()`. The
-  observation suite already covers the sheet binding, so the risk is churn, not silence.
-- **P2's remaining two extractions**, `HistoryCache` then `EnvironmentCoordinator`.
+`HomeStore` went from 760 lines holding six jobs to 553 holding two: what Home Assistant said
+(`home`, `states`) and the command dispatch that writes optimistic state over it. The other four
+moved out — `BulkActionRunner`, `HistoryCache`, `EnvironmentCoordinator`, `Navigation` — and the
+views' call sites are untouched, because the store still forwards.
+
+**P3 landed better than this document predicted.** The plan assumed the sign-out coupling would
+*move* to `AppModel` (something must still close the sheet). It does not have to: `Navigation` is
+`@State` on `DashboardView`, which only exists while `phase == .ready`, so sign-out,
+reauthentication and a mid-session reconnect all destroy it in passing. The coupling disappears.
+
+**A correction to what this document said about observation.** The negative control originally
+claimed that reading one entity does not depend on another, and that this is what stops a
+forty-tile floor re-evaluating on every push. **That is false.** `states` is one dictionary, so
+granularity is per-property: any push invalidates every tile that read it. This is fine today — a
+`body` is cheap and SwiftUI diffs before touching the render tree — but it is now pinned by a test
+of its own, because the obvious "optimisation" of per-entity observables would be a large change
+resting on an assumption nobody had checked.
 
 ## Recommended next steps, in order
 
-1. **P4** (tile chrome) — highest value per unit of risk, wants ten minutes with the app running.
-   It removes a whole class of "the sweep missed one" defect, which has already happened once.
-2. **P6** (move `FlowRow`/`PlayerLayerView` to `DesignSystem`) — trivial, do it while you're in
-   there. Remember `xcodegen generate` after.
-3. **P1** (connection seam) — now about covering the candidate loop, not about the trust decision;
-   see the update on that section.
-4. **P2 / P3** (HomeStore split, navigation state) — largest, and the one that most wants a person
-   watching a live dashboard redraw.
+Every item in this document is now closed. What is worth doing next is not on it:
+
+1. **Look at the branch on a real instance.** Nothing here has run against a live Home Assistant.
+   The suites and the gallery cover a great deal, but "the dashboard still works" is not something
+   either can assert.
+2. **Consider whether the modals want the same pass the tiles got.** Six of them still hand-write
+   `accent: unavailable ? .secondary : accent` into `ControlModalScaffold`. That is consistent and
+   correct today, so it was left alone — but it is the same shape as the tile finding, one layer
+   up, and `TileEmphasis` already exists to express it.
+3. **Leave `states` as one dictionary** until something measurably wants otherwise — see the
+   observation correction above.
 
 ## Verification summary
 
 | Suite | Baseline | After session 1 | After session 2 |
 |---|---|---|---|
 | HavenCore | 636 passed | 636 passed | **638 passed** |
-| HavenApp | 55 passed | 63 passed | **76 passed** |
+| HavenApp | 55 passed | 63 passed | **78 passed** |
 
 Plus one form of verification neither suite provides: `TileGallery`, rendered before and after the
 tile refactor and compared by eye, both halves.
