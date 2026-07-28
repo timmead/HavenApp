@@ -328,7 +328,7 @@ Working through the list below. `git log main..refactor/foundation-review` has t
 | **P4** tile chrome | **Done.** `TileEmphasis` (Core, tested) + `TileLabel`; no tile hand-writes the guard now |
 | **P6** move `FlowRow`/`PlayerLayerView` | **Done.** CameraModal 543 → 467 lines |
 | **P1** connection seam | **Done.** `PeerObservableConnection` + injected factory; six loop tests |
-| **P2** HomeStore split | **Done.** All three seams out; HomeStore 760 → 553 lines |
+| **P2** HomeStore split | **Done.** All three seams out; HomeStore 760 → 560 lines |
 | **P3** navigation state | **Done.** `Navigation`, owned by `DashboardView` |
 
 **P4 got real visual verification, which the plan said it needed and assumed it could not have.**
@@ -345,7 +345,7 @@ anecdote to a house rule — **a new test is not finished until you have watched
 
 ### Everything on this list is now done
 
-`HomeStore` went from 760 lines holding six jobs to 553 holding two: what Home Assistant said
+`HomeStore` went from 760 lines holding six jobs to 560 holding two: what Home Assistant said
 (`home`, `states`) and the command dispatch that writes optimistic state over it. The other four
 moved out — `BulkActionRunner`, `HistoryCache`, `EnvironmentCoordinator`, `Navigation` — and the
 views' call sites are untouched, because the store still forwards.
