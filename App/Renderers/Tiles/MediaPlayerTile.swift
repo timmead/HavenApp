@@ -29,10 +29,11 @@ struct MediaPlayerTile: View {
         let e = store.state(entityId)
         let s = e.map(MediaPlayerState.init)
         let name = TileName.of(entityId, e)
+        let unavailable = e?.isUnavailable ?? false
         Group {
             switch size {
-            case .small: small(s, name: name)
-            case .wide: wide(s, name: name)
+            case .small: small(s, name: name, unavailable: unavailable)
+            case .wide: wide(s, name: name, unavailable: unavailable)
             case .large: large(s, name: name, deviceClass: e?.deviceClass)
             }
         }
@@ -47,9 +48,8 @@ struct MediaPlayerTile: View {
 
     // MARK: - 1×1
 
-    private func small(_ s: MediaPlayerState?, name: String) -> some View {
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
-        return GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
+    private func small(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             VStack(spacing: 4) {
                 Spacer(minLength: 0)
                 playPauseButton(s, size: 26)
@@ -66,9 +66,8 @@ struct MediaPlayerTile: View {
 
     // MARK: - 2×1
 
-    private func wide(_ s: MediaPlayerState?, name: String) -> some View {
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
-        return GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
+    private func wide(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             // `spacing: 0` with a `Spacer` between the two rows, rather than a spaced `VStack`:
             // a `VStack(spacing: 6)` over three children adds *two* 6pt gaps, which would push the
             // ideal height to 72 and grow the tile past the floor — the exact state-dependent

@@ -6,11 +6,16 @@ struct CoverTile: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        let unavailable = e?.isUnavailable ?? false
         GlassTile(active: open, accent: accent, unavailable: unavailable) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(open ? accent : .secondary).symbolRenderingMode(.hierarchical)
+                    // `open` already reads `false` for an `unavailable` state string, same as for a
+                    // genuinely closed cover, so this guard is currently redundant with that — but
+                    // stated explicitly rather than left to depend on `CoverState.isOpen`'s exact
+                    // definition never changing. The symbol itself needs no such guard: it is
+                    // already the neutral domain glyph in every case, not an open/closed variant.
+                    Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (open ? accent : .secondary)).symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(open ? .primary : .secondary)
                 }
                 // Unlike the light, this is shown at every position including 0 — a closed shade

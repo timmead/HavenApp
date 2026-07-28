@@ -8,10 +8,14 @@ struct SwitchTile: View {
         let on = (e?.state == "on")
         let accent = HavenColor.domain(.switchOutlet)
         let name = TileName.of(entityId, e)
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: IconMap.symbol(domain: .switchOutlet, deviceClass: nil)).font(.system(size: 20)).foregroundStyle(on ? accent : .secondary).symbolRenderingMode(.hierarchical)
+                // `on` already reads `false` for an `unavailable` state string, same as for a
+                // genuinely off switch, so this guard is currently redundant with that — but
+                // stated explicitly rather than left to depend on the `state == "on"` check above
+                // never changing.
+                Image(systemName: IconMap.symbol(domain: .switchOutlet, deviceClass: nil)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (on ? accent : .secondary)).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)
                 Text(name).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(on ? .primary : .secondary)
             }

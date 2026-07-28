@@ -5,10 +5,13 @@ struct SceneTile: View {
     @Environment(HomeStore.self) private var store
     var body: some View {
         let e = store.state(entityId); let accent = HavenColor.domain(.scene)
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        let unavailable = e?.isUnavailable ?? false
         GlassTile(active: false, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil)).font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
+                // Always tinted `accent` by design, same as `ClimateTile` — scenes have no on/off
+                // to gate it, so the unavailable guard has to be added on its own rather than
+                // inherited from a state check.
+                Image(systemName: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : accent).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
         }

@@ -6,10 +6,13 @@ struct ClimateTile: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let on = s?.isOn ?? false; let accent = HavenColor.domain(.climate)
-        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 4) {
-                Image(systemName: "thermometer.medium").font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
+                // Unlike the other tiles' icons, this one is always tinted `accent` regardless of
+                // on/off by design — but that means an unreachable thermostat needs its own guard
+                // rather than inheriting one from an `on`/`off` check that was never gating it.
+                Image(systemName: "thermometer.medium").font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : accent).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—").font(.system(size: 24, weight: .bold)).foregroundStyle(accent)
