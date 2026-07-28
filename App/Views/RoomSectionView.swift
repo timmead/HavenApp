@@ -139,8 +139,15 @@ struct RoomSectionView: View {
             .disabled(!hasActive)
             // Named rather than silent: a bulk action that half-fails used to revert the failed
             // rows with no explanation at all, which reads as the app ignoring the tap.
+            //
+            // Gated on `hasActive` too, not just `failures > 0`: this is the only way a stale count
+            // ever clears without another bulk action. If the user fixes the failures by hand (e.g.
+            // manually locks the one door that didn't respond), `activeCount` drops to 0, the button
+            // disables, and the room genuinely has nothing left to complain about — but nothing
+            // re-runs `recordBulkFailures` to zero the stored count, so without this gate the label
+            // would go on accusing the room of a failure that no longer exists.
             let failures = store.bulkFailureCount(for: rollup.kind, in: room.areaId)
-            if failures > 0 {
+            if failures > 0 && hasActive {
                 Text("\(failures) didn't respond")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(HavenColor.warning)

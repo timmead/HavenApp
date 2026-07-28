@@ -14,15 +14,28 @@ struct BinarySensorModal: View {
     /// defers.
     private static let maximumChanges = 10
 
+    /// The Recent list's vocabulary, made to match the header's: `"on"`/`"off"` (the only two values
+    /// `HistoryParsing.stateChanges` ever returns for a binary sensor — `unavailable`/`unknown` rows
+    /// are dropped there) become the same "Active"/"Clear" words the header above shows.
+    private static func label(for state: String) -> String { state == "on" ? "Active" : "Clear" }
+
     var body: some View {
         let e = store.state(entityId)
         let s = e.map(BinarySensorState.init)
         let active = s?.isActive ?? false
+        // `isActive` reads `false` for an `unavailable` state string exactly as it would for a
+        // genuinely clear sensor (see `BinarySensorState`), so left alone this header said "Clear"
+        // about a door sensor Home Assistant cannot reach — a state claim for an unreachable device,
+        // which is this whole branch's thesis to remove. `unavailable` overrides the subtitle and
+        // accent the same way `BinarySensorTile` already overrides its icon tint; the icon itself
+        // needs no such override, since `IconMap.symbol(domain: .binarySensor, ...)` is the
+        // device-class glyph in every state, not an active/clear variant.
+        let unavailable = e?.isUnavailable ?? false
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
-                        subtitle: active ? "Active" : "Clear",
-                        accent: active ? HavenColor.warning : .gray)
+                        subtitle: unavailable ? "Unavailable" : (active ? "Active" : "Clear"),
+                        accent: unavailable ? .secondary : (active ? HavenColor.warning : .gray))
 
             FacetCard(title: "Recent") {
                 if let changes = store.stateChanges(entityId) {
@@ -32,7 +45,11 @@ struct BinarySensorModal: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(changes.prefix(Self.maximumChanges), id: \.time) { change in
                                 HStack {
-                                    Text(TileName.words(change.state))
+                                    // `Self.label(for:)`, not `TileName.words(change.state)` — the
+                                    // header two lines above speaks "Active"/"Clear", and rendering
+                                    // this list's raw "on"/"off" through a generic word-formatter
+                                    // was the same device described in two vocabularies at once.
+                                    Text(Self.label(for: change.state))
                                         .font(.system(size: 13, weight: .semibold))
                                     Spacer()
                                     Text(change.time, format: .dateTime.hour().minute())
@@ -42,6 +59,13 @@ struct BinarySensorModal: View {
                             }
                         }
                     }
+                } else if store.stateChangesLoadFailed(entityId) {
+                    // Distinct from both "no changes today" (an empty but successful fetch) and
+                    // "not asked yet" below: this fetch was made and it failed. Before this branch
+                    // existed, `nil` covered "not asked yet" and "asked and failed" alike, so an
+                    // install without the `history` integration — or an entity `recorder` excludes —
+                    // showed "Loading…" every time the modal opened, forever.
+                    Text("Couldn't load recent changes").font(.caption).foregroundStyle(.secondary)
                 } else {
                     // Distinct from "no changes today": we have not asked yet.
                     Text("Loading…").font(.caption).foregroundStyle(.secondary)

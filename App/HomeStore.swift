@@ -7,13 +7,33 @@ final class HomeStore {
     var states: [String: EntityState] = [:]
     /// Fetched series, with the moment each was fetched — see `HistoryRange.cacheLifetime`.
     var historyByKey: [String: (series: HistorySeries, fetched: Date)] = [:]
-    /// Keys with a fetch currently in flight. Without this, flicking across the range picker fires
-    /// a request per tap and the last one to *arrive* wins, which is not necessarily the one the
-    /// user is looking at.
+    /// Keys with a fetch currently in flight.
+    ///
+    /// This does *not* protect against flicking across the range picker — every range is a
+    /// different cache key (see `historyKey`), so two different ranges never collide here at all;
+    /// each just gets its own in-flight entry. What this actually guards against is `.task(id:
+    /// range)` (`SensorModal`, `RoomEnvironmentHistoryView`) restarting on the *same* key: flicking
+    /// Day → Week → Day cancels the first Day task but — per `HAWebSocketClient.request` being a
+    /// bare continuation with no cancellation handling (see `CameraPlaybackPlan`'s doc for the same
+    /// fact) — does not cancel its in-flight `history` command. Without this guard the second Day
+    /// task would fire a duplicate request for a key whose answer is already on the way; with it,
+    /// the second task finds the key already in flight and returns immediately, and the first
+    /// request's result lands in `historyByKey` for both to read.
     private var historyInFlight: Set<String> = []
-    /// Recent state changes per entity, for the binary-sensor modal. Keyed by entity id alone —
-    /// unlike `historyByKey` there is one range (Day) and no attribute variant to disambiguate.
-    var stateChangesByEntity: [String: [StateChange]] = [:]
+    /// Recent state changes per entity, with the moment each was fetched — see
+    /// `HistoryRange.day.cacheLifetime`, the same lifetime `historyByKey` uses. Keyed by entity id
+    /// alone — unlike `historyByKey` there is one range (Day) and no attribute variant to
+    /// disambiguate.
+    ///
+    /// Before this carried a `fetched` date, an entry never expired: open a door sensor's modal at
+    /// 09:00 and again at 18:00 and the header (read live off `states`) said "Active" while this
+    /// list still ended at 08:12's "Off" — the modal contradicting itself for the whole session.
+    var stateChangesByEntity: [String: (changes: [StateChange], fetched: Date)] = [:]
+    /// Entity ids whose most recent `loadStateChanges` attempt threw, with no cached entry (of any
+    /// age) to fall back to. See `loadStateChanges`: a failure never touches the cache, so a stale
+    /// list survives a failed refresh exactly like `historyByKey` does — this only exists to tell
+    /// "never asked" apart from "asked and it failed" when there is nothing to show at all.
+    var stateChangesFailed: Set<String> = []
     /// Each room's nominated temperature/humidity source, keyed by area id.
     ///
     /// Resolved once per structure load — deliberately *not* on every state change, even though
@@ -99,6 +119,8 @@ final class HomeStore {
         states = [:]
         historyByKey = [:]
         stateChangesByEntity = [:]
+        stateChangesFailed = []
+        bulkFailures = [:]
         environment = [:]
         dashboard = DashboardDocument()
         presented = nil
@@ -652,19 +674,38 @@ final class HomeStore {
         }
     }
 
-    /// Cached recent state changes. `nil` means "not loaded yet" — render a placeholder, not an
-    /// empty list, which would read as "nothing has happened".
-    func stateChanges(_ entityId: String) -> [StateChange]? { stateChangesByEntity[entityId] }
+    /// Cached recent state changes, ignoring `fetched` age — a stale list beats a blank one, exactly
+    /// as `history(_:_:attribute:)` reads `historyByKey`. `nil` means "not loaded yet, or every
+    /// attempt so far has failed"; callers distinguish the two with `stateChangesLoadFailed`.
+    func stateChanges(_ entityId: String) -> [StateChange]? { stateChangesByEntity[entityId]?.changes }
 
-    /// Fetches and caches recent state changes. Never caches a failure, so reopening the modal
-    /// retries.
+    /// Whether the most recent fetch for `entityId` failed with nothing cached to fall back to. The
+    /// binary-sensor modal uses this to tell "not asked yet" (render nothing conclusive, a loading
+    /// state is fine) apart from "asked, and it failed" (say so, rather than show "Loading…"
+    /// forever — the state before this existed, on an install without the `history` integration or
+    /// an entity `recorder` excludes).
+    func stateChangesLoadFailed(_ entityId: String) -> Bool { stateChangesFailed.contains(entityId) }
+
+    /// Fetches and caches recent state changes. Reuses the cache while the entry is still within
+    /// `HistoryRange.day.cacheLifetime` — the same lifetime and reasoning as `loadHistory`'s Day
+    /// range, since this is always a Day query. Never caches a failure (so a transient error doesn't
+    /// permanently block a retry) and never *clears* a stale cache on failure either — an old list
+    /// beats a blank one.
     func loadStateChanges(_ entityId: String) async {
-        guard stateChangesByEntity[entityId] == nil, let connection else { return }
+        let now = Date()
+        if let cached = stateChangesByEntity[entityId],
+           now.timeIntervalSince(cached.fetched) < HistoryRange.day.cacheLifetime {
+            return
+        }
+        guard let connection else { return }
         do {
-            stateChangesByEntity[entityId] =
-                try await connection.stateChanges(entityId: entityId, range: .day, now: Date())
+            let changes = try await connection.stateChanges(entityId: entityId, range: .day, now: now)
+            stateChangesByEntity[entityId] = (changes, now)
+            stateChangesFailed.remove(entityId)
         } catch {
-            // Leave the cache untouched so a later attempt can retry.
+            // Leave the cache untouched so a later attempt can retry, but note the failure so a
+            // caller with nothing cached can say so instead of showing "Loading…" forever.
+            stateChangesFailed.insert(entityId)
         }
     }
 }

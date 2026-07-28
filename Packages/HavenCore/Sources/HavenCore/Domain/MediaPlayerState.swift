@@ -57,10 +57,10 @@ public struct MediaPlayerFeatures: OptionSet, Sendable, Equatable {
 
 /// A `media_player` entity's state, typed.
 ///
-/// Playback, position and features are all read straight off the attributes Home Assistant
-/// publishes; nothing here interpolates or ticks — that is `MediaProgress`, deliberately separate
-/// so the value that changes every second isn't baked into a struct compared for equality on every
-/// state push.
+/// Playback, position and most attributes are read straight off what Home Assistant publishes;
+/// nothing here interpolates or ticks — that is `MediaProgress`, deliberately separate so the value
+/// that changes every second isn't baked into a struct compared for equality on every state push.
+/// `features` is the one exception to "straight off the attributes": see its init line.
 public struct MediaPlayerState: Sendable, Equatable {
     /// Home Assistant's own `media_player` state strings, one case each, so an unrecognised state
     /// is `.unknown` rather than silently coerced into a plausible neighbour. `on` is real and
@@ -118,6 +118,16 @@ public struct MediaPlayerState: Sendable, Equatable {
     public let position: Double?
     public let positionUpdatedAt: Date?
     public let duration: Double?
+    /// `[]` whenever the entity is unavailable — **not** whatever `supported_features` says.
+    ///
+    /// Home Assistant keeps `supported_features` on an unavailable entity, because it is a
+    /// *capability* of the device rather than a live reading, unlike `media_title`/`volume_level`,
+    /// which it drops. Read verbatim, that capability bit still draws a tinted, tappable transport
+    /// on a device Home Assistant cannot currently reach — the same false claim this project's
+    /// unavailable-state work exists to remove elsewhere. Zeroing it here, at the source, removes
+    /// every control gated on a feature bit (play/pause on all three tile sizes and the modal's
+    /// transport, volume, source and power toggle) in one place, rather than threading an
+    /// `unavailable` flag through each renderer that reads `features`.
     public let features: MediaPlayerFeatures
 
     public init(_ e: EntityState) {
@@ -138,7 +148,10 @@ public struct MediaPlayerState: Sendable, Equatable {
         position = e.attributes["media_position"]?.asDouble
         positionUpdatedAt = MediaProgress.parseUpdatedAt(e.attributes["media_position_updated_at"])
         duration = e.attributes["media_duration"]?.asDouble
-        features = MediaPlayerFeatures(attribute: e.attributes["supported_features"])
+        // See `features`' own doc: an unavailable entity still carries `supported_features` (it is
+        // a capability, not a reading), so this must not read it verbatim or every transport
+        // control survives a device Home Assistant cannot reach.
+        features = e.isUnavailable ? [] : MediaPlayerFeatures(attribute: e.attributes["supported_features"])
     }
 
     public var isPlaying: Bool { playback.isPlaying }

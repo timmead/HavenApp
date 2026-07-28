@@ -139,6 +139,19 @@ struct RoomDetailView: View {
                             .buttonStyle(.plain)
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(HavenColor.domain(rollup.kind == .lights ? .light : .cover))
+                            // Mirrors `RoomSectionView.rollupRow`: named rather than silent, and
+                            // gated on `activeCount > 0` (this block) the same way that view gates
+                            // on `hasActive` — the only way the count ever clears without another
+                            // bulk action is the button disappearing once there's nothing left to
+                            // act on. Without this, a user who taps "All off" here saw exactly the
+                            // silent half-failure this task exists to end: the count is tracked and
+                            // shown in the room-list row, but this detail view never read it at all.
+                            let failures = store.bulkFailureCount(for: rollup.kind, in: room.areaId)
+                            if failures > 0 {
+                                Text("\(failures) didn't respond")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(HavenColor.warning)
+                            }
                         }
                     } else {
                         Spacer()

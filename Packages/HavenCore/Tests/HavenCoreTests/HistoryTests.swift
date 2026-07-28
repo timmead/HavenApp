@@ -167,7 +167,11 @@ import Foundation
 @Test func cacheLifetimeGrowsWithTheRange() {
     #expect(HistoryRange.day.cacheLifetime < HistoryRange.week.cacheLifetime)
     #expect(HistoryRange.week.cacheLifetime <= HistoryRange.month.cacheLifetime)
-    #expect(HistoryRange.month.cacheLifetime <= HistoryRange.year.cacheLifetime)
+    // `<=`, not `<`: month and threeMonths share one bucket (both 3_600) by design — see
+    // `cacheLifetime`'s switch. `.threeMonths` was missing from this chain entirely, so a typo
+    // there (e.g. `case .threeMonths: 60`) would have passed all three lifetime tests in this file.
+    #expect(HistoryRange.month.cacheLifetime <= HistoryRange.threeMonths.cacheLifetime)
+    #expect(HistoryRange.threeMonths.cacheLifetime <= HistoryRange.year.cacheLifetime)
 }
 
 /// Every range must actually expire. An infinite lifetime is the bug this replaced.

@@ -21,13 +21,20 @@ struct LockModal: View {
         let s = e.map(LockState.init)
         let locked = s?.isLocked ?? false
         let jammed = s?.isJammed ?? false
-        let subtitle = jammed ? "Jammed" : (locked ? "Locked" : "Unlocked")
-        let symbol = jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill")
-        let accent = jammed ? HavenColor.warning : HavenColor.domain(.lock)
+        // `isLocked`/`isJammed` both read `false` for an `unavailable` state string exactly as they
+        // would for a genuinely unlocked lock (see `LockState`), so left alone this header asserted
+        // "Unlocked", drew `lock.open.fill` in lock-blue, and offered a confident full-width "Lock"
+        // button one tap from a tile that was just struck through to say we don't know — the state
+        // claim this whole branch's thesis exists to remove, on the one modal that thesis is about.
+        let unavailable = e?.isUnavailable ?? false
+        let subtitle = unavailable ? "Unavailable" : (jammed ? "Jammed" : (locked ? "Locked" : "Unlocked"))
+        let symbol = unavailable ? "questionmark.circle"
+            : (jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill"))
+        let accent = unavailable ? Color.secondary : (jammed ? HavenColor.warning : HavenColor.domain(.lock))
         VStack(spacing: 20) {
             // No `toggle:` at all, in either state — see the type's doc comment.
             ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle, accent: accent)
-            actionButton(locked: locked, jammed: jammed, accent: accent)
+            actionButton(locked: locked, jammed: jammed, unavailable: unavailable, accent: accent)
         }
     }
 
@@ -42,16 +49,28 @@ struct LockModal: View {
     /// a jammed lock with no action at all strands the user in the one situation where they most
     /// need one. It offers "Lock" (a jam is usually a failure to close), says plainly that the
     /// position is unknown, and carries the warning colour.
+    ///
+    /// **An unreachable lock is different, and gets `.disabled(true)` rather than a jammed-style
+    /// live button.** The label stays "Lock" — never "Unavailable" — because this file's own rule,
+    /// two paragraphs above, is that the label is the *action*, never the current state; a disabled
+    /// button that renamed itself to the state would restate the subtitle a second time and revive
+    /// exactly the ambiguity this file exists to avoid. Disabling instead of merely captioning it
+    /// matters behaviourally, not just visually: `store.toggleLock` computes `locked = (state ==
+    /// "locked")`, which is `false` for `unavailable` exactly as it is for a genuinely unlocked
+    /// door, so a live button here would optimistically write `state = "locked"` — manufacturing
+    /// the very state claim this branch's thesis exists to kill, the instant it was tapped.
     @ViewBuilder
-    private func actionButton(locked: Bool, jammed: Bool, accent: Color) -> some View {
+    private func actionButton(locked: Bool, jammed: Bool, unavailable: Bool, accent: Color) -> some View {
         VStack(spacing: 8) {
             // `toggleLock` is correct for the jammed case without a special path: it locks anything
-            // whose state is not already `locked`, and `jammed` is not `locked`.
+            // whose state is not already `locked`, and `jammed` is not `locked`. It is *not* called
+            // at all when `unavailable`, since the button below is disabled in that case.
             Button {
                 store.toggleLock(entityId)
             } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: jammed ? "lock.fill" : (locked ? "lock.open.fill" : "lock.fill"))
+                    Image(systemName: unavailable ? "questionmark.circle"
+                          : (jammed ? "lock.fill" : (locked ? "lock.open.fill" : "lock.fill")))
                         .font(.system(size: 17, weight: .semibold))
                     Text(jammed ? "Lock" : (locked ? "Unlock" : "Lock"))
                         .font(.system(size: 17, weight: .semibold))
@@ -59,11 +78,19 @@ struct LockModal: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(accent))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(unavailable ? AnyShapeStyle(Color.secondary.opacity(0.4)) : AnyShapeStyle(accent)))
             }
             .buttonStyle(.plain)
+            .disabled(unavailable)
 
-            if jammed {
+            if unavailable {
+                Text("This lock can't be reached right now, so its position is unknown.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            } else if jammed {
                 Text("This lock reported a jam, so its position is unknown.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
