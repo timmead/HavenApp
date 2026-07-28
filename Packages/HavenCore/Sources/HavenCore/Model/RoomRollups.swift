@@ -1,5 +1,5 @@
 public struct Rollup: Sendable, Equatable {
-    public enum Kind: Sendable, Equatable { case lights, covers }
+    public enum Kind: Sendable, Hashable { case lights, covers }
     public let kind: Kind
     public let activeCount: Int
     public let total: Int

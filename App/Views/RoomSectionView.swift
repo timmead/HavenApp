@@ -136,6 +136,14 @@ struct RoomSectionView: View {
             .buttonStyle(.plain)
             .foregroundStyle(hasActive ? accent : .secondary)
             .disabled(!hasActive)
+            // Named rather than silent: a bulk action that half-fails used to revert the failed
+            // rows with no explanation at all, which reads as the app ignoring the tap.
+            let failures = store.bulkFailureCount(for: rollup.kind)
+            if failures > 0 {
+                Text("\(failures) didn't respond")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HavenColor.warning)
+            }
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(Capsule().fill(HavenColor.glassFill))

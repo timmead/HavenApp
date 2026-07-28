@@ -189,6 +189,24 @@ final class HomeStore {
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
 
+    /// How many entities the last bulk action of each kind failed to change. Surfaced on the
+    /// roll-up row; see `recordBulkFailures`.
+    private(set) var bulkFailures: [Rollup.Kind: Int] = [:]
+
+    /// At most this many commands in flight during one bulk action. A forty-light room otherwise
+    /// opens forty concurrent WebSocket requests, which is both rude to Home Assistant and a good
+    /// way to have several of them time out and *become* the failures this task surfaces.
+    private static let bulkConcurrency = 6
+
+    func bulkFailureCount(for kind: Rollup.Kind) -> Int { bulkFailures[kind] ?? 0 }
+
+    /// Records the outcome of a bulk action. Always called, including with zero — a successful run
+    /// has to clear the previous run's complaint, or the row goes on accusing the user of a
+    /// failure they have already fixed.
+    func recordBulkFailures(_ count: Int, for kind: Rollup.Kind) {
+        bulkFailures[kind] = count > 0 ? count : nil
+    }
+
     var presented: String?                                   // entityId whose modal is open
     func state(_ id: String) -> EntityState? { states[id] }
 
@@ -458,50 +476,85 @@ final class HomeStore {
         RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
     }
 
-    /// Turns off every entity in the roll-up (e.g. "All off" for a room's lights).
-    /// Reuses `setLight`, which is already the optimistic flip → command → rollback
-    /// primitive for a single entity, so each entity's failure is isolated from the rest.
-    /// Entities already off are skipped so this doesn't spam HA with redundant calls.
+    /// Turns off every light in the roll-up, at most `bulkConcurrency` at a time, and records how
+    /// many refused.
     func allOff(_ rollup: Rollup) {
         guard rollup.kind == .lights else {
             assertionFailure("allOff called with rollup.kind == \(rollup.kind), expected .lights")
             return
         }
-        for id in rollup.targetEntityIds {
-            guard states[id]?.state == "on" else { continue }
-            setLight(id, on: false)
+        runBulk(rollup, targets: rollup.targetEntityIds.filter { states[$0]?.state == "on" }) {
+            [weak self] connection, id in
+            guard let self else { return }
+            let previous = self.states[id]
+            if var s = previous { s.state = "off"; self.states[id] = s }
+            do { try await connection.setLight(id, on: false) }
+            catch {
+                if self.states[id]?.state == "off" { self.states[id] = previous }
+                throw error
+            }
         }
     }
 
-    /// Closes every cover in the roll-up (e.g. "Close all" for a room's covers). Covers use
-    /// "open"/"closed" rather than "on"/"off", so this mirrors `openCloseCover(_:)`'s
-    /// per-entity optimistic flip → command → rollback instead of the on/off helper.
-    /// Already-closed (or closing) covers are skipped.
+    /// Closes every open cover in the roll-up, same bounding and counting as `allOff`.
     func closeAll(_ rollup: Rollup) {
         guard rollup.kind == .covers else {
             assertionFailure("closeAll called with rollup.kind == \(rollup.kind), expected .covers")
             return
         }
-        for id in rollup.targetEntityIds {
-            let current = states[id]?.state
-            guard current == "open" || current == "opening" else { continue }
-            optimisticClose(id)
+        let open = rollup.targetEntityIds.filter {
+            let s = states[$0]?.state; return s == "open" || s == "opening"
+        }
+        runBulk(rollup, targets: open) { [weak self] connection, id in
+            guard let self else { return }
+            let previous = self.states[id]
+            if var s = previous { s.state = "closed"; self.states[id] = s }
+            do { try await connection.closeCover(id) }
+            catch {
+                if self.states[id]?.state == "closed" { self.states[id] = previous }
+                throw error
+            }
         }
     }
 
-    /// Per-entity optimistic close for one cover: flip state immediately, run the command,
-    /// roll back on failure. Isolated per entity so one failing cover doesn't undo the rest.
-    /// Rollback only fires if the entity still holds the value we optimistically wrote, so a
-    /// late failure can't clobber state that changed in the meantime.
-    private func optimisticClose(_ id: String) {
-        guard let connection, var s = states[id] else { return }
-        let previous = s
-        let optimisticValue = "closed"
-        s.state = optimisticValue
-        states[id] = s
-        Task {
-            do { try await connection.closeCover(id) }
-            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
+    /// Runs `work` over `targets` in bounded batches, then records how many threw.
+    ///
+    /// Each entity keeps its own optimistic flip and rollback, so one failure never disturbs the
+    /// rest — that property predates this and must survive it. What is new is that the failures
+    /// are counted rather than discarded.
+    ///
+    /// **The isolation here is fiddly and was arrived at by compiling, not by reasoning.** Two
+    /// shapes that look obviously right do not build under `SWIFT_STRICT_CONCURRENCY: complete`:
+    ///
+    /// - A `@Sendable` closure cannot touch `states`, which is `@MainActor` — so `work` is
+    ///   `@MainActor`, and only the `await` on the connection actually suspends. That is enough:
+    ///   MainActor tasks interleave at suspension points, so the network round-trips still overlap.
+    /// - `withTaskGroup` + `group.addTask { @MainActor in … }` fails with *"pattern that the
+    ///   region-based isolation checker does not understand how to check. Please file a bug"* —
+    ///   a compiler limitation, not a mistake in the code. Plain child `Task`s collected into an
+    ///   array avoid it entirely and read more simply.
+    ///
+    /// Do not "tidy" this back into a task group.
+    private func runBulk(_ rollup: Rollup, targets: [String],
+                         _ work: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
+        guard let connection else { return }
+        recordBulkFailures(0, for: rollup.kind)
+        Task { @MainActor in
+            var failed = 0
+            var index = 0
+            while index < targets.count {
+                let slice = Array(targets[index..<min(index + Self.bulkConcurrency, targets.count)])
+                index += slice.count
+                let running = slice.map { id in
+                    Task { @MainActor in
+                        do { try await work(connection, id); return true } catch { return false }
+                    }
+                }
+                for task in running {
+                    if await task.value == false { failed += 1 }
+                }
+            }
+            recordBulkFailures(failed, for: rollup.kind)
         }
     }
 
