@@ -104,8 +104,32 @@ import HavenCore
 
         #expect(observes({ _ = store.history("sensor.a", .day) },
                          whenMutating: {
-                             store.historyByKey[key] = (HistorySeries(points: []), Date())
+                             store.historyCache.byKey[key] = (HistorySeries(points: []), Date())
                          }))
+    }
+
+    /// The room pills read `environment`, which is a computed property forwarding to
+    /// `EnvironmentCoordinator.byArea` — two levels of indirection between the view and the
+    /// storage, and each is a place observation can be dropped.
+    ///
+    /// `resolveEnvironment()` is what a structure reload calls, so this is the real path: the
+    /// pills must repaint when the nominations are recomputed.
+    @Test func theRoomPillsSeeNominationsResolve() {
+        let store = HomeStore()
+        store.states["sensor.t"] = EntityState(
+            entityId: "sensor.t", state: "21",
+            attributes: ["device_class": .string("temperature"),
+                         "unit_of_measurement": .string("°C")],
+            lastUpdated: Date(timeIntervalSince1970: 0))
+        store.home = ResolvedHome(floors: [
+            ResolvedFloor(id: "f1", name: "Ground", level: 0, areas: [
+                ResolvedArea(id: "living", name: "Living", entityIds: ["sensor.t"],
+                             temperatureEntityId: nil, humidityEntityId: nil, tiers: [:])
+            ])
+        ])
+
+        #expect(observes({ _ = store.environment },
+                         whenMutating: { store.resolveEnvironment() }))
     }
 
     /// **The negative control.** Without this, every test above could be passing because the

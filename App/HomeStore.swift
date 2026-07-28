@@ -3,55 +3,23 @@ import HavenCore
 
 @MainActor @Observable
 final class HomeStore {
+    /// What Home Assistant said — the structure and the live entity states. After three seams came
+    /// out (`BulkActionRunner`, `HistoryCache`, `EnvironmentCoordinator`) this is close to all the
+    /// storage this type has left of its own, which is the point: it owns what HA told us, and the
+    /// three children own jobs that merely need a connection.
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
-    /// Fetched series, with the moment each was fetched — see `HistoryRange.cacheLifetime`.
-    var historyByKey: [String: (series: HistorySeries, fetched: Date)] = [:]
-    /// Keys with a fetch currently in flight.
-    ///
-    /// This does *not* protect against flicking across the range picker — every range is a
-    /// different cache key (see `historyKey`), so two different ranges never collide here at all;
-    /// each just gets its own in-flight entry. What this actually guards against is `.task(id:
-    /// range)` (`SensorModal`, `RoomEnvironmentHistoryView`) restarting on the *same* key: flicking
-    /// Day → Week → Day cancels the first Day task but — per `HAWebSocketClient.request` being a
-    /// bare continuation with no cancellation handling (see `CameraPlaybackPlan`'s doc for the same
-    /// fact) — does not cancel its in-flight `history` command. Without this guard the second Day
-    /// task would fire a duplicate request for a key whose answer is already on the way; with it,
-    /// the second task finds the key already in flight and returns immediately, and the first
-    /// request's result lands in `historyByKey` for both to read.
-    private var historyInFlight: Set<String> = []
-    /// Recent state changes per entity, with the moment each was fetched — see
-    /// `HistoryRange.day.cacheLifetime`, the same lifetime `historyByKey` uses. Keyed by entity id
-    /// alone — unlike `historyByKey` there is one range (Day) and no attribute variant to
-    /// disambiguate.
-    ///
-    /// Before this carried a `fetched` date, an entry never expired: open a door sensor's modal at
-    /// 09:00 and again at 18:00 and the header (read live off `states`) said "Active" while this
-    /// list still ended at 08:12's "Off" — the modal contradicting itself for the whole session.
-    var stateChangesByEntity: [String: (changes: [StateChange], fetched: Date)] = [:]
-    /// Entity ids whose most recent `loadStateChanges` attempt threw. Inserted unconditionally on
-    /// failure — including for an id with a stale cached list already sitting in
-    /// `stateChangesByEntity`, since `loadStateChanges` never touches the cache on error — so this
-    /// set is *not* itself "ids with no cached entry of any age"; that framing only holds for the
-    /// callers that consult it, because `stateChangesLoadFailed` is only ever checked once
-    /// `stateChanges(_:)` has already returned `nil`. See `loadStateChanges`: a failure never
-    /// touches the cache, so a stale list survives a failed refresh exactly like `historyByKey`
-    /// does — this exists to tell "never asked" apart from "asked and it failed" for an entity
-    /// with nothing cached to show.
-    var stateChangesFailed: Set<String> = []
-    /// Each room's nominated temperature/humidity source, keyed by area id.
-    ///
-    /// Resolved once per structure load — deliberately *not* on every state change, even though
-    /// candidacy reads `device_class` out of `states`. `rooms()` runs inside `DashboardView.body`,
-    /// so anything derived from live state recomputes on every tick; a nomination recomputed there
-    /// would silently switch a room to a different physical thermometer the moment the nominated
-    /// one went unavailable and dropped its attributes. Which sensor is the room's is
-    /// configuration; only the reading is live data.
-    private(set) var environment: [String: RoomEnvironment] = [:]
-    /// Haven's dashboard definition, as loaded from the `havenapp` integration. Held so a write-back
-    /// merges into what the household actually has rather than replacing it — see
-    /// `DashboardDocument`.
-    private var dashboard = DashboardDocument()
+
+    /// Fetched history series and recent state-change lists — see `HistoryCache`. Named
+    /// `historyCache`, not `history`, because `history(_:_:attribute:)` below is the read the views
+    /// already call and that name is worth keeping for them.
+    let historyCache = HistoryCache()
+    /// Room temperature/humidity nominations and the shared dashboard document — see
+    /// `EnvironmentCoordinator`.
+    let environmentCoordinator = EnvironmentCoordinator()
+    /// Bounded execution and the per-room failure tally for bulk actions — see `BulkActionRunner`.
+    let bulk = BulkActionRunner()
+
     private var connection: HomeConnection?
     private var subscriptionTask: Task<Void, Never>?
     /// True only while `reset()` is deliberately tearing a live connection down (sign-out,
@@ -73,9 +41,14 @@ final class HomeStore {
     /// `OnboardingModel`'s restart step, generalized to any drop.
     var onDisconnected: (() -> Void)?
 
+    /// Points this store — and the three children that need a connection of their own — at a live
+    /// session. One call site rather than three, so a new seam cannot be left holding a stale
+    /// connection from the previous session (or none at all, which reads as "no data" forever).
     func attach(_ connection: HomeConnection) {
         subscriptionTask?.cancel(); subscriptionTask = nil
         self.connection = connection
+        historyCache.attach(connection)
+        environmentCoordinator.attach(connection)
     }
 
     func bootstrap() async throws {
@@ -96,14 +69,14 @@ final class HomeStore {
         }
         // Deliberately after the subscription is established, not before: `subscribe_events`
         // never replays, so any state change landing in the gap between `loadStates()` and the
-        // subscription taking effect is lost until that entity next changes. `loadDashboardConfig`
+        // subscription taking effect is lost until that entity next changes. The config load below
         // is a config get (and possibly a write-back) round trip with no bearing on that
         // subscription — nothing here depends on it running before the socket is subscribed — so
         // putting it after shrinks that window instead of widening it with a config round trip.
-        // A config failure still can't fail `bootstrap()` itself: `loadDashboardConfig` swallows
-        // its own errors (see its doc comment) and there is nothing after it in this function that
-        // could turn a config problem into a thrown one.
-        await loadDashboardConfig()
+        // A config failure still can't fail `bootstrap()` itself: `EnvironmentCoordinator.load`
+        // swallows its own errors (see its doc comment) and there is nothing after it in this
+        // function that could turn a config problem into a thrown one.
+        await environmentCoordinator.load(home: home, states: states)
     }
 
     /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and
@@ -122,108 +95,31 @@ final class HomeStore {
         connection = nil
         home = ResolvedHome(floors: [])
         states = [:]
-        historyByKey = [:]
-        stateChangesByEntity = [:]
-        stateChangesFailed = []
+        historyCache.reset()
+        environmentCoordinator.reset()
         bulk.reset()
-        environment = [:]
-        dashboard = DashboardDocument()
         presented = nil
         isResetting = false
     }
 
     // MARK: - Room environment (the dashboard config layer)
+    //
+    // Storage, the dashboard document, the resolver call and the version-conflict write-back all
+    // moved to `EnvironmentCoordinator`, together with their reasoning. What stays here is the
+    // join: that coordinator takes `home` and `states` as arguments rather than holding a
+    // reference back to this store, so the dependency runs one way.
 
-    /// Loads Haven's dashboard definition, resolves each room's nomination from it, and writes back
-    /// any this device proposed.
-    ///
-    /// A failure to read the configuration must never take the dashboard down with it: an
-    /// unreachable integration leaves `dashboard` empty, which falls through to proposals, and the
-    /// user still sees their home. Hence this swallows rather than rethrows: `bootstrap()` is
-    /// `throws`, so letting the error out would fail the whole session over a pill.
-    ///
-    /// Note the difference between a `nil` record and a throw: `nil` is "no dashboard configured
-    /// yet", the ordinary first-run state and the cue to propose one. A throw is "we could not find
-    /// out", and proposing over a document we failed to read would overwrite it.
-    private func loadDashboardConfig() async {
-        guard let connection else { return }
-        do {
-            let record = try await connection.loadConfig(scope: HavenConfigScope.shared,
-                                                         key: Self.dashboardKey)
-            dashboard = DashboardDocument(raw: record?.payload)
-            resolveEnvironment()
-            await persistProposedNominations(baseVersion: record?.version ?? 0)
-        } catch {
-            havenLog.error("dashboard config unreadable, falling back to proposed nominations: \(error)")
-            dashboard = DashboardDocument()
-            resolveEnvironment()
-        }
-    }
+    /// Each room's nominated temperature/humidity source, keyed by area id. Read inside
+    /// `DashboardView.body` by way of `rooms()`, so this must stay a live read of the
+    /// coordinator's storage rather than a copy taken at some earlier moment.
+    var environment: [String: RoomEnvironment] { environmentCoordinator.byArea }
 
-    static let dashboardKey = "dashboard"
-
-    /// Resolves every room's environment from the current registry, the current states and the
-    /// loaded dashboard document.
-    ///
-    /// The `states` join is the App layer's job for the same reason it is in `cameraEvents()`:
-    /// `device_class` lives on entity state, not in the entity registry (HA's
-    /// `config/entity_registry/list` returns `as_partial_dict`, which omits it). Every rule about
-    /// what may be nominated lives in `RoomEnvironmentResolver`; nothing is decided here.
+    /// Re-resolves every room's nomination against the current registry and states.
     func resolveEnvironment() {
-        environment = RoomEnvironmentResolver.resolve(
-            home: home,
-            sources: states.mapValues(RoomEnvironmentSource.init),
-            stored: dashboard.nominations,
-            // A proposal is only worth *writing* if it currently reads. See the resolver: a stored
-            // nomination is never re-picked, so a pick made while the room's real sensor happened
-            // to be offline would be permanently wrong.
-            isReadable: { [states] sensor in
-                EnvironmentReading.value(sensor, state: states[sensor.entityId]) != nil
-            })
-    }
-
-    /// Writes this device's proposed nominations into the shared dashboard document.
-    ///
-    /// Skipped entirely when there is nothing new to say — a no-op write on every launch would
-    /// churn the shared record's version and `updated_by` for nothing.
-    private func persistProposedNominations(baseVersion: Int, isRetry: Bool = false) async {
-        guard let connection, dashboard.isWritable else { return }
-        let proposals = environment.compactMapValues(\.nominationsToPersist)
-        guard !proposals.isEmpty else { return }
-        let merged = dashboard.merging(proposals)
-        guard merged != dashboard else { return }
-
-        do {
-            switch try await connection.saveConfig(scope: HavenConfigScope.shared,
-                                                   key: Self.dashboardKey,
-                                                   baseVersion: baseVersion, payload: merged.raw) {
-            case .ok:
-                dashboard = merged
-            case .versionConflict(let current):
-                // Another admin's phone wrote first. Reapply onto what they wrote and retry once;
-                // both devices are proposing the same deterministic picks, so this converges
-                // immediately. A second conflict is left for the next bootstrap rather than spun
-                // on — there is nothing time-critical about a pill.
-                guard !isRetry else { return }
-                dashboard = DashboardDocument(raw: current?.payload)
-                resolveEnvironment()
-                await persistProposedNominations(baseVersion: current?.version ?? 0, isRetry: true)
-            }
-        } catch let error as WSError where error.isNotAuthorized {
-            // Only HA admins curate the shared dashboard. For everyone else in the household this
-            // is the expected steady state, not a fault — and they already have the right pills on
-            // screen, since the proposals render whether or not they were written.
-            havenLog.debug("not an HA admin; leaving the shared dashboard config to one")
-        } catch {
-            havenLog.error("could not write dashboard config: \(error)")
-        }
+        environmentCoordinator.resolve(home: home, states: states)
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
-
-    /// Bounded execution and the per-room failure tally for bulk actions — see `BulkActionRunner`.
-    /// A `let`, so the reference never changes; what views observe is the tally inside it.
-    let bulk = BulkActionRunner()
 
     /// Forwarded rather than reached through by the views, so the roll-up rows keep asking
     /// `HomeStore` for everything and this stays an implementation detail. Reading it inside a
@@ -633,80 +529,30 @@ final class HomeStore {
 
     // `runBulk` moved to `BulkActionRunner.run`, together with the whole of its reasoning —
     // including the note about why this must not be "tidied" back into a task group.
-    /// The cache key for one series.
-    ///
-    /// `attribute` is part of it because a thermostat-only room reads two series off a single
-    /// entity at a single range — `current_temperature` and `current_humidity`. Keyed on entity
-    /// and range alone those collide, and the room's chart plots one series twice under two
-    /// labels, which looks like data rather than like a bug.
-    ///
-    /// Internal rather than private so the cache's separation can be asserted directly; the
-    /// alternative is a test that drives a live connection to prove a dictionary key.
+    // MARK: - History
+    //
+    // The caches, the in-flight guard, the cache-lifetime rules and the never-cache-a-failure
+    // reasoning all moved to `HistoryCache`. These forward, so the views and their tests keep the
+    // call sites they had — and, because each read happens through this store inside a `body`, the
+    // observation dependency still lands on the cache's own storage. `ObservationTests` pins that.
+
     static func historyKey(_ entityId: String, _ range: HistoryRange, _ attribute: String?) -> String {
-        "\(entityId)#\(attribute ?? "")#\(range)"
+        HistoryCache.key(entityId, range, attribute)
     }
 
-    /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
-    /// (or the load failed) — callers should render an empty/loading state, not crash.
     func history(_ entityId: String, _ range: HistoryRange, attribute: String? = nil) -> HistorySeries? {
-        historyByKey[Self.historyKey(entityId, range, attribute)]?.series
+        historyCache.series(entityId, range, attribute: attribute)
     }
 
-    /// Fetches and caches a history series for `entityId`/`range`/`attribute`. Reuses the cache
-    /// while the entry is still within `range.cacheLifetime` (a range or attribute switch always
-    /// misses, since the key changes); never caches a failure, so a transient error doesn't
-    /// permanently block a later retry.
     func loadHistory(_ entityId: String, range: HistoryRange, attribute: String? = nil) async {
-        let key = Self.historyKey(entityId, range, attribute)
-        let now = Date()
-        if let cached = historyByKey[key], now.timeIntervalSince(cached.fetched) < range.cacheLifetime {
-            return
-        }
-        guard !historyInFlight.contains(key), let connection else { return }
-        historyInFlight.insert(key)
-        defer { historyInFlight.remove(key) }
-        do {
-            let series = try await connection.history(entityId: entityId, attribute: attribute,
-                                                      range: range, now: now)
-            historyByKey[key] = (series, now)
-        } catch {
-            // Leave the cache untouched so a later attempt can retry — and note that a *stale*
-            // entry deliberately survives a failed refresh. An old chart beats a blank one.
-        }
+        await historyCache.load(entityId, range: range, attribute: attribute)
     }
 
-    /// Cached recent state changes, ignoring `fetched` age — a stale list beats a blank one, exactly
-    /// as `history(_:_:attribute:)` reads `historyByKey`. `nil` means "not loaded yet, or every
-    /// attempt so far has failed"; callers distinguish the two with `stateChangesLoadFailed`.
-    func stateChanges(_ entityId: String) -> [StateChange]? { stateChangesByEntity[entityId]?.changes }
+    func stateChanges(_ entityId: String) -> [StateChange]? { historyCache.stateChanges(entityId) }
 
-    /// Whether the most recent fetch for `entityId` failed with nothing cached to fall back to. The
-    /// binary-sensor modal uses this to tell "not asked yet" (render nothing conclusive, a loading
-    /// state is fine) apart from "asked, and it failed" (say so, rather than show "Loading…"
-    /// forever — the state before this existed, on an install without the `history` integration or
-    /// an entity `recorder` excludes).
-    func stateChangesLoadFailed(_ entityId: String) -> Bool { stateChangesFailed.contains(entityId) }
+    func stateChangesLoadFailed(_ entityId: String) -> Bool { historyCache.loadFailed(entityId) }
 
-    /// Fetches and caches recent state changes. Reuses the cache while the entry is still within
-    /// `HistoryRange.day.cacheLifetime` — the same lifetime and reasoning as `loadHistory`'s Day
-    /// range, since this is always a Day query. Never caches a failure (so a transient error doesn't
-    /// permanently block a retry) and never *clears* a stale cache on failure either — an old list
-    /// beats a blank one.
     func loadStateChanges(_ entityId: String) async {
-        let now = Date()
-        if let cached = stateChangesByEntity[entityId],
-           now.timeIntervalSince(cached.fetched) < HistoryRange.day.cacheLifetime {
-            return
-        }
-        guard let connection else { return }
-        do {
-            let changes = try await connection.stateChanges(entityId: entityId, range: .day, now: now)
-            stateChangesByEntity[entityId] = (changes, now)
-            stateChangesFailed.remove(entityId)
-        } catch {
-            // Leave the cache untouched so a later attempt can retry, but note the failure so a
-            // caller with nothing cached can say so instead of showing "Loading…" forever.
-            stateChangesFailed.insert(entityId)
-        }
+        await historyCache.loadStateChanges(entityId)
     }
 }

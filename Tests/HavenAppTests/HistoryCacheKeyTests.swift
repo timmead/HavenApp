@@ -13,8 +13,8 @@ import HavenCore
         let temp = HistorySeries(points: [HistoryPoint(time: Date(timeIntervalSince1970: 0), value: 20.5)])
         let humid = HistorySeries(points: [HistoryPoint(time: Date(timeIntervalSince1970: 0), value: 44)])
 
-        store.historyByKey[HomeStore.historyKey("climate.lr", .day, "current_temperature")] = (temp, Date())
-        store.historyByKey[HomeStore.historyKey("climate.lr", .day, "current_humidity")] = (humid, Date())
+        store.historyCache.byKey[HomeStore.historyKey("climate.lr", .day, "current_temperature")] = (temp, Date())
+        store.historyCache.byKey[HomeStore.historyKey("climate.lr", .day, "current_humidity")] = (humid, Date())
 
         #expect(store.history("climate.lr", .day, attribute: "current_temperature")?.points.first?.value == 20.5)
         #expect(store.history("climate.lr", .day, attribute: "current_humidity")?.points.first?.value == 44)
@@ -23,7 +23,7 @@ import HavenCore
     /// A state-sourced lookup must not collide with an attribute-sourced one on the same entity.
     @Test func stateAndAttributeSeriesDoNotShareACacheEntry() {
         let store = HomeStore()
-        store.historyByKey[HomeStore.historyKey("climate.lr", .day, nil)] =
+        store.historyCache.byKey[HomeStore.historyKey("climate.lr", .day, nil)] =
             (HistorySeries(points: [HistoryPoint(time: Date(timeIntervalSince1970: 0), value: 1)]), Date())
         #expect(store.history("climate.lr", .day) != nil)
         #expect(store.history("climate.lr", .day, attribute: "current_temperature") == nil)
@@ -32,7 +32,7 @@ import HavenCore
     /// Ranges stay separate, as they always have.
     @Test func rangesStillDoNotShareACacheEntry() {
         let store = HomeStore()
-        store.historyByKey[HomeStore.historyKey("sensor.t", .day, nil)] =
+        store.historyCache.byKey[HomeStore.historyKey("sensor.t", .day, nil)] =
             (HistorySeries(points: [HistoryPoint(time: Date(timeIntervalSince1970: 0), value: 1)]), Date())
         #expect(store.history("sensor.t", .day) != nil)
         #expect(store.history("sensor.t", .week) == nil)
