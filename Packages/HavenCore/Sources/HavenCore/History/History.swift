@@ -74,6 +74,13 @@ public struct HistorySeries: Sendable, Equatable {
     }
 }
 
+/// One moment an entity's state became something new. See `HistoryParsing.stateChanges`.
+public struct StateChange: Sendable, Equatable {
+    public let time: Date
+    public let state: String
+    public init(time: Date, state: String) { self.time = time; self.state = state }
+}
+
 public enum HistoryParsing {
     /// Statistics rows may carry `start` either as milliseconds-since-epoch (a JSON
     /// number, older/other HA versions) or as an ISO-8601 string (modern HA, e.g.
@@ -146,5 +153,32 @@ public enum HistoryParsing {
             return HistoryPoint(time: Date(timeIntervalSince1970: lu), value: val)
         }
         return HistorySeries(points: pts)
+    }
+
+    /// Parses `history/history_during_period` rows as a sequence of state *changes*, for an entity
+    /// whose value is a word rather than a number — a binary sensor's "on"/"off", or its
+    /// device-class reading of "open"/"closed".
+    ///
+    /// Deliberately not `fromHistory`: that one parses each row's state as a `Double` and drops
+    /// what does not convert, which for a binary sensor is every row. The wire response needs no
+    /// change — the compressed rows already carry `s` and `lu`.
+    ///
+    /// Newest first, `unavailable`/`unknown` dropped (a door that went offline did not open), and
+    /// consecutive repeats collapsed to the moment the value *changed*. That last part is what
+    /// makes this a list of events: Home Assistant records a row per update, not per change, so a
+    /// sensor polling every 30 seconds otherwise yields hundreds of identical entries.
+    public static func stateChanges(_ result: JSONValue, entityId: String) -> [StateChange] {
+        let rows = result.asObject?[entityId]?.asArray ?? []
+        var out: [StateChange] = []
+        for row in rows {
+            guard let o = row.asObject, let lu = o["lu"]?.asDouble,
+                  let value = o["s"]?.asString,
+                  !EntityState.unavailableStates.contains(value) else { continue }
+            // Compared against the last *kept* row, so a run broken only by an `unavailable` gap
+            // still reads as one continuous state rather than a spurious change back to itself.
+            if out.last?.state == value { continue }
+            out.append(StateChange(time: Date(timeIntervalSince1970: lu), state: value))
+        }
+        return out.reversed()
     }
 }

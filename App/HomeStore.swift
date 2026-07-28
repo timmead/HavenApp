@@ -6,6 +6,9 @@ final class HomeStore {
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
     var historyByKey: [String: HistorySeries] = [:]
+    /// Recent state changes per entity, for the binary-sensor modal. Keyed by entity id alone —
+    /// unlike `historyByKey` there is one range (Day) and no attribute variant to disambiguate.
+    var stateChangesByEntity: [String: [StateChange]] = [:]
     /// Each room's nominated temperature/humidity source, keyed by area id.
     ///
     /// Resolved once per structure load — deliberately *not* on every state change, even though
@@ -90,6 +93,7 @@ final class HomeStore {
         home = ResolvedHome(floors: [])
         states = [:]
         historyByKey = [:]
+        stateChangesByEntity = [:]
         environment = [:]
         dashboard = DashboardDocument()
         presented = nil
@@ -532,6 +536,22 @@ final class HomeStore {
                                                              range: range, now: Date())
         } catch {
             // Leave the cache untouched so a later attempt (e.g. reopening the modal) can retry.
+        }
+    }
+
+    /// Cached recent state changes. `nil` means "not loaded yet" — render a placeholder, not an
+    /// empty list, which would read as "nothing has happened".
+    func stateChanges(_ entityId: String) -> [StateChange]? { stateChangesByEntity[entityId] }
+
+    /// Fetches and caches recent state changes. Never caches a failure, so reopening the modal
+    /// retries.
+    func loadStateChanges(_ entityId: String) async {
+        guard stateChangesByEntity[entityId] == nil, let connection else { return }
+        do {
+            stateChangesByEntity[entityId] =
+                try await connection.stateChanges(entityId: entityId, range: .day, now: Date())
+        } catch {
+            // Leave the cache untouched so a later attempt can retry.
         }
     }
 }
