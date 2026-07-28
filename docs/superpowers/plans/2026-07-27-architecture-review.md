@@ -227,9 +227,37 @@ main..refactor/foundation-review`.
 1. `test(app): cover the unavailable guard on every fire-and-forget command` — the safety net for
    commit 2, added first. Ten methods went from unverified to pinned, in both directions
    (`unavailable` ⇒ no state change *and* no frame on the wire; `unknown` ⇒ commands normally).
-2. `refactor(app): one guard for every fire-and-forget command` — L1.
-3. `refactor(app): allOff and closeAll are one bulk flip` — L2.
-4. `refactor(app): lift one candidate's connect attempt out of the loop` — L3.
+   Confirmed to bite by removing `stopCover`'s guard and watching it fail.
+2. `refactor(app): one guard for every fire-and-forget command` — L1. Hand-written guards in
+   `HomeStore`: 14 → 5, all five now in primitives.
+3. `refactor(app): allOff and closeAll are one bulk flip` — L2, plus a test for `closeAll`'s own
+   arguments, which nothing covered.
+4. `refactor(app): lift one candidate's connect attempt out of the loop` — L3. `connect()`
+   287 lines → ~100, plus `attemptCandidate` and `finishConnecting`.
+
+### Two things worth knowing that came out of doing the work
+
+**A test that passes is not a test that pins.** The first version of the `closeAll` test used a room
+of open, opening and closed covers, and it passed under the exact mutation it claimed to catch
+(`!= "closed"` excludes closed covers too — the mutant was equivalent on that data). The room now
+also holds a `closing` and an `unavailable` cover, and fails on three assertions under that
+mutation. Both new tests on this branch were checked this way, by breaking the production code and
+watching them go red. **This is worth making the house habit** — a green new test proves nothing
+about the mutation it was written for until you have seen it fail.
+
+**`bulkFlip` has no explicit unavailable guard**, unlike `fireAndForget` and `optimisticState`,
+which both carry one. An unreachable light or cover is excluded from a bulk action only because the
+string `"unavailable"` is neither `"on"` nor `"open"`/`"opening"` — i.e. correct, but *incidentally*
+so, falling out of the target predicates rather than being decided. This is not a defect today and
+was deliberately not "fixed" overnight (adding a redundant guard changes nothing observable and
+would need its own justification). It is recorded on the new test, and it is the thing to remember
+if either predicate is ever rewritten as a deny-list.
+
+**Verification of L3 could not come from the tests**, since nothing drives `connect()`. It was
+checked by inventory instead: identical set of `havenLog` call sites before and after, 18
+cancellation checks in both, 3 `requireReauthentication()` calls in both, and each of the six catch
+arms traced by hand to the same successor state. That is weaker than a test, which is exactly why
+P1 is the recommendation it is.
 
 ## Recommended next steps, in order
 
