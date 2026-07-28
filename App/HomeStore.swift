@@ -189,22 +189,32 @@ final class HomeStore {
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
 
-    /// How many entities the last bulk action of each kind failed to change. Surfaced on the
-    /// roll-up row; see `recordBulkFailures`.
-    private(set) var bulkFailures: [Rollup.Kind: Int] = [:]
+    /// Identifies one room's roll-up of one kind. `Rollup.Kind` alone is not enough to key
+    /// `bulkFailures`: `RoomSectionView`/`RoomDetailView` render one roll-up row *per room*, and a
+    /// kind-only key would make a failure in the Kitchen's lights show up on the Living Room's
+    /// lights row too — worse than the silent rollback this feature replaced, because it is
+    /// affirmatively false about a room nobody touched.
+    private struct BulkFailureKey: Hashable { let areaId: String; let kind: Rollup.Kind }
+
+    /// How many entities the last bulk action of each room+kind failed to change. Surfaced on
+    /// that room's roll-up row; see `recordBulkFailures`.
+    private var bulkFailures: [BulkFailureKey: Int] = [:]
 
     /// At most this many commands in flight during one bulk action. A forty-light room otherwise
     /// opens forty concurrent WebSocket requests, which is both rude to Home Assistant and a good
     /// way to have several of them time out and *become* the failures this task surfaces.
     private static let bulkConcurrency = 6
 
-    func bulkFailureCount(for kind: Rollup.Kind) -> Int { bulkFailures[kind] ?? 0 }
+    func bulkFailureCount(for kind: Rollup.Kind, in areaId: String) -> Int {
+        bulkFailures[BulkFailureKey(areaId: areaId, kind: kind)] ?? 0
+    }
 
     /// Records the outcome of a bulk action. Always called, including with zero — a successful run
     /// has to clear the previous run's complaint, or the row goes on accusing the user of a
     /// failure they have already fixed.
-    func recordBulkFailures(_ count: Int, for kind: Rollup.Kind) {
-        bulkFailures[kind] = count > 0 ? count : nil
+    func recordBulkFailures(_ count: Int, for kind: Rollup.Kind, in areaId: String) {
+        let key = BulkFailureKey(areaId: areaId, kind: kind)
+        bulkFailures[key] = count > 0 ? count : nil
     }
 
     var presented: String?                                   // entityId whose modal is open
@@ -476,52 +486,76 @@ final class HomeStore {
         RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
     }
 
-    /// Turns off every light in the roll-up, at most `bulkConcurrency` at a time, and records how
-    /// many refused.
-    func allOff(_ rollup: Rollup) {
+    /// Turns off every light in the roll-up. Every target's `states` entry is flipped
+    /// synchronously, before anything is batched — see `runBulk`'s doc comment for why the flip
+    /// must not live inside the batched work — then the commands run at most `bulkConcurrency`
+    /// at a time and however many refuse are recorded against this room.
+    func allOff(_ rollup: Rollup, in areaId: String) {
         guard rollup.kind == .lights else {
             assertionFailure("allOff called with rollup.kind == \(rollup.kind), expected .lights")
             return
         }
-        runBulk(rollup, targets: rollup.targetEntityIds.filter { states[$0]?.state == "on" }) {
-            [weak self] connection, id in
+        let targets = rollup.targetEntityIds.filter { states[$0]?.state == "on" }
+        var previous: [String: EntityState] = [:]
+        for id in targets {
+            guard let s = states[id] else { continue }
+            previous[id] = s
+            var next = s; next.state = "off"; states[id] = next
+        }
+        runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
             guard let self else { return }
-            let previous = self.states[id]
-            if var s = previous { s.state = "off"; self.states[id] = s }
             do { try await connection.setLight(id, on: false) }
             catch {
-                if self.states[id]?.state == "off" { self.states[id] = previous }
+                if self.states[id]?.state == "off" { self.states[id] = previous[id] }
                 throw error
             }
         }
     }
 
-    /// Closes every open cover in the roll-up, same bounding and counting as `allOff`.
-    func closeAll(_ rollup: Rollup) {
+    /// Closes every open cover in the roll-up — same up-front synchronous flip, then bounded and
+    /// counted commands, as `allOff`.
+    func closeAll(_ rollup: Rollup, in areaId: String) {
         guard rollup.kind == .covers else {
             assertionFailure("closeAll called with rollup.kind == \(rollup.kind), expected .covers")
             return
         }
-        let open = rollup.targetEntityIds.filter {
+        let targets = rollup.targetEntityIds.filter {
             let s = states[$0]?.state; return s == "open" || s == "opening"
         }
-        runBulk(rollup, targets: open) { [weak self] connection, id in
+        var previous: [String: EntityState] = [:]
+        for id in targets {
+            guard let s = states[id] else { continue }
+            previous[id] = s
+            var next = s; next.state = "closed"; states[id] = next
+        }
+        runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
             guard let self else { return }
-            let previous = self.states[id]
-            if var s = previous { s.state = "closed"; self.states[id] = s }
             do { try await connection.closeCover(id) }
             catch {
-                if self.states[id]?.state == "closed" { self.states[id] = previous }
+                if self.states[id]?.state == "closed" { self.states[id] = previous[id] }
                 throw error
             }
         }
     }
 
-    /// Runs `work` over `targets` in bounded batches, then records how many threw.
+    /// Runs `work` over `targets` in bounded batches, then records how many threw against this
+    /// room's (`areaId`'s) roll-up of `rollup.kind` — kind alone is not a safe key, because
+    /// `RoomSectionView`/`RoomDetailView` render one roll-up row per room, and a kind-only key
+    /// would print a Kitchen failure on the identical-kind row of every other room on the floor.
     ///
-    /// Each entity keeps its own optimistic flip and rollback, so one failure never disturbs the
-    /// rest — that property predates this and must survive it. What is new is that the failures
-    /// are counted rather than discarded.
+    /// The optimistic flip is **not** done here — `allOff`/`closeAll` do it synchronously, before
+    /// this is ever called. `work` only runs inside a batch's child tasks, so a flip placed there
+    /// would wait on *earlier batches' network round-trips* rather than on nothing: a 40-light
+    /// room would then staircase its tiles off in visible blocks of six over a couple of seconds
+    /// instead of the whole grid snapping off the instant the button is tapped, which defeats the
+    /// entire point of optimistic state. Bounding the network must not also bound the UI.
+    ///
+    /// Each entity keeps its own optimistic flip and rollback — flip done by the caller up front,
+    /// rollback done here in `work`, conditionally, only if the entity still holds the value the
+    /// flip wrote (so a late failure can't clobber a state that changed in the meantime, e.g. a
+    /// WebSocket push that landed mid-flight). One failure never disturbs another entity; that
+    /// property predates this and must survive it. What is new is that the failures are counted
+    /// rather than discarded.
     ///
     /// **The isolation here is fiddly and was arrived at by compiling, not by reasoning.** Two
     /// shapes that look obviously right do not build under `SWIFT_STRICT_CONCURRENCY: complete`:
@@ -535,10 +569,10 @@ final class HomeStore {
     ///   array avoid it entirely and read more simply.
     ///
     /// Do not "tidy" this back into a task group.
-    private func runBulk(_ rollup: Rollup, targets: [String],
+    private func runBulk(_ rollup: Rollup, in areaId: String, targets: [String],
                          _ work: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
         guard let connection else { return }
-        recordBulkFailures(0, for: rollup.kind)
+        recordBulkFailures(0, for: rollup.kind, in: areaId)
         Task { @MainActor in
             var failed = 0
             var index = 0
@@ -554,7 +588,7 @@ final class HomeStore {
                     if await task.value == false { failed += 1 }
                 }
             }
-            recordBulkFailures(failed, for: rollup.kind)
+            recordBulkFailures(failed, for: rollup.kind, in: areaId)
         }
     }
 

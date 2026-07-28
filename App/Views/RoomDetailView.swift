@@ -133,7 +133,8 @@ struct RoomDetailView: View {
                         Spacer()
                         if rollup.activeCount > 0 {
                             Button(rollup.kind == .lights ? "All off" : "Close all") {
-                                if rollup.kind == .lights { store.allOff(rollup) } else { store.closeAll(rollup) }
+                                if rollup.kind == .lights { store.allOff(rollup, in: room.areaId) }
+                                else { store.closeAll(rollup, in: room.areaId) }
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 12.5, weight: .semibold))

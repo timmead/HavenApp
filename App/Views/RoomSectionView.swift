@@ -130,7 +130,8 @@ struct RoomSectionView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             Button(rollup.kind == .lights ? "All Off" : "Close All") {
-                if rollup.kind == .lights { store.allOff(rollup) } else { store.closeAll(rollup) }
+                if rollup.kind == .lights { store.allOff(rollup, in: room.areaId) }
+                else { store.closeAll(rollup, in: room.areaId) }
             }
             .font(.system(size: 12, weight: .semibold))
             .buttonStyle(.plain)
@@ -138,7 +139,7 @@ struct RoomSectionView: View {
             .disabled(!hasActive)
             // Named rather than silent: a bulk action that half-fails used to revert the failed
             // rows with no explanation at all, which reads as the app ignoring the tap.
-            let failures = store.bulkFailureCount(for: rollup.kind)
+            let failures = store.bulkFailureCount(for: rollup.kind, in: room.areaId)
             if failures > 0 {
                 Text("\(failures) didn't respond")
                     .font(.system(size: 11, weight: .semibold))
