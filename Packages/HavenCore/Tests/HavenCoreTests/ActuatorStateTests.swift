@@ -47,3 +47,38 @@ private func e(_ id: String, _ st: String, _ a: [String: JSONValue] = [:]) -> En
     #expect(s.hvacMode == "heat"); #expect(s.modes == ["off","heat","cool"]); #expect(s.fanMode == "auto")
     #expect(!ClimateState(e("climate.h", "off")).isOn)
 }
+
+/// `isConditioning` is what lights the tile, and the four cases it has to get right are the four
+/// that used to be one: on-and-running, on-and-idle, on-with-a-device-that-doesn't-say, and
+/// unreachable-with-stale-attributes.
+@Test func climateIsConditioning() {
+    func climate(_ st: String, action: String? = nil) -> ClimateState {
+        ClimateState(e("climate.h", st, action.map { ["hvac_action": .string($0)] } ?? [:]))
+    }
+
+    // Running.
+    #expect(climate("heat", action: "heating").isConditioning)
+    #expect(climate("cool", action: "cooling").isConditioning)
+    // Not enumerated as a whitelist, so values HA added later still read as active.
+    #expect(climate("heat", action: "preheating").isConditioning)
+    #expect(climate("dry", action: "drying").isConditioning)
+
+    // On, at target, doing nothing — the case this property exists to separate out.
+    #expect(climate("heat", action: "idle").isOn)
+    #expect(!climate("heat", action: "idle").isConditioning)
+    // `hvac_action: off` under a non-`off` mode is contradictory but HA emits it; treat the
+    // action as the truth about the equipment.
+    #expect(!climate("heat", action: "off").isConditioning)
+
+    // The attribute is absent — a large share of integrations never send it. Falls back to `isOn`
+    // rather than to "idle", which would silently kill the fill on all of that hardware.
+    #expect(climate("heat").isConditioning)
+    #expect(!climate("off").isConditioning)
+
+    // Unreachable wins over whatever stale action the last-known attributes still carry.
+    #expect(!climate("unavailable", action: "heating").isConditioning)
+    #expect(!climate("unknown", action: "heating").isConditioning)
+
+    #expect(climate("heat", action: "heating").hvacAction == "heating")
+    #expect(climate("heat").hvacAction == nil)
+}

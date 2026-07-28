@@ -40,7 +40,18 @@ struct LockModal: View {
             : (unknown ? "Unknown" : (jammed ? "Jammed" : (locked ? "Locked" : "Unlocked")))
         let symbol = (unavailable || unknown) ? "questionmark.circle"
             : (jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill"))
-        let accent = (unavailable || unknown) ? Color.secondary : (jammed ? HavenColor.warning : HavenColor.domain(.lock))
+        // **The accent is the lock's state, and an unlocked door is not a resting state.**
+        // `LockTile` has always said so — it draws an unlocked lock in `warning`, the same amber a
+        // jam gets — and this file did not, resolving locked *and* unlocked to the same calm
+        // lock-green. So the tile that made you open the sheet stopped agreeing with the sheet the
+        // moment it opened: the one surface with room to act on the thing was the one that stopped
+        // pointing at it. Read against the tile, not invented here.
+        //
+        // It tints the header icon as well as the action button below, and that is the point
+        // rather than a side effect: it is the same amber on the same padlock in both places, so
+        // the sheet reads as a larger version of the tile it came from.
+        let accent = (unavailable || unknown) ? Color.secondary
+            : ((jammed || !locked) ? HavenColor.warning : HavenColor.domain(.lock))
         VStack(spacing: 20) {
             // No `toggle:` at all, in either state — see the type's doc comment.
             // `accent` and `subtitle` above already account for unreachability *and* for `unknown`,
@@ -58,12 +69,18 @@ struct LockModal: View {
     /// The label is the *action*, never the current state — "Unlock" on a locked door — because a
     /// button labelled with the state it is in is the oldest ambiguity in this kind of control.
     ///
+    /// The colour is the *state*, though, and comes in from `accent` above: green while the door is
+    /// locked, amber while it is not. So the button says what it will do and shows what is true —
+    /// "Lock" in amber on an open door, "Unlock" in green on a shut one — which is why the label
+    /// never has to carry the state as well.
+    ///
     /// A jammed lock still gets a button, and this is the deliberate part: its *position* is
     /// unknown, not its controls. The header's toggle used to be omitted outright when jammed,
     /// which was right for a toggle — a two-position switch has to claim a position — but leaving
     /// a jammed lock with no action at all strands the user in the one situation where they most
     /// need one. It offers "Lock" (a jam is usually a failure to close), says plainly that the
-    /// position is unknown, and carries the warning colour.
+    /// position is unknown, and carries the warning colour — the same amber an unlocked door gets,
+    /// which is right rather than a collision: neither one is a shut door.
     ///
     /// An `unknown` lock gets the same live button, for the same reason and worded for its own
     /// case: it has not reported a position at all (never mind reported a jam), and a tap is the
@@ -134,3 +151,47 @@ struct LockModal: View {
         }
     }
 }
+
+#if DEBUG
+/// All four lock states, for the same reason `TileGallery` exists: the colour a modal draws in a
+/// given state is view code with no test coverage, and this file spent a long time resolving locked
+/// and unlocked to the same green without anyone noticing — because nothing renders it side by
+/// side. Compare against `TileGallery`'s Lock row; the two are meant to agree.
+private struct LockModalGallery: View {
+    // Same shape as `TileGallery`: the store is built on the main actor and held in `@State`,
+    // because `HomeStore.states` is main-actor isolated and a `#Preview` body is not.
+    @State private var store = LockModalGallery.populatedStore()
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                LockModal(entityId: "lock.locked")
+                LockModal(entityId: "lock.unlocked")
+                LockModal(entityId: "lock.jammed")
+                LockModal(entityId: "lock.unavailable")
+            }
+            .padding()
+        }
+        .environment(store)
+    }
+
+    @MainActor
+    private static func populatedStore() -> HomeStore {
+        let store = HomeStore()
+        func set(_ id: String, _ state: String, _ name: String) {
+            store.states[id] = EntityState(entityId: id, state: state,
+                                           attributes: ["friendly_name": .string(name)],
+                                           lastUpdated: Date(timeIntervalSince1970: 0))
+        }
+        set("lock.locked", "locked", "Front")
+        set("lock.unlocked", "unlocked", "Back")
+        set("lock.jammed", "jammed", "Side")
+        set("lock.unavailable", "unavailable", "Shed")
+        return store
+    }
+}
+
+#Preview("Lock modal — locked, unlocked, jammed, unavailable") {
+    LockModalGallery()
+}
+#endif

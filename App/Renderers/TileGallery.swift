@@ -46,10 +46,19 @@ struct TileGallery: View {
                     // either padlock glyph — the one place in the tiles where the *symbol*, not
                     // just its colour, is a state claim. See `LockTile`.
                     section("Lock") { ids("lock", ["locked", "unlocked", "jammed", "unavailable"]) }
-                    // The unavailable case here is the most prominent state claim on any tile: a
+                    // Four, and the first two are the point: `heat`-and-heating is filled,
+                    // `heat`-and-idle is not, and they are otherwise the same tile. The fill now
+                    // tracks `hvac_action` rather than on/off (see `ClimateState.isConditioning`),
+                    // which is a distinction you can only check by looking at the two side by side.
+                    // The unavailable case is the most prominent state claim on any tile: a
                     // thermostat's target temperature is read straight from a cached attribute, so
                     // an unreachable one has a number to show whether or not it means anything.
-                    section("Climate") { ids("climate", ["on", "off", "unavailable"]) }
+                    // `unknown` is the fifth for the same reason the lock row has four: it is dimmed
+                    // and struck like `unavailable`, but its power button is *live*, because an
+                    // unknown thermostat is reachable and a tap is what resolves it. Two tiles that
+                    // look alike and behave differently is precisely a thing to look at rather than
+                    // infer.
+                    section("Climate") { ids("climate", ["heating", "idle", "off", "unknown", "unavailable"]) }
                 case .second:
                     section("Scene") { ids("scene", ["idle", "unavailable"]) }
                     // The tile the original sweep actually missed.
@@ -119,9 +128,19 @@ struct TileGallery: View {
         set("lock.jammed", "jammed", ["friendly_name": .string("Side")])
         set("lock.unavailable", "unavailable", ["friendly_name": .string("Shed")])
 
-        set("climate.on", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
-                                   "fan_mode": .string("auto")])
-        set("climate.off", "off", ["friendly_name": .string("Study"), "temperature": .double(18)])
+        // Same mode, same target, same everything but `hvac_action` — the pair the fill rule is
+        // about. `climate.idle` is a thermostat that is *on* and has reached its target: warm
+        // thermometer, warm number, lit power button, no wash.
+        set("climate.heating", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
+                                        "fan_mode": .string("auto"), "hvac_action": .string("heating"),
+                                        "hvac_modes": .array([.string("off"), .string("heat")])])
+        set("climate.idle", "heat", ["friendly_name": .string("Hall"), "temperature": .double(21),
+                                     "fan_mode": .string("auto"), "hvac_action": .string("idle"),
+                                     "hvac_modes": .array([.string("off"), .string("heat")])])
+        set("climate.off", "off", ["friendly_name": .string("Study"), "temperature": .double(18),
+                                   "hvac_modes": .array([.string("off"), .string("heat")])])
+        set("climate.unknown", "unknown", ["friendly_name": .string("Attic"), "temperature": .double(19),
+                                           "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23)])
 
