@@ -3,6 +3,7 @@ import HavenCore
 struct LockTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let s = e.map(LockState.init)
         let locked = s?.isLocked ?? false; let jammed = s?.isJammed ?? false
@@ -38,10 +39,10 @@ struct LockTile: View {
                       icon: .accent,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.lock(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { store.presented = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
     }
 }

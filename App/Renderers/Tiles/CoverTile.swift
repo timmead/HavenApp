@@ -3,6 +3,7 @@ import HavenCore
 struct CoverTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
@@ -34,10 +35,10 @@ struct CoverTile: View {
                 }
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.cover(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { store.presented = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
     }
 }

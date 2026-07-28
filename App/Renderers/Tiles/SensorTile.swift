@@ -3,6 +3,7 @@ import HavenCore
 struct SensorTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let s = e.map(SensorState.init)
         let unavailable = e?.isUnavailable ?? false
@@ -24,7 +25,7 @@ struct SensorTile: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.sensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)

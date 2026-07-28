@@ -3,6 +3,7 @@ import HavenCore
 struct GenericTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId)
         let unavailable = e?.isUnavailable ?? false
@@ -16,7 +17,7 @@ struct GenericTile: View {
                 Text(e?.state ?? "—").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(AccessibilitySummary.generic(TileName.of(entityId, e), rawState: e?.state ?? "unknown"))
         .accessibilityAddTraits(.isButton)

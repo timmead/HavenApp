@@ -29,6 +29,11 @@ struct DashboardView: View {
     /// pushed detail covers the pager entirely, so the back-swipe is the only horizontal gesture
     /// on screen and no room can be dragged into another floor's context.
     @State private var path: [String] = []
+    /// Which device modal is open. Owned here rather than by `HomeStore` — see `Navigation`. Being
+    /// `@State` on the view that only exists while `phase == .ready` is the whole point: sign-out,
+    /// reauthentication and a mid-session reconnect all destroy it on their way past, so a stale
+    /// modal cannot outlive the session that opened it.
+    @State private var navigation = Navigation()
 
     private var floors: [ResolvedFloor] { store.home.floors }
     /// What the bar highlights and the title names. Falls back to the first floor so neither is
@@ -88,9 +93,13 @@ struct DashboardView: View {
         .onChange(of: floors.map(\.id)) { _, _ in
             scrolledFloorId = FloorPaging.selection(current: scrolledFloorId, floors: floors)
         }
-        .sheet(isPresented: Binding(get: { store.presented != nil }, set: { if !$0 { store.presented = nil } })) {
-            if let id = store.presented { DeviceModalView(entityId: id) }
+        .sheet(isPresented: Binding(get: { navigation.presentedEntityId != nil },
+                                    set: { if !$0 { navigation.presentedEntityId = nil } })) {
+            if let id = navigation.presentedEntityId { DeviceModalView(entityId: id) }
         }
+        // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as
+        // well as the tiles in the pager.
+        .environment(navigation)
         .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
     }
 

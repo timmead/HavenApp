@@ -79,9 +79,13 @@ final class HomeStore {
         await environmentCoordinator.load(home: home, states: states)
     }
 
-    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and
-    /// any open modal too — otherwise signing into a different HA instance can show the previous
-    /// account's chart data for a same-named sensor, or leave a stale modal presented.
+    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history too —
+    /// otherwise signing into a different HA instance can show the previous account's chart data
+    /// for a same-named sensor.
+    ///
+    /// It no longer has to close an open modal: that moved to `Navigation`, which `DashboardView`
+    /// owns as `@State` and which therefore dies with the dashboard whenever `phase` leaves
+    /// `.ready` — see that type for why the coupling disappears rather than moves.
     ///
     /// Disconnects the underlying `HomeConnection` before dropping it — nothing else in the app
     /// retains the `HAWebSocketClient` once this reference goes away, so skipping this would
@@ -98,7 +102,6 @@ final class HomeStore {
         historyCache.reset()
         environmentCoordinator.reset()
         bulk.reset()
-        presented = nil
         isResetting = false
     }
 
@@ -133,7 +136,6 @@ final class HomeStore {
         bulk.record(count, for: kind, in: areaId)
     }
 
-    var presented: String?                                   // entityId whose modal is open
     func state(_ id: String) -> EntityState? { states[id] }
 
     // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.

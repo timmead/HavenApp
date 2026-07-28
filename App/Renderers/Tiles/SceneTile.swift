@@ -3,6 +3,7 @@ import HavenCore
 struct SceneTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let accent = HavenColor.domain(.scene)
         let unavailable = e?.isUnavailable ?? false
@@ -15,10 +16,10 @@ struct SceneTile: View {
                       icon: .accent,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(AccessibilitySummary.scene(TileName.of(entityId, e)))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { store.presented = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
     }
 }

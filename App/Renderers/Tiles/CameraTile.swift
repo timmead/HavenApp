@@ -29,6 +29,7 @@ struct CameraTile: View {
     let entityId: String
     var size: CameraTileSize = .square
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
 
     /// Seconds between snapshots. The cycle itself belongs to `AuthenticatedImage`, which starts
@@ -59,7 +60,7 @@ struct CameraTile: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { store.presented = entityId }
+        .onTapGesture { navigation.presentedEntityId = entityId }
         // The whole tile is one element: unlike a media tile it holds no buttons, so combining
         // costs nothing and spares a VoiceOver user two stops for a picture and its caption.
         .accessibilityElement(children: .ignore)
@@ -71,7 +72,7 @@ struct CameraTile: View {
         // `SegmentedControl.swift`'s "a real Button, not `.onTapGesture`" comment — and the result
         // is a tile a VoiceOver user can hear described but not open. `MediaPlayerTile` solves it
         // the same way.
-        .accessibilityAction { store.presented = entityId }
+        .accessibilityAction { navigation.presentedEntityId = entityId }
     }
 
     /// **Where the refresh stops.**

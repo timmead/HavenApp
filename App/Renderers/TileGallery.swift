@@ -28,6 +28,9 @@ struct TileGallery: View {
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
     /// is the only way to drive them.
     @State private var store = TileGallery.populatedStore()
+    /// The tiles write their long-press target into this. Nothing here presents a modal, but the
+    /// environment has to hold one or every tile traps on a missing value.
+    @State private var navigation = Navigation()
 
     private static let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
 
@@ -60,6 +63,7 @@ struct TileGallery: View {
             .padding()
         }
         .environment(store)
+        .environment(navigation)
     }
 
     @ViewBuilder

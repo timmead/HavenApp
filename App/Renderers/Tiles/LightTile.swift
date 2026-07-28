@@ -3,6 +3,7 @@ import HavenCore
 struct LightTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId)
         let s = e.map(LightState.init)
@@ -40,12 +41,12 @@ struct LightTile: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }
-        .onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         // One combined element per tile, not five fragments — a VoiceOver user hears
         // "Kitchen light, on, 60% brightness" once, not the icon/name/level bar separately.
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.light(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { store.presented = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
     }
 }

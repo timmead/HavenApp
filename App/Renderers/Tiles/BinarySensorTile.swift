@@ -3,6 +3,7 @@ import HavenCore
 struct BinarySensorTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let s = e.map(BinarySensorState.init)
         let active = s?.isActive ?? false
@@ -18,7 +19,7 @@ struct BinarySensorTile: View {
                       icon: active ? .accent : .secondary,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.binarySensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)

@@ -87,13 +87,14 @@ import HavenCore
                          }))
     }
 
-    /// The modal sheet binding reads `presented`. If this stops observing, tapping a tile opens
-    /// nothing at all — and it would still pass every other test in this repository.
+    /// The modal sheet binding reads `Navigation.presentedEntityId`, which a tile writes on tap or
+    /// long-press. If this stops observing, tapping a tile opens nothing at all — and it would
+    /// still pass every other test in this repository.
     @Test func theSheetBindingSeesAPresentationRequest() {
-        let store = HomeStore()
+        let navigation = Navigation()
 
-        #expect(observes({ _ = store.presented },
-                         whenMutating: { store.presented = "light.a" }))
+        #expect(observes({ _ = navigation.presentedEntityId },
+                         whenMutating: { navigation.presentedEntityId = "light.a" }))
     }
 
     /// The history chart reads through `history(_:_:attribute:)`, whose cache is a stored
@@ -132,17 +133,40 @@ import HavenCore
                          whenMutating: { store.resolveEnvironment() }))
     }
 
-    /// **The negative control.** Without this, every test above could be passing because the
-    /// harness reports `true` unconditionally rather than because observation works. Reading one
-    /// entity and mutating a different one must *not* fire: that is also the property that keeps a
-    /// forty-tile dashboard from re-evaluating every tile on every push.
-    @Test func readingOneEntityDoesNotObserveAnUnrelatedOne() {
+    /// **The negative control.** Without it, every test above could be passing because the harness
+    /// reports `true` unconditionally rather than because observation works. Reading `states` and
+    /// mutating `home` — two genuinely separate properties — must not fire.
+    @Test func readingOnePropertyDoesNotObserveAnUnrelatedOne() {
+        let store = HomeStore()
+        store.states["light.a"] = entity("light.a", "off")
+
+        #expect(!observes({ _ = store.state("light.a") },
+                          whenMutating: {
+                              store.home = ResolvedHome(floors: [
+                                  ResolvedFloor(id: "f1", name: "Ground", level: 0, areas: [])
+                              ])
+                          }),
+                "reading one property must not register a dependency on an unrelated one")
+    }
+
+    /// **Granularity is per-property, not per-key — worth knowing, and not what you might assume.**
+    ///
+    /// `states` is one dictionary, so reading *any* entity out of it registers a dependency on the
+    /// whole thing, and a push for *any* other entity invalidates that read. On a forty-tile floor
+    /// every push therefore re-evaluates every tile's `body`.
+    ///
+    /// That is fine today — a `body` is cheap, and SwiftUI still diffs the result before touching
+    /// the render tree — and it is pinned here rather than left as folklore because the obvious
+    /// "optimisation" of splitting `states` into per-entity observables would be a large change
+    /// justified by an assumption nobody had checked. This is the check. Written the other way
+    /// round first, and it failed, which is how the assumption got noticed at all.
+    @Test func readingOneEntityObservesEveryOtherEntityToo() {
         let store = HomeStore()
         store.states["light.a"] = entity("light.a", "off")
         store.states["light.b"] = entity("light.b", "off")
 
-        #expect(!observes({ _ = store.state("light.a") },
-                          whenMutating: { store.presented = "light.b" }),
-                "reading one property must not register a dependency on an unrelated one")
+        #expect(observes({ _ = store.state("light.a") },
+                         whenMutating: { store.states["light.b"] = self.entity("light.b", "on") }),
+                "one dictionary means one dependency; if this ever stops holding, the tiles got finer-grained")
     }
 }
