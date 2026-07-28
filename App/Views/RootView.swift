@@ -38,9 +38,17 @@ struct RootView: View {
         case .loggedOut, .error:
             LoginView(showingConnectionSettings: $showingConnectionSettings)
         case .connecting: ProgressView("Connecting…")
-        case .retrying(let attempt):
+        case .retrying(let attempt, let isReconnect):
             VStack(spacing: 16) {
-                ProgressView("Connection lost — retrying… (attempt \(attempt))")
+                // Two different sentences because they describe two different situations, and the
+                // wrong one is actively misleading. "Connection lost" to someone who has just
+                // opened the app asserts that something broke — it reads as a fault in their Home
+                // Assistant or their network, when the ordinary cause is a first connect that
+                // simply has not landed yet. The first-connect copy says what is true and nothing
+                // more. Which of the two applies is `Phase.retrying`'s to say, not this view's.
+                ProgressView(isReconnect
+                             ? "Connection lost — retrying… (attempt \(attempt))"
+                             : "Connecting to Home Assistant… (attempt \(attempt))")
                 // Offered ahead of "Change server", which signs out and discards the session: this
                 // is the non-destructive way out of a retry loop, and for someone whose only
                 // working address is one Haven doesn't know yet, it is the one that fixes it.

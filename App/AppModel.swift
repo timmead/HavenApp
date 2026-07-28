@@ -20,7 +20,21 @@ private enum DefaultsKeys {
 
 @MainActor @Observable
 final class AppModel {
-    enum Phase { case loggedOut, connecting, retrying(attempt: Int), ready, error(String) }
+    enum Phase {
+        case loggedOut
+        case connecting
+        /// A round of candidates failed and the next is pending after a backoff.
+        ///
+        /// `isReconnect` distinguishes the two situations that look identical from inside the loop
+        /// and completely different to the person holding the phone: a live session that dropped,
+        /// versus a first connection that has not landed yet. Saying "Connection lost" to someone
+        /// who has just opened the app claims something untrue and reads as a fault in their setup.
+        /// Carried on the case rather than as a second property beside `phase`, so there is one
+        /// value to switch on and no way for the two to disagree.
+        case retrying(attempt: Int, isReconnect: Bool)
+        case ready
+        case error(String)
+    }
     var phase: Phase = .loggedOut
     var serverURLText = "http://homeassistant.local:8123"
     let store = HomeStore()
@@ -105,6 +119,14 @@ final class AppModel {
     private let customRemoteURLStore: CustomRemoteURLStore
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
+    /// Whether this signed-in session has ever reached `.ready`.
+    ///
+    /// The only input to `Phase.retrying`'s `isReconnect`, and deliberately keyed on the *session*
+    /// rather than on which function started the connect: `reconnectAfterConnectionLoss` is not the
+    /// only way a working connection can be retried, and a first connect that fails its first round
+    /// must not be described as a lost one no matter what called it. Cleared wherever the session
+    /// ends, so signing in again starts over as a first connect.
+    private var hasConnectedSinceSignIn = false
 
     /// Loads images that live behind Home Assistant's authentication — media-player artwork and
     /// camera snapshots — for the current session. `nil` while signed out.
@@ -315,6 +337,7 @@ final class AppModel {
         // Dropped, not just cleared: these are pictures of the user's home, fetched with their
         // token, and nothing signed out has any business still holding them in memory.
         imageLoader = nil
+        hasConnectedSinceSignIn = false
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
@@ -331,6 +354,7 @@ final class AppModel {
         tokens.clear()
         tokenProvider = nil
         imageLoader = nil
+        hasConnectedSinceSignIn = false
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
@@ -478,7 +502,7 @@ final class AppModel {
             }
             attempt += 1
             havenLog.error("all candidates failed this round — backing off (attempt \(attempt, privacy: .public))")
-            phase = .retrying(attempt: attempt)
+            phase = .retrying(attempt: attempt, isReconnect: hasConnectedSinceSignIn)
             try? await Task.sleep(for: policy.delay(forAttempt: attempt))
         }
     }
@@ -596,6 +620,7 @@ final class AppModel {
                 // `get_config` must not pin the connecting spinner forever over a socket that is
                 // otherwise perfectly live and usable.
                 phase = .ready
+                hasConnectedSinceSignIn = true
                 // Read here because only this scope holds the `NWWebSocketConnection` — see
                 // `finishConnecting` for what it is used to decide and why it is read off the
                 // socket rather than derived from the URL.
