@@ -248,7 +248,27 @@ struct CameraTile: View {
             ) { phase in
                 switch phase {
                 case .image(let image):
-                    image.resizable().aspectRatio(contentMode: .fill)
+                    // **`Color.clear` with the picture as an overlay, not the picture itself.**
+                    //
+                    // `aspectRatio(contentMode: .fill)` sizes the image to *cover* what it was
+                    // offered, so one of its two dimensions comes back larger than the offer — and a
+                    // view that returns an oversized size hands that size to its parent. The tile's
+                    // `.frame(maxWidth: .infinity)` does not clamp it and `.clipped()` only trims the
+                    // drawing, so the whole tile reported itself wider than its grid column and bled
+                    // out past the room's insets, over the tile beside it.
+                    //
+                    // Overlays are the one composition that cannot do this: the overlay is offered
+                    // its host's size and never contributes to it, so `Color.clear` — which accepts
+                    // whatever it is offered — fixes the tile at exactly its column, and the picture
+                    // overflows *inside* the clip where it is supposed to.
+                    //
+                    // The overflow was always here: at 16:9 in the old 172×99 still it was about two
+                    // points a side and invisible. Making the still 16pt taller (the caption strip
+                    // lost a line) turned the fill from width-driven to height-driven and the same
+                    // two points became sixteen. The geometry changed; the defect did not.
+                    Color.clear
+                        .overlay { image.resizable().aspectRatio(contentMode: .fill) }
+                        .clipped()
                 case .loading:
                     placeholder(symbol: "video.fill", caption: nil)
                 case .empty, .failed:
