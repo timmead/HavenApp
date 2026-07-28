@@ -76,7 +76,7 @@ private final class ContinuationBox<T: Sendable>: @unchecked Sendable {
 /// `URLSessionWebSocketTask`. This avoids the iOS Simulator's `URLSession` WebSocket
 /// breakage and talks to the socket directly, which is what Home Assistant expects.
 @available(iOS 13, macOS 10.15, *)
-public final class NWWebSocketConnection: WebSocketConnection, @unchecked Sendable {
+public final class NWWebSocketConnection: PeerObservableConnection, @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "app.haven.websocket")
     /// Bounds how long `connect()` can hang on an address that never answers — e.g. the LAN

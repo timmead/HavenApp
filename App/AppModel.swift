@@ -82,7 +82,24 @@ final class AppModel {
     private let defaults: UserDefaults
     private let tokens: TokenStore
     private let oauth = OAuthClient()
-    private let http = URLSessionHTTP()
+    /// How this session POSTs its token refreshes. Injectable for the same reason `tokens` is: a
+    /// test that drives `connect()` must be able to answer a refresh without reaching the network,
+    /// and `TokenProvider` already takes it as a protocol.
+    private let http: HTTPPoster
+    /// Builds the transport for one candidate address.
+    ///
+    /// The seam `connect()`'s doc comment spent two rounds admitting it did not have. Everything
+    /// else the candidate loop touches was already injectable — `UserDefaults`, the `TokenStore`,
+    /// and (through `TokenProvider`) the `HTTPPoster` — so `NWWebSocketConnection`, constructed
+    /// inline in `attemptCandidate`, was the single reason no test could drive the loop.
+    ///
+    /// Returns `any PeerObservableConnection` rather than `any WebSocketConnection` because
+    /// `attemptCandidate` reads the peer address off it to feed the trust decision. Note what a
+    /// fake *cannot* do here: claiming a private-IP peer address does not make adoption happen by
+    /// itself, because the classification is `ConnectionClass.observed`'s (tested in HavenCore) and
+    /// the wiring into it is `finishConnecting`'s (tested by `AppModelTrustTests`). This seam
+    /// exercises the loop; it is not a second, weaker route to the decision those already pin.
+    private let makeConnection: @MainActor (URL) -> any PeerObservableConnection
     private let web = WebAuthPresenter()
     private let policy = ReconnectPolicy()
     private let customRemoteURLStore: CustomRemoteURLStore
@@ -135,9 +152,16 @@ final class AppModel {
     /// defaults domain or their saved Home Assistant session. Nothing else is injectable — the
     /// OAuth client and the WebSocket transport are still constructed inline, which is why no test
     /// drives `connect()` end to end (see `HavenAppTests`).
-    init(defaults: UserDefaults = .standard, tokens: TokenStore = KeychainTokenStore()) {
+    init(defaults: UserDefaults = .standard,
+         tokens: TokenStore = KeychainTokenStore(),
+         http: HTTPPoster = URLSessionHTTP(),
+         makeConnection: @escaping @MainActor (URL) -> any PeerObservableConnection = {
+             NWWebSocketConnection(url: $0)
+         }) {
         self.defaults = defaults
         self.tokens = tokens
+        self.http = http
+        self.makeConnection = makeConnection
         self.customRemoteURLStore = CustomRemoteURLStore(defaults: defaults)
         self.homeNetwork = HomeNetwork(defaults: defaults)
         // Runs here — once per launch, gated to once per device by its own flag — and deliberately
@@ -544,7 +568,7 @@ final class AppModel {
                 let token = try await tokenProvider.validAccessToken(now: Date())
                 if Task.isCancelled { return result(.cancelled) }
                 havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(round, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")
-                let conn = NWWebSocketConnection(url: wsURL)
+                let conn = makeConnection(wsURL)
                 let c = HAWebSocketClient(connection: conn)
                 client = c
                 try await c.authenticate(token: token)
