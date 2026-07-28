@@ -10,7 +10,7 @@ public struct ClimateState: Sendable, Equatable {
     public let unit: String
     public init(_ e: EntityState) {
         hvacMode = e.state
-        isOn = e.state != "off" && e.state != "unavailable" && e.state != "unknown"
+        isOn = !e.isUnavailable && e.state != "off"
         currentTemp = e.attributes["current_temperature"]?.asDouble
         targetTemp = e.attributes["temperature"]?.asDouble
         modes = (e.attributes["hvac_modes"]?.asArray ?? []).compactMap { $0.asString }
