@@ -52,6 +52,31 @@ import Foundation
                                     Date(timeIntervalSince1970: 100)])
 }
 
+/// A run broken only by an `unavailable`/`unknown` gap must read as one continuous state, not
+/// as a change-away-and-back. This is the property `stateChangesDropsUnavailableRows` looks
+/// like it covers but doesn't: there the gap is followed by a *different* state
+/// (`on → unavailable → unknown → off`), which a naive "compare to the immediately preceding
+/// *row*" implementation would pass just as happily as the real one. Here the gap is followed
+/// by the *same* state on both sides (`on → unavailable → on`, and again `on → unknown → on`):
+/// a naive implementation would see the row after the gap differ from the raw previous row
+/// (`unavailable`/`unknown`) and record a spurious second "on" transition after each outage. The
+/// real parser compares against the last *kept* row, so a door sensor that drops offline and
+/// comes back to the same reading emits nothing extra — only the eventual real change to "off"
+/// produces a second entry.
+@Test func stateChangesTreatsAGapAsAContinuationNotAChange() {
+    let json = #"""
+    {"binary_sensor.door":[{"s":"on","lu":100.0},{"s":"unavailable","lu":200.0},
+                           {"s":"on","lu":300.0},{"s":"unknown","lu":400.0},
+                           {"s":"on","lu":500.0},{"s":"off","lu":600.0}]}
+    """#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let changes = HistoryParsing.stateChanges(v, entityId: "binary_sensor.door")
+    #expect(changes.map(\.state) == ["off", "on"])
+    // The surviving "on" entry is the *first* row of the run (100) — the moment it actually
+    // changed — not the row that happens to follow either gap (300 or 500).
+    #expect(changes.map(\.time) == [Date(timeIntervalSince1970: 600), Date(timeIntervalSince1970: 100)])
+}
+
 @Test func stateChangesOfAnAbsentEntityIsEmpty() {
     let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(#"{}"#.utf8))
     #expect(HistoryParsing.stateChanges(v, entityId: "binary_sensor.door").isEmpty)
