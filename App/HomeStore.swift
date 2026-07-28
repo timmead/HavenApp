@@ -507,15 +507,37 @@ final class HomeStore {
     /// callers are `RoomSectionView`/`RoomDetailView` rendering a row whose kind they already
     /// know, so a mismatch is a programming error and `assertionFailure` names the caller
     /// (`#function` at the call site) rather than this shared helper.
-    private func bulkFlip(_ rollup: Rollup, in areaId: String, expecting kind: Rollup.Kind,
-                          isTarget: (EntityState) -> Bool, flippingTo flipped: String,
-                          caller: String = #function,
-                          _ command: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
+    /// Internal rather than private **so a test can call it with a predicate the shipped callers
+    /// never use** — see `bulkActionsSkipUnreachableEntitiesWhateverThePredicateSays`. The
+    /// unreachability guard below is redundant against today's two allow-list predicates, and
+    /// therefore unprovable through `allOff`/`closeAll`; the only way to hold it to anything is to
+    /// hand it a predicate that would otherwise let an unreachable entity through.
+    func bulkFlip(_ rollup: Rollup, in areaId: String, expecting kind: Rollup.Kind,
+                  isTarget: (EntityState) -> Bool, flippingTo flipped: String,
+                  caller: String = #function,
+                  _ command: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
         guard rollup.kind == kind else {
             assertionFailure("\(caller) called with rollup.kind == \(rollup.kind), expected \(kind)")
             return
         }
-        let targets = rollup.targetEntityIds.filter { states[$0].map(isTarget) ?? false }
+        // **Unreachable entities are excluded here, deliberately, before the caller's predicate is
+        // consulted at all.**
+        //
+        // They were already excluded, but only as a side effect: `allOff` targets `state == "on"`
+        // and `closeAll` targets `"open"`/`"opening"`, and the string `"unavailable"` is none of
+        // those. Correct, and true by accident. Rewrite either predicate as a deny-list — `!=
+        // "closed"` is the obvious "simplification", and was tried during review — and every
+        // unreachable cover in the room silently becomes a target: flipped to a state it is not in,
+        // and sent a command Home Assistant answers *success* to without doing anything.
+        //
+        // So the guard is stated rather than inherited, matching `fireAndForget` and
+        // `optimisticState`, which is where a reader looking for this rule will expect to find it.
+        // Keyed on `state == "unavailable"` alone and not `EntityState.isUnavailable` for the same
+        // reason as those two: an `unknown` entity is reachable and simply has not reported.
+        let targets = rollup.targetEntityIds.filter { id in
+            guard let state = states[id], state.state != "unavailable" else { return false }
+            return isTarget(state)
+        }
         var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
         for id in targets {
             guard let s = states[id] else { continue }
