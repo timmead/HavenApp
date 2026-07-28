@@ -9,13 +9,14 @@ import HavenCore
 /// cannot be given the space gets no tile rather than a misleading one, which is why neither
 /// surface routes cameras through `DeviceTileView`'s 4-column grid.
 enum CameraTileSize {
-    /// 2×2. The still above a caption strip carrying the name, the state, and how old the picture
-    /// is.
+    /// 2×2. The still above a caption strip carrying the name, with the age of the picture stamped
+    /// over the bottom-right corner of the still itself.
     case square
     /// 4×2. Full-bleed still with the name over a gradient scrim, and **no** staleness stamp: at
-    /// this width the picture *is* the tile, and a stamp floating over it is furniture. The 2×2
-    /// needs one because there the still is small enough that "is this now?" is a real question;
-    /// here you can see the scene.
+    /// this width the picture *is* the tile, and you can see the scene well enough to judge it. The
+    /// 2×2 keeps a stamp because there the still is small enough that "is this now?" is a real
+    /// question — the difference is how much picture there is to read, which is why the stamp
+    /// survived the caption strip that used to carry it.
     case wide
 }
 
@@ -99,7 +100,8 @@ struct CameraTile: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: height - captionHeight)
                 .clipped()
-            caption(s, name: name)
+                .overlay(alignment: .bottomTrailing) { ageStamp(s) }
+            caption(name: name)
                 .frame(height: captionHeight)
         }
         .frame(height: height)
@@ -113,51 +115,68 @@ struct CameraTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var captionHeight: CGFloat { 42 }
+    private var captionHeight: CGFloat { 26 }
 
-    /// Name, then state and age beneath it.
+    /// The name, and nothing else.
     ///
-    /// Two lines rather than one row, because at half of four columns "Front Door Camera" and
-    /// "Recording · 12s ago" do not fit side by side on a phone, and the one that would get
-    /// ellipsised is the name — leaving a caption strip that says how fresh a picture of *something*
-    /// is. Note the state is here in text at all sizes: it is the difference between a camera that
-    /// is watching and one that stopped answering, which the picture itself cannot show.
+    /// It used to carry the state and the age on a second line beneath. Both left, in opposite
+    /// directions, and the strip shrank from 42pt to one line — the 16pt goes to the picture, and
+    /// the tile's overall 141 is unchanged because it is matched to the 4×2 media tile.
+    ///
+    /// - The **age** moved onto the still (`ageStamp`), where it is beside the thing it describes
+    ///   instead of below it.
+    /// - The **state** — "Recording", "Idle", "Streaming" — is gone from this size outright.
+    ///   Distinguishing a recording camera from an idle one is not what a glance at a dashboard is
+    ///   for, and it was spending a whole line of a two-column tile to do it. What that line was
+    ///   really defending is still defended: a camera that *stopped answering* says so inside the
+    ///   picture, because `still()` draws `status.label` in its placeholder for an unavailable
+    ///   camera and "No picture" for a failed fetch, and both are more legible there — full width,
+    ///   with an icon — than they ever were in 9.5pt grey. The state also remains in the
+    ///   accessibility label, which never read this strip.
+    private func caption(name: String) -> some View {
+        Text(name)
+            .font(.system(size: 11.5, weight: .semibold))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+    }
+
+    /// How old the picture is, stamped on the picture.
+    ///
+    /// Drawn on a dark capsule for the same reason `wide()`'s name sits on a gradient: the frame
+    /// underneath can be any colour at all — a floodlit driveway at night, a sunlit garden — and
+    /// text laid straight onto it is legible over one and invisible over the other. The capsule is
+    /// a fixed black rather than a material, so it does not go pale over a bright frame in light
+    /// mode.
+    ///
+    /// **Shown only over a frame that actually arrived** — `isAvailable` and a non-nil
+    /// `capturedAt` — which is the same condition the caption used to gate on, for the same
+    /// reason: `CameraSnapshotAge.describe` reads a nil capture time as "just now", so a stamp
+    /// under a loading placeholder would be a freshness claim about a picture that does not exist,
+    /// and it would disagree with the accessibility label, which omits the age in exactly this
+    /// case. Over an unavailable or failed camera it would be worse still — an age describing a
+    /// frame nothing is updating is the plausible-blank failure wearing a timestamp.
     ///
     /// The stamp re-renders on a five-second cadence rather than every second: the frame behind it
     /// only changes every ten, and a counter ticking once a second on four tiles is both wasted
     /// work and exactly the restless dashboard the design keeps ruling out.
-    private func caption(_ s: CameraState?, name: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(name)
-                .font(.system(size: 11.5, weight: .semibold))
-                .lineLimit(1)
-            if let s, s.isAvailable, capturedAt != nil {
-                TimelineView(.periodic(from: .now, by: 5)) { context in
-                    Text("\(s.status.label) · \(CameraSnapshotAge.describe(capturedAt: capturedAt, now: context.date))")
-                        .font(.system(size: 9.5, weight: .medium).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            } else if let s, s.isAvailable {
-                // No frame has arrived yet. State only, and deliberately *no* stamp: `describe`
-                // reads a nil capture time as "just now", which under a loading placeholder would
-                // be a freshness claim about a picture that does not exist — and it would disagree
-                // with the accessibility label, which omits the age in exactly this case.
-                Text(s.status.label)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+    @ViewBuilder
+    private func ageStamp(_ s: CameraState?) -> some View {
+        if let s, s.isAvailable, capturedAt != nil {
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                Text(CameraSnapshotAge.describe(capturedAt: capturedAt, now: context.date))
+                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white)
                     .lineLimit(1)
-            } else {
-                // No stamp at all when there is no live picture: an age would be describing a frame
-                // nothing is updating, which is the plausible-blank failure wearing a timestamp.
-                Text(s?.status.label ?? "Unavailable")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(.black.opacity(0.55)))
             }
+            .padding(6)
+            // The tile's own label already speaks the age (`AccessibilitySummary.camera`), and the
+            // tile combines its children — so this would be a second reading of the same fact.
+            .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
     }
 
     // MARK: - 4×2
