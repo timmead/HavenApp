@@ -37,7 +37,7 @@ struct RoomSectionView: View {
             let rollups = store.rollups(room)
             if !rollups.isEmpty {
                 HStack(spacing: 8) {
-                    ForEach(Array(rollups.enumerated()), id: \.offset) { _, rollup in
+                    ForEach(rollups) { rollup in
                         rollupRow(rollup)
                     }
                     Spacer(minLength: 0)
@@ -130,12 +130,28 @@ struct RoomSectionView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             Button(rollup.kind == .lights ? "All Off" : "Close All") {
-                if rollup.kind == .lights { store.allOff(rollup) } else { store.closeAll(rollup) }
+                if rollup.kind == .lights { store.allOff(rollup, in: room.areaId) }
+                else { store.closeAll(rollup, in: room.areaId) }
             }
             .font(.system(size: 12, weight: .semibold))
             .buttonStyle(.plain)
             .foregroundStyle(hasActive ? accent : .secondary)
             .disabled(!hasActive)
+            // Named rather than silent: a bulk action that half-fails used to revert the failed
+            // rows with no explanation at all, which reads as the app ignoring the tap.
+            //
+            // Gated on `hasActive` too, not just `failures > 0`: this is the only way a stale count
+            // ever clears without another bulk action. If the user fixes the failures by hand (e.g.
+            // manually locks the one door that didn't respond), `activeCount` drops to 0, the button
+            // disables, and the room genuinely has nothing left to complain about — but nothing
+            // re-runs `recordBulkFailures` to zero the stored count, so without this gate the label
+            // would go on accusing the room of a failure that no longer exists.
+            let failures = store.bulkFailureCount(for: rollup.kind, in: room.areaId)
+            if failures > 0 && hasActive {
+                Text("\(failures) didn't respond")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HavenColor.warning)
+            }
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(Capsule().fill(HavenColor.glassFill))

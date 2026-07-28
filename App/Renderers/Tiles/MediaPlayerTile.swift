@@ -29,10 +29,11 @@ struct MediaPlayerTile: View {
         let e = store.state(entityId)
         let s = e.map(MediaPlayerState.init)
         let name = TileName.of(entityId, e)
+        let unavailable = e?.isUnavailable ?? false
         Group {
             switch size {
-            case .small: small(s, name: name)
-            case .wide: wide(s, name: name)
+            case .small: small(s, name: name, unavailable: unavailable)
+            case .wide: wide(s, name: name, unavailable: unavailable)
             case .large: large(s, name: name, deviceClass: e?.deviceClass)
             }
         }
@@ -47,16 +48,20 @@ struct MediaPlayerTile: View {
 
     // MARK: - 1×1
 
-    private func small(_ s: MediaPlayerState?, name: String) -> some View {
-        GlassTile(active: s?.isPlaying ?? false, accent: accent) {
+    private func small(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             VStack(spacing: 4) {
                 Spacer(minLength: 0)
                 playPauseButton(s, size: 26)
                 Spacer(minLength: 0)
+                // `isActive` already reads `false` for an `unavailable` state string (see
+                // `MediaPlayerState.Playback.isActive`), so this was already `.secondary` there —
+                // incidentally rather than deliberately, same as the other tiles' on/off-derived
+                // name colours. Stated explicitly like the rest.
                 Text(name)
                     .font(.system(size: 10.5, weight: .semibold))
                     .lineLimit(1)
-                    .foregroundStyle((s?.isActive ?? false) ? .primary : .secondary)
+                    .foregroundStyle(unavailable ? .secondary : ((s?.isActive ?? false) ? .primary : .secondary))
             }
             .frame(maxWidth: .infinity)
         }
@@ -65,8 +70,8 @@ struct MediaPlayerTile: View {
 
     // MARK: - 2×1
 
-    private func wide(_ s: MediaPlayerState?, name: String) -> some View {
-        GlassTile(active: s?.isPlaying ?? false, accent: accent) {
+    private func wide(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             // `spacing: 0` with a `Spacer` between the two rows, rather than a spaced `VStack`:
             // a `VStack(spacing: 6)` over three children adds *two* 6pt gaps, which would push the
             // ideal height to 72 and grow the tile past the floor — the exact state-dependent
@@ -80,7 +85,8 @@ struct MediaPlayerTile: View {
                     ScrollingText(
                         text: s?.title ?? name,
                         secondary: s?.secondaryLine,
-                        windowHeight: 30
+                        windowHeight: 30,
+                        unavailable: unavailable
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -119,6 +125,11 @@ struct MediaPlayerTile: View {
 
     // MARK: - 4×2
 
+    // Deliberately not struck when unavailable. Unlike `small()` and `wide()`, this size does
+    // not route through `GlassTile` at all — it is a full-bleed `HStack` with its own artwork,
+    // scrim, and background, structurally the same shape as `CameraTile`. Giving it a strike
+    // would mean designing a treatment for a different surface, not passing a flag to an
+    // existing one, which is out of scope here.
     private func large(_ s: MediaPlayerState?, name: String, deviceClass: String?) -> some View {
         // Two tile rows plus the grid's own row spacing, so a 4×2 lines up with two rows of 1×1s.
         let height: CGFloat = 141
@@ -361,6 +372,12 @@ private struct ScrollingText: View {
     let text: String
     var secondary: String?
     let windowHeight: CGFloat
+    /// Had no `foregroundStyle` at all on the main line, which defaults to `.primary` regardless
+    /// of reachability — the only caller is `MediaPlayerTile.wide()`, which now threads its own
+    /// `unavailable` through here rather than leaving this window as the one text element on the
+    /// tile the strike didn't reach. `large()` has its own title `Text` and does not use this
+    /// view — see its doc comment for why it stays out of this feature entirely.
+    var unavailable: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var contentHeight: CGFloat = 0
@@ -407,6 +424,7 @@ private struct ScrollingText: View {
     private var lines: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(text).font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(unavailable ? .secondary : .primary)
             if let secondary {
                 Text(secondary).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }

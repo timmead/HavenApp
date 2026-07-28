@@ -9,10 +9,22 @@ struct CoverModal: View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let accent = HavenColor.domain(.cover)
         let live = Double(s?.positionPercent ?? 0)
+        // `isOpen` reads `false` for an `unavailable` state string exactly as it would for a cover
+        // that is genuinely closed, so this header claimed "Closed" about a blind Home Assistant
+        // cannot reach. `unavailable` and `unknown` are read apart because only the former cannot
+        // be commanded — `HomeStore.openCloseCover` makes the same distinction, and the toggle has
+        // to agree with it or it flips and springs back having sent nothing.
+        let unavailable = e?.state == "unavailable"
+        let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
-            ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: (s?.isOpen ?? false) ? "Open" : "Closed", accent: accent,
+            ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
+                        title: TileName.of(entityId, e),
+                        subtitle: unavailable ? "Unavailable"
+                            : (unknown ? "Unknown" : ((s?.isOpen ?? false) ? "Open" : "Closed")),
+                        accent: unavailable ? .secondary : accent,
                         toggle: Binding(get: { s?.isOpen ?? false },
-                                        set: { _ in store.openCloseCover(entityId) }))
+                                        set: { _ in store.openCloseCover(entityId) }),
+                        toggleEnabled: !unavailable)
             if s?.supportsPosition ?? false {
                 FacetCard(title: "Position") {
                     Slider(value: Binding(get: { dragPercent ?? live },

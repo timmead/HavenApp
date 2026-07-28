@@ -35,6 +35,22 @@ public enum HistoryRange: Sendable, CaseIterable {
         case .year: "month"
         }
     }
+
+    /// How long a fetched series stays usable before it is re-fetched.
+    ///
+    /// Scaled to how fast the underlying data actually moves rather than picked as one number: a
+    /// Day chart is drawn from hourly buckets and goes stale within the hour, while a Year chart
+    /// built from monthly ones cannot meaningfully change between two glances on the same evening.
+    /// Before this the cache had no expiry at all, so a chart opened at breakfast still showed
+    /// breakfast's data at dinner without the app ever having been quit.
+    public var cacheLifetime: TimeInterval {
+        switch self {
+        case .day: 300            // 5 minutes
+        case .week: 1_800         // 30 minutes
+        case .month, .threeMonths: 3_600
+        case .year: 21_600        // 6 hours
+        }
+    }
 }
 
 public struct HistoryPoint: Sendable, Equatable {
@@ -72,6 +88,13 @@ public struct HistorySeries: Sendable, Equatable {
         self.max = max ?? points.map(\.value).max()
         self.avg = avg ?? points.map(\.value).reduce(0, +) / Double(points.count)
     }
+}
+
+/// One moment an entity's state became something new. See `HistoryParsing.stateChanges`.
+public struct StateChange: Sendable, Equatable {
+    public let time: Date
+    public let state: String
+    public init(time: Date, state: String) { self.time = time; self.state = state }
 }
 
 public enum HistoryParsing {
@@ -146,5 +169,34 @@ public enum HistoryParsing {
             return HistoryPoint(time: Date(timeIntervalSince1970: lu), value: val)
         }
         return HistorySeries(points: pts)
+    }
+
+    /// Parses `history/history_during_period` rows as a sequence of state *changes*, for an entity
+    /// whose value is a word rather than a number — currently only used for a binary sensor's raw
+    /// state, which is strictly "on"/"off". A device class ("door", "motion", …) only changes how
+    /// that reading is *displayed* elsewhere (`BinarySensorModal`'s "Open"/"Closed" for a door,
+    /// say) — it is never a different string recorded here.
+    ///
+    /// Deliberately not `fromHistory`: that one parses each row's state as a `Double` and drops
+    /// what does not convert, which for a binary sensor is every row. The wire response needs no
+    /// change — the compressed rows already carry `s` and `lu`.
+    ///
+    /// Newest first, `unavailable`/`unknown` dropped (a door that went offline did not open), and
+    /// consecutive repeats collapsed to the moment the value *changed*. That last part is what
+    /// makes this a list of events: Home Assistant records a row per update, not per change, so a
+    /// sensor polling every 30 seconds otherwise yields hundreds of identical entries.
+    public static func stateChanges(_ result: JSONValue, entityId: String) -> [StateChange] {
+        let rows = result.asObject?[entityId]?.asArray ?? []
+        var out: [StateChange] = []
+        for row in rows {
+            guard let o = row.asObject, let lu = o["lu"]?.asDouble,
+                  let value = o["s"]?.asString,
+                  !EntityState.unavailableStates.contains(value) else { continue }
+            // Compared against the last *kept* row, so a run broken only by an `unavailable` gap
+            // still reads as one continuous state rather than a spurious change back to itself.
+            if out.last?.state == value { continue }
+            out.append(StateChange(time: Date(timeIntervalSince1970: lu), state: value))
+        }
+        return out.reversed()
     }
 }

@@ -112,5 +112,3 @@ public actor HomeConnection {
         await client.disconnect()
     }
 }
-
-extension JSONValue { public var asArray: [JSONValue]? { if case .array(let a) = self { return a }; return nil } }

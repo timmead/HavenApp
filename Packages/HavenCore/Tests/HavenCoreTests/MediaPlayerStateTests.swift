@@ -167,6 +167,33 @@ private func mp(_ st: String, _ a: [String: JSONValue] = [:]) -> EntityState {
     #expect(AccessibilitySummary.mediaPlayer("Kitchen", MediaPlayerState(mp("unavailable"))) == "Kitchen, unavailable")
 }
 
+/// An unreachable player must offer no transport at all. `supported_features` is a capability HA
+/// keeps on an unavailable entity (unlike `media_title`/`volume_level`, which it drops), so reading
+/// it verbatim would draw a tinted, tappable play button — and a power toggle — on a device Home
+/// Assistant cannot currently command.
+@Test func unavailablePlayerExposesNoFeatures() {
+    let attrs: [String: JSONValue] = ["supported_features": .int(1 | 4 | 8 | 16 | 32 | 128 | 256 | 16384)]
+    let s = MediaPlayerState(mp("unavailable", attrs))
+    #expect(s.features.isEmpty)
+    #expect(!s.showsPlayPause)
+    #expect(!s.canPlay)
+    #expect(!s.canPause)
+    #expect(!s.features.supportsPower)
+}
+
+/// `unknown` is different from `unavailable`: the player is reachable and has simply not reported
+/// a value, and the power toggle in particular is the one control that might resolve that. Pinned
+/// as its own test rather than left to `unavailablePlayerExposesNoFeatures` covering `isUnavailable`
+/// incidentally — `features` must key on `state == "unavailable"` alone, not `EntityState.
+/// isUnavailable`, which also matches `unknown`.
+@Test func unknownPlayerStillExposesFeatures() {
+    let attrs: [String: JSONValue] = ["supported_features": .int(1 | 4 | 8 | 16 | 32 | 128 | 256 | 16384)]
+    let s = MediaPlayerState(mp("unknown", attrs))
+    #expect(!s.features.isEmpty)
+    #expect(s.features.supportsPower)
+    #expect(s.showsPlayPause)
+}
+
 // MARK: - Volume vs mute
 
 /// Dragging a volume control on a muted speaker must clear the mute, because the alternative is a

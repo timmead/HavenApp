@@ -29,6 +29,15 @@ struct ModalHeader: View {
     /// addition beside it: the slot means one thing per device, which is the property that made the
     /// header trustworthy in the first place. Passing both is a caller bug, and the toggle wins.
     var accessory: AnyView? = nil
+    /// Whether the toggle can be operated. `false` renders it in place but greyed and inert — for a
+    /// device Home Assistant cannot currently reach.
+    ///
+    /// Disabled rather than removed on purpose. Removing it would leave the slot empty and say
+    /// nothing about *why*; leaving it live would be worse still, because the command primitives
+    /// now refuse to act on an unreachable entity (see `HomeStore.optimistic`), so an enabled
+    /// toggle would flip under the finger, send nothing, and spring back — a control that silently
+    /// does nothing is the least honest of the three.
+    var toggleEnabled: Bool = true
     var body: some View {
         HStack(spacing: 10) {
             // Grouped as one VoiceOver element ("name, state") — the icon carries no
@@ -49,7 +58,10 @@ struct ModalHeader: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(subtitle.isEmpty ? title : "\(title), \(subtitle)")
             Spacer()
-            if let toggle { Toggle("", isOn: toggle).labelsHidden().tint(accent).accessibilityLabel(title) }
+            if let toggle {
+                Toggle("", isOn: toggle).labelsHidden().tint(accent).accessibilityLabel(title)
+                    .disabled(!toggleEnabled)
+            }
             else if let accessory { accessory }
         }
     }

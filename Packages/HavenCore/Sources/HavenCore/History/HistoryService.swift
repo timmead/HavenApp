@@ -30,4 +30,16 @@ public extension HomeConnection {
             return HistoryParsing.fromHistory(v, entityId: entityId)
         }
     }
+
+    /// A binary sensor's recent state changes. Always raw history, never statistics: statistics
+    /// are numeric aggregates and a binary sensor has no mean.
+    func stateChanges(entityId: String, range: HistoryRange, now: Date) async throws -> [StateChange] {
+        let start = now.addingTimeInterval(-range.seconds)
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        let v = try await client.request {
+            WSCommand.historyDuringPeriod(id: $0, entityId: entityId,
+                                          startISO: f.string(from: start), endISO: f.string(from: now))
+        }
+        return HistoryParsing.stateChanges(v, entityId: entityId)
+    }
 }

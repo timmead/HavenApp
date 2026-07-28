@@ -8,17 +8,13 @@ import Foundation
 /// answers in one function is what stops "readable enough to display" and "readable enough to
 /// persist" from drifting apart.
 public enum EnvironmentReading {
-    /// Home Assistant's two non-values. An entity reporting either has no reading, whatever its
-    /// attributes still say.
-    private static let nonValues: Set<String> = ["unavailable", "unknown"]
-
     /// The numeric reading and the unit to show it in, or `nil` when there isn't one.
     ///
     /// `nil` covers every way a reading can be missing — no state at all, `unavailable`, `unknown`,
     /// a non-numeric state, an absent attribute — because callers do the same thing for all of
     /// them: show an em-dash, and don't persist the nomination.
     public static func value(_ sensor: UpliftedSensor, state: EntityState?) -> (Double, String)? {
-        guard let state, !nonValues.contains(state.state) else { return nil }
+        guard let state, !state.isUnavailable else { return nil }
         let reading: (number: Double, unit: String)?
         switch sensor.source {
         case .state:
