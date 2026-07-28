@@ -93,7 +93,7 @@ import HavenCore
     /// real re-fetch; a fresh one must not cause a second round trip.
     @Test func aStaleCacheEntryIsRefetchedButAFreshOneIsNot() async throws {
         let (store, socket) = try await makeStore(succeed: true)
-        store.stateChangesByEntity["binary_sensor.door"] =
+        store.historyCache.stateChangesByEntity["binary_sensor.door"] =
             (changes: [], fetched: Date().addingTimeInterval(-(HistoryRange.day.cacheLifetime + 1)))
 
         await store.loadStateChanges("binary_sensor.door")

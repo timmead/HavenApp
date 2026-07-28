@@ -3,23 +3,29 @@ import HavenCore
 struct SensorTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     var body: some View {
         let e = store.state(entityId); let s = e.map(SensorState.init)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: false, accent: .gray, unavailable: unavailable) {
-            VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(.secondary).symbolRenderingMode(.hierarchical)
-                Spacer(minLength: 2)
-                // Had no `foregroundStyle` at all, which defaults to `.primary` regardless of
-                // reachability — the one this feature exists to catch.
-                Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
-                    .foregroundStyle(unavailable ? .secondary : .primary)
+            // **The tile the sweep missed.** Its name had no `foregroundStyle` at all, so it
+            // defaulted to `.primary` and stayed full-strength for a sensor nothing could reach.
+            // There is now no way to render this label without an emphasis going through
+            // `resolved(unavailable:)`, which is the point of the component.
+            //
+            // The icon is unconditionally `.secondary`: a sensor is a reading, not a state, and
+            // has no "active" to tint for.
+            TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
+                      name: TileName.of(entityId, e),
+                      accent: .gray, unavailable: unavailable) {
                 // Already unconditionally `.secondary` — a hierarchy choice, not an on/off one —
-                // so it already satisfies "unavailable text is secondary" with no change.
-                Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " ")).font(.system(size: 10)).foregroundStyle(.secondary)
+                // so it already satisfies "unavailable text is secondary" with no change. For an
+                // unreachable sensor the value string *is* "unavailable", which is honest.
+                Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.presented = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.sensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
         .accessibilityAddTraits(.isButton)

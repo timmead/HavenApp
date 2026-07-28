@@ -144,4 +144,76 @@ import HavenCore
         try await Task.sleep(for: .milliseconds(50))
         #expect(await socket.commandCount == 1)
     }
+
+    // MARK: - The fire-and-forget group
+
+    /// One command that writes no optimistic state and only has to be *withheld* from an
+    /// unreachable entity.
+    private struct FireAndForget {
+        let name: String
+        let entityId: String
+        let send: @MainActor (HomeStore) -> Void
+    }
+
+    /// Every fire-and-forget command on `HomeStore`, as of this commit.
+    ///
+    /// The three tests above cover the commands that also write optimistic state; these ten were
+    /// covered by nothing. Each carried its own hand-written copy of the same
+    /// `guard let connection, states[id]?.state != "unavailable" else { return }` line, which is
+    /// ten independent chances to write the eleventh without it — and the one defect of this exact
+    /// shape that did ship (`optimistic(_:on:_:)`, pinned above) reached a user. Listed as a table
+    /// rather than twenty near-identical test functions so that adding a command and forgetting to
+    /// cover it is a one-line omission in an obvious place.
+    private var fireAndForgetCommands: [FireAndForget] {
+        [
+            .init(name: "run", entityId: "scene.movie") { $0.run("scene.movie") },
+            .init(name: "setColorTemp", entityId: "light.kitchen") { $0.setColorTemp("light.kitchen", kelvin: 3000) },
+            .init(name: "setClimateMode", entityId: "climate.hall") { $0.setClimateMode("climate.hall", mode: "heat") },
+            .init(name: "setClimateTemp", entityId: "climate.hall") { $0.setClimateTemp("climate.hall", temp: 21) },
+            .init(name: "setFanMode", entityId: "climate.hall") { $0.setFanMode("climate.hall", mode: "auto") },
+            .init(name: "openCover", entityId: "cover.blinds") { $0.openCover("cover.blinds") },
+            .init(name: "stopCover", entityId: "cover.blinds") { $0.stopCover("cover.blinds") },
+            .init(name: "closeCover", entityId: "cover.blinds") { $0.closeCover("cover.blinds") },
+            .init(name: "mediaNextTrack", entityId: "media_player.tv") { $0.mediaNextTrack("media_player.tv") },
+            .init(name: "mediaPreviousTrack", entityId: "media_player.tv") { $0.mediaPreviousTrack("media_player.tv") },
+        ]
+    }
+
+    /// Nothing goes out to a device Home Assistant cannot reach.
+    ///
+    /// Asserted on the frames actually sent, not on `states`: these commands write no optimistic
+    /// state at all, so a missing guard leaves `states` untouched and looking perfectly correct
+    /// while the command still goes out. The wire is the only place the bug is visible.
+    @Test func noFireAndForgetCommandReachesAnUnavailableEntity() async throws {
+        for command in fireAndForgetCommands {
+            let (store, socket) = try await makeStore()
+            set(store, command.entityId, "unavailable")
+
+            command.send(store)
+            // Give any (incorrectly) fired Task a chance to run before asserting nothing happened.
+            try await Task.sleep(for: .milliseconds(50))
+
+            #expect(await socket.commandCount == 0,
+                    "\(command.name) sent a command to an unavailable entity")
+            #expect(store.states[command.entityId]?.state == "unavailable",
+                    "\(command.name) changed the state of an unavailable entity")
+        }
+    }
+
+    /// …and `unknown` is still commanded, for the reason the guards are keyed on the `state` string
+    /// rather than on `EntityState.isUnavailable`: an `unknown` entity is reachable and has simply
+    /// not reported, so the command is the one thing that might resolve it. A guard widened to
+    /// `isUnavailable` would pass the test above and fail this one.
+    @Test func everyFireAndForgetCommandStillReachesAnUnknownEntity() async throws {
+        for command in fireAndForgetCommands {
+            let (store, socket) = try await makeStore()
+            set(store, command.entityId, "unknown")
+
+            command.send(store)
+            try await Task.sleep(for: .milliseconds(50))
+
+            #expect(await socket.commandCount == 1,
+                    "\(command.name) refused an unknown — but reachable — entity")
+        }
+    }
 }

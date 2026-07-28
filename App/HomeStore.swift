@@ -3,55 +3,23 @@ import HavenCore
 
 @MainActor @Observable
 final class HomeStore {
+    /// What Home Assistant said — the structure and the live entity states. After three seams came
+    /// out (`BulkActionRunner`, `HistoryCache`, `EnvironmentCoordinator`) this is close to all the
+    /// storage this type has left of its own, which is the point: it owns what HA told us, and the
+    /// three children own jobs that merely need a connection.
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
-    /// Fetched series, with the moment each was fetched — see `HistoryRange.cacheLifetime`.
-    var historyByKey: [String: (series: HistorySeries, fetched: Date)] = [:]
-    /// Keys with a fetch currently in flight.
-    ///
-    /// This does *not* protect against flicking across the range picker — every range is a
-    /// different cache key (see `historyKey`), so two different ranges never collide here at all;
-    /// each just gets its own in-flight entry. What this actually guards against is `.task(id:
-    /// range)` (`SensorModal`, `RoomEnvironmentHistoryView`) restarting on the *same* key: flicking
-    /// Day → Week → Day cancels the first Day task but — per `HAWebSocketClient.request` being a
-    /// bare continuation with no cancellation handling (see `CameraPlaybackPlan`'s doc for the same
-    /// fact) — does not cancel its in-flight `history` command. Without this guard the second Day
-    /// task would fire a duplicate request for a key whose answer is already on the way; with it,
-    /// the second task finds the key already in flight and returns immediately, and the first
-    /// request's result lands in `historyByKey` for both to read.
-    private var historyInFlight: Set<String> = []
-    /// Recent state changes per entity, with the moment each was fetched — see
-    /// `HistoryRange.day.cacheLifetime`, the same lifetime `historyByKey` uses. Keyed by entity id
-    /// alone — unlike `historyByKey` there is one range (Day) and no attribute variant to
-    /// disambiguate.
-    ///
-    /// Before this carried a `fetched` date, an entry never expired: open a door sensor's modal at
-    /// 09:00 and again at 18:00 and the header (read live off `states`) said "Active" while this
-    /// list still ended at 08:12's "Off" — the modal contradicting itself for the whole session.
-    var stateChangesByEntity: [String: (changes: [StateChange], fetched: Date)] = [:]
-    /// Entity ids whose most recent `loadStateChanges` attempt threw. Inserted unconditionally on
-    /// failure — including for an id with a stale cached list already sitting in
-    /// `stateChangesByEntity`, since `loadStateChanges` never touches the cache on error — so this
-    /// set is *not* itself "ids with no cached entry of any age"; that framing only holds for the
-    /// callers that consult it, because `stateChangesLoadFailed` is only ever checked once
-    /// `stateChanges(_:)` has already returned `nil`. See `loadStateChanges`: a failure never
-    /// touches the cache, so a stale list survives a failed refresh exactly like `historyByKey`
-    /// does — this exists to tell "never asked" apart from "asked and it failed" for an entity
-    /// with nothing cached to show.
-    var stateChangesFailed: Set<String> = []
-    /// Each room's nominated temperature/humidity source, keyed by area id.
-    ///
-    /// Resolved once per structure load — deliberately *not* on every state change, even though
-    /// candidacy reads `device_class` out of `states`. `rooms()` runs inside `DashboardView.body`,
-    /// so anything derived from live state recomputes on every tick; a nomination recomputed there
-    /// would silently switch a room to a different physical thermometer the moment the nominated
-    /// one went unavailable and dropped its attributes. Which sensor is the room's is
-    /// configuration; only the reading is live data.
-    private(set) var environment: [String: RoomEnvironment] = [:]
-    /// Haven's dashboard definition, as loaded from the `havenapp` integration. Held so a write-back
-    /// merges into what the household actually has rather than replacing it — see
-    /// `DashboardDocument`.
-    private var dashboard = DashboardDocument()
+
+    /// Fetched history series and recent state-change lists — see `HistoryCache`. Named
+    /// `historyCache`, not `history`, because `history(_:_:attribute:)` below is the read the views
+    /// already call and that name is worth keeping for them.
+    let historyCache = HistoryCache()
+    /// Room temperature/humidity nominations and the shared dashboard document — see
+    /// `EnvironmentCoordinator`.
+    let environmentCoordinator = EnvironmentCoordinator()
+    /// Bounded execution and the per-room failure tally for bulk actions — see `BulkActionRunner`.
+    let bulk = BulkActionRunner()
+
     private var connection: HomeConnection?
     private var subscriptionTask: Task<Void, Never>?
     /// True only while `reset()` is deliberately tearing a live connection down (sign-out,
@@ -73,9 +41,14 @@ final class HomeStore {
     /// `OnboardingModel`'s restart step, generalized to any drop.
     var onDisconnected: (() -> Void)?
 
+    /// Points this store — and the three children that need a connection of their own — at a live
+    /// session. One call site rather than three, so a new seam cannot be left holding a stale
+    /// connection from the previous session (or none at all, which reads as "no data" forever).
     func attach(_ connection: HomeConnection) {
         subscriptionTask?.cancel(); subscriptionTask = nil
         self.connection = connection
+        historyCache.attach(connection)
+        environmentCoordinator.attach(connection)
     }
 
     func bootstrap() async throws {
@@ -96,19 +69,23 @@ final class HomeStore {
         }
         // Deliberately after the subscription is established, not before: `subscribe_events`
         // never replays, so any state change landing in the gap between `loadStates()` and the
-        // subscription taking effect is lost until that entity next changes. `loadDashboardConfig`
+        // subscription taking effect is lost until that entity next changes. The config load below
         // is a config get (and possibly a write-back) round trip with no bearing on that
         // subscription — nothing here depends on it running before the socket is subscribed — so
         // putting it after shrinks that window instead of widening it with a config round trip.
-        // A config failure still can't fail `bootstrap()` itself: `loadDashboardConfig` swallows
-        // its own errors (see its doc comment) and there is nothing after it in this function that
-        // could turn a config problem into a thrown one.
-        await loadDashboardConfig()
+        // A config failure still can't fail `bootstrap()` itself: `EnvironmentCoordinator.load`
+        // swallows its own errors (see its doc comment) and there is nothing after it in this
+        // function that could turn a config problem into a thrown one.
+        await environmentCoordinator.load(home: home, states: states)
     }
 
-    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history and
-    /// any open modal too — otherwise signing into a different HA instance can show the previous
-    /// account's chart data for a same-named sensor, or leave a stale modal presented.
+    /// Tear down the live session (used on sign-out, and on any reconnect). Clears history too —
+    /// otherwise signing into a different HA instance can show the previous account's chart data
+    /// for a same-named sensor.
+    ///
+    /// It no longer has to close an open modal: that moved to `Navigation`, which `DashboardView`
+    /// owns as `@State` and which therefore dies with the dashboard whenever `phase` leaves
+    /// `.ready` — see that type for why the coupling disappears rather than moves.
     ///
     /// Disconnects the underlying `HomeConnection` before dropping it — nothing else in the app
     /// retains the `HAWebSocketClient` once this reference goes away, so skipping this would
@@ -122,134 +99,43 @@ final class HomeStore {
         connection = nil
         home = ResolvedHome(floors: [])
         states = [:]
-        historyByKey = [:]
-        stateChangesByEntity = [:]
-        stateChangesFailed = []
-        bulkFailures = [:]
-        environment = [:]
-        dashboard = DashboardDocument()
-        presented = nil
+        historyCache.reset()
+        environmentCoordinator.reset()
+        bulk.reset()
         isResetting = false
     }
 
     // MARK: - Room environment (the dashboard config layer)
+    //
+    // Storage, the dashboard document, the resolver call and the version-conflict write-back all
+    // moved to `EnvironmentCoordinator`, together with their reasoning. What stays here is the
+    // join: that coordinator takes `home` and `states` as arguments rather than holding a
+    // reference back to this store, so the dependency runs one way.
 
-    /// Loads Haven's dashboard definition, resolves each room's nomination from it, and writes back
-    /// any this device proposed.
-    ///
-    /// A failure to read the configuration must never take the dashboard down with it: an
-    /// unreachable integration leaves `dashboard` empty, which falls through to proposals, and the
-    /// user still sees their home. Hence this swallows rather than rethrows: `bootstrap()` is
-    /// `throws`, so letting the error out would fail the whole session over a pill.
-    ///
-    /// Note the difference between a `nil` record and a throw: `nil` is "no dashboard configured
-    /// yet", the ordinary first-run state and the cue to propose one. A throw is "we could not find
-    /// out", and proposing over a document we failed to read would overwrite it.
-    private func loadDashboardConfig() async {
-        guard let connection else { return }
-        do {
-            let record = try await connection.loadConfig(scope: HavenConfigScope.shared,
-                                                         key: Self.dashboardKey)
-            dashboard = DashboardDocument(raw: record?.payload)
-            resolveEnvironment()
-            await persistProposedNominations(baseVersion: record?.version ?? 0)
-        } catch {
-            havenLog.error("dashboard config unreadable, falling back to proposed nominations: \(error)")
-            dashboard = DashboardDocument()
-            resolveEnvironment()
-        }
-    }
+    /// Each room's nominated temperature/humidity source, keyed by area id. Read inside
+    /// `DashboardView.body` by way of `rooms()`, so this must stay a live read of the
+    /// coordinator's storage rather than a copy taken at some earlier moment.
+    var environment: [String: RoomEnvironment] { environmentCoordinator.byArea }
 
-    static let dashboardKey = "dashboard"
-
-    /// Resolves every room's environment from the current registry, the current states and the
-    /// loaded dashboard document.
-    ///
-    /// The `states` join is the App layer's job for the same reason it is in `cameraEvents()`:
-    /// `device_class` lives on entity state, not in the entity registry (HA's
-    /// `config/entity_registry/list` returns `as_partial_dict`, which omits it). Every rule about
-    /// what may be nominated lives in `RoomEnvironmentResolver`; nothing is decided here.
+    /// Re-resolves every room's nomination against the current registry and states.
     func resolveEnvironment() {
-        environment = RoomEnvironmentResolver.resolve(
-            home: home,
-            sources: states.mapValues(RoomEnvironmentSource.init),
-            stored: dashboard.nominations,
-            // A proposal is only worth *writing* if it currently reads. See the resolver: a stored
-            // nomination is never re-picked, so a pick made while the room's real sensor happened
-            // to be offline would be permanently wrong.
-            isReadable: { [states] sensor in
-                EnvironmentReading.value(sensor, state: states[sensor.entityId]) != nil
-            })
-    }
-
-    /// Writes this device's proposed nominations into the shared dashboard document.
-    ///
-    /// Skipped entirely when there is nothing new to say — a no-op write on every launch would
-    /// churn the shared record's version and `updated_by` for nothing.
-    private func persistProposedNominations(baseVersion: Int, isRetry: Bool = false) async {
-        guard let connection, dashboard.isWritable else { return }
-        let proposals = environment.compactMapValues(\.nominationsToPersist)
-        guard !proposals.isEmpty else { return }
-        let merged = dashboard.merging(proposals)
-        guard merged != dashboard else { return }
-
-        do {
-            switch try await connection.saveConfig(scope: HavenConfigScope.shared,
-                                                   key: Self.dashboardKey,
-                                                   baseVersion: baseVersion, payload: merged.raw) {
-            case .ok:
-                dashboard = merged
-            case .versionConflict(let current):
-                // Another admin's phone wrote first. Reapply onto what they wrote and retry once;
-                // both devices are proposing the same deterministic picks, so this converges
-                // immediately. A second conflict is left for the next bootstrap rather than spun
-                // on — there is nothing time-critical about a pill.
-                guard !isRetry else { return }
-                dashboard = DashboardDocument(raw: current?.payload)
-                resolveEnvironment()
-                await persistProposedNominations(baseVersion: current?.version ?? 0, isRetry: true)
-            }
-        } catch let error as WSError where error.isNotAuthorized {
-            // Only HA admins curate the shared dashboard. For everyone else in the household this
-            // is the expected steady state, not a fault — and they already have the right pills on
-            // screen, since the proposals render whether or not they were written.
-            havenLog.debug("not an HA admin; leaving the shared dashboard config to one")
-        } catch {
-            havenLog.error("could not write dashboard config: \(error)")
-        }
+        environmentCoordinator.resolve(home: home, states: states)
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
 
-    /// Identifies one room's roll-up of one kind. `Rollup.Kind` alone is not enough to key
-    /// `bulkFailures`: `RoomSectionView`/`RoomDetailView` render one roll-up row *per room*, and a
-    /// kind-only key would make a failure in the Kitchen's lights show up on the Living Room's
-    /// lights row too — worse than the silent rollback this feature replaced, because it is
-    /// affirmatively false about a room nobody touched.
-    private struct BulkFailureKey: Hashable { let areaId: String; let kind: Rollup.Kind }
-
-    /// How many entities the last bulk action of each room+kind failed to change. Surfaced on
-    /// that room's roll-up row; see `recordBulkFailures`.
-    private var bulkFailures: [BulkFailureKey: Int] = [:]
-
-    /// At most this many commands in flight during one bulk action. A forty-light room otherwise
-    /// opens forty concurrent WebSocket requests, which is both rude to Home Assistant and a good
-    /// way to have several of them time out and *become* the failures this task surfaces.
-    private static let bulkConcurrency = 6
-
+    /// Forwarded rather than reached through by the views, so the roll-up rows keep asking
+    /// `HomeStore` for everything and this stays an implementation detail. Reading it inside a
+    /// `body` registers a dependency on the runner's own storage, which is what keeps those rows
+    /// redrawing — `ObservationTests` holds this to that.
     func bulkFailureCount(for kind: Rollup.Kind, in areaId: String) -> Int {
-        bulkFailures[BulkFailureKey(areaId: areaId, kind: kind)] ?? 0
+        bulk.failureCount(for: kind, in: areaId)
     }
 
-    /// Records the outcome of a bulk action. Always called, including with zero — a successful run
-    /// has to clear the previous run's complaint, or the row goes on accusing the user of a
-    /// failure they have already fixed.
     func recordBulkFailures(_ count: Int, for kind: Rollup.Kind, in areaId: String) {
-        let key = BulkFailureKey(areaId: areaId, kind: kind)
-        bulkFailures[key] = count > 0 ? count : nil
+        bulk.record(count, for: kind, in: areaId)
     }
 
-    var presented: String?                                   // entityId whose modal is open
     func state(_ id: String) -> EntityState? { states[id] }
 
     // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.
@@ -282,6 +168,33 @@ final class HomeStore {
             do { try await work(connection) }
             catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
         }
+    }
+
+    /// The third primitive, alongside `optimistic(_:on:_:)` above and `optimisticState` below: a
+    /// command that writes **no** optimistic state and only has to be withheld from an entity Home
+    /// Assistant cannot reach. Every fire-and-forget command in this file routes through here.
+    ///
+    /// Which commands those are, and *why* each writes nothing, is recorded on the individual
+    /// methods — the answer differs (a scene has no state to predict; the next track is unknowable
+    /// until the device says so; a kelvin value nothing on the grid displays). What is shared, and
+    /// what lives here, is the guard, previously hand-copied into ten separate methods:
+    ///
+    /// Keyed on `state == "unavailable"` alone, **not** `EntityState.isUnavailable`, which also
+    /// covers `unknown`. There is no optimistic write here to make an unreachable device look
+    /// available — that was the `optimistic(_:on:_:)`/`toggleLock` defect — but an unreachable
+    /// entity still has no business receiving a command it cannot act on, and Home Assistant will
+    /// not tell us it didn't: `call_service` against an entity the integration cannot reach answers
+    /// *success* and does nothing. `unknown` is deliberately let through: that entity **is**
+    /// reachable and has simply not reported yet, so refusing it would remove the one interaction
+    /// that could resolve it.
+    ///
+    /// Ten copies of that guard was ten independent chances to write the eleventh command without
+    /// it, and the local failure is invisible — nothing is written to `states`, so the store looks
+    /// perfectly correct while the command goes out anyway. `UnavailableCommandGuardTests` pins
+    /// both halves against the frames actually sent.
+    private func fireAndForget(_ id: String, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
+        guard let connection, states[id]?.state != "unavailable" else { return }
+        Task { try? await work(connection) }
     }
 
     /// Same class of bug as `toggleLock`, at lower stakes, and guarded the same way: keyed on
@@ -329,14 +242,11 @@ final class HomeStore {
         }
     }
 
-    /// Fire-and-forget scene/script/button activation. No optimistic local state to update.
-    ///
-    /// Guarded on `state == "unavailable"` the same one-line way as the primitives above: there is
-    /// no optimistic write here to make the entity look available, but an unreachable scene/script
-    /// still has no business receiving a command it cannot act on.
+    /// Fire-and-forget scene/script/button activation. No optimistic local state to update: a
+    /// scene has no on/off of its own to predict, and a script's "running" is Home Assistant's to
+    /// report.
     func run(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.activate(sceneOrScript: id) }
+        fireAndForget(id) { try await $0.activate(sceneOrScript: id) }
     }
 
     /// Brightness, optimistically. D spec §10b item 2 names this control by name as one that
@@ -357,42 +267,36 @@ final class HomeStore {
     /// `dragKelvin` covers the in-flight preview, and it is the only place a kelvin value can be
     /// set. Writing one into `states` here would be inventing a reading for an attribute nothing
     /// on the grid displays, with a rollback to get right for no visible gain.
-    // Fire-and-forget, no optimistic write to make an unreachable device look available — but
-    // guarded the same one-line way as `run` above, so none of these send a command into the void
-    // for an entity `state == "unavailable"`. `unknown` still goes through.
     func setColorTemp(_ id: String, kelvin: Int) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.setColorTemp(id, kelvin: kelvin) }
+        fireAndForget(id) { try await $0.setColorTemp(id, kelvin: kelvin) }
     }
 
     func setClimateMode(_ id: String, mode: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.setClimateMode(id, mode: mode) }
+        fireAndForget(id) { try await $0.setClimateMode(id, mode: mode) }
     }
 
     func setClimateTemp(_ id: String, temp: Double) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.setClimateTemp(id, temp: temp) }
+        fireAndForget(id) { try await $0.setClimateTemp(id, temp: temp) }
     }
 
     func setFanMode(_ id: String, mode: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.setFanMode(id, mode: mode) }
+        fireAndForget(id) { try await $0.setFanMode(id, mode: mode) }
     }
 
+    /// Open/stop/close, unlike `openCloseCover` and `setCoverPosition`, write nothing
+    /// optimistically: where those two know the state they are heading for, a cover asked to
+    /// *start* moving passes through `opening`/`closing` on its own schedule, and guessing at the
+    /// intermediate would fight the position pushes that follow.
     func openCover(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.openCover(id) }
+        fireAndForget(id) { try await $0.openCover(id) }
     }
 
     func stopCover(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.stopCover(id) }
+        fireAndForget(id) { try await $0.stopCover(id) }
     }
 
     func closeCover(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.closeCover(id) }
+        fireAndForget(id) { try await $0.closeCover(id) }
     }
 
     /// Cover position, optimistically — and the open/closed state with it. `CoverState` reads those
@@ -420,16 +324,12 @@ final class HomeStore {
 
     /// No optimistic state: what the next track *is* is unknowable until the device says so, and
     /// blanking the title in the meantime would flash an empty now-playing card between two songs.
-    /// Guarded on `state == "unavailable"` the same one-line way as the rest of this fire-and-forget
-    /// group.
     func mediaNextTrack(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.mediaNextTrack(id) }
+        fireAndForget(id) { try await $0.mediaNextTrack(id) }
     }
 
     func mediaPreviousTrack(_ id: String) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await connection.mediaPreviousTrack(id) }
+        fireAndForget(id) { try await $0.mediaPreviousTrack(id) }
     }
 
     /// Sets the level, and clears mute when a volume change implies it.
@@ -562,199 +462,99 @@ final class HomeStore {
         RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
     }
 
-    /// Turns off every light in the roll-up. Every target's `states` entry is flipped
-    /// synchronously, before anything is batched — see `runBulk`'s doc comment for why the flip
-    /// must not live inside the batched work — then the commands run at most `bulkConcurrency`
-    /// at a time and however many refuse are recorded against this room.
+    /// Turns off every light in the roll-up.
     func allOff(_ rollup: Rollup, in areaId: String) {
-        guard rollup.kind == .lights else {
-            assertionFailure("allOff called with rollup.kind == \(rollup.kind), expected .lights")
+        bulkFlip(rollup, in: areaId, expecting: .lights,
+                 isTarget: { $0.state == "on" }, flippingTo: "off") { connection, id in
+            try await connection.setLight(id, on: false)
+        }
+    }
+
+    /// Closes every open cover in the roll-up. `opening` counts as a target: a cover on its way up
+    /// is one the user asking for "close all" plainly means to include.
+    func closeAll(_ rollup: Rollup, in areaId: String) {
+        bulkFlip(rollup, in: areaId, expecting: .covers,
+                 isTarget: { $0.state == "open" || $0.state == "opening" }, flippingTo: "closed") { connection, id in
+            try await connection.closeCover(id)
+        }
+    }
+
+    /// One room's roll-up, flipped optimistically and then commanded in bounded batches.
+    ///
+    /// `allOff` and `closeAll` were this function twice, differing only in the four things now
+    /// passed in: which kind of roll-up is expected, which entities are targets, what state they
+    /// are flipped to, and which command is sent. Everything else — and it is the part that is
+    /// subtle — was duplicated, including the rollback rule, which had to be explained in both
+    /// copies.
+    ///
+    /// Every target's `states` entry is flipped **synchronously, here**, before anything is
+    /// batched — see `BulkActionRunner.run`'s doc comment for why the flip must not live inside the batched
+    /// work — then the commands run at most `bulkConcurrency` at a time and however many refuse
+    /// are recorded against this room.
+    ///
+    /// The `expecting` check is an internal-consistency assertion, not input validation: the
+    /// callers are `RoomSectionView`/`RoomDetailView` rendering a row whose kind they already
+    /// know, so a mismatch is a programming error and `assertionFailure` names the caller
+    /// (`#function` at the call site) rather than this shared helper.
+    private func bulkFlip(_ rollup: Rollup, in areaId: String, expecting kind: Rollup.Kind,
+                          isTarget: (EntityState) -> Bool, flippingTo flipped: String,
+                          caller: String = #function,
+                          _ command: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
+        guard rollup.kind == kind else {
+            assertionFailure("\(caller) called with rollup.kind == \(rollup.kind), expected \(kind)")
             return
         }
-        let targets = rollup.targetEntityIds.filter { states[$0]?.state == "on" }
+        let targets = rollup.targetEntityIds.filter { states[$0].map(isTarget) ?? false }
         var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
         for id in targets {
             guard let s = states[id] else { continue }
-            var next = s; next.state = "off"
+            var next = s; next.state = flipped
             flips[id] = (previous: s, flipped: next)
             states[id] = next
         }
-        runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
+        guard let connection else { return }
+        bulk.run(targets, kind: rollup.kind, in: areaId) { [weak self] id in
             guard let self else { return }
-            do { try await connection.setLight(id, on: false) }
+            do { try await command(connection, id) }
             catch {
                 // Whole-entity comparison, not just `state`: a WebSocket push that lands mid-flight
-                // and happens to also report "off" would satisfy a state-only check and overwrite
-                // the pushed reading (and its now-stale attributes/lastUpdated) with the tap-time
-                // snapshot. Comparing the whole `EntityState` — which carries `lastUpdated` — means
-                // any genuine push no longer compares equal, so the rollback correctly stays out.
+                // and happens to also report the flipped-to state would satisfy a state-only check
+                // and overwrite the pushed reading (and its now-stale attributes/lastUpdated) with
+                // the tap-time snapshot. Comparing the whole `EntityState` — which carries
+                // `lastUpdated` — means any genuine push no longer compares equal, so the rollback
+                // correctly stays out.
                 if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
                 throw error
             }
         }
     }
 
-    /// Closes every open cover in the roll-up — same up-front synchronous flip, then bounded and
-    /// counted commands, as `allOff`.
-    func closeAll(_ rollup: Rollup, in areaId: String) {
-        guard rollup.kind == .covers else {
-            assertionFailure("closeAll called with rollup.kind == \(rollup.kind), expected .covers")
-            return
-        }
-        let targets = rollup.targetEntityIds.filter {
-            let s = states[$0]?.state; return s == "open" || s == "opening"
-        }
-        var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
-        for id in targets {
-            guard let s = states[id] else { continue }
-            var next = s; next.state = "closed"
-            flips[id] = (previous: s, flipped: next)
-            states[id] = next
-        }
-        runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
-            guard let self else { return }
-            do { try await connection.closeCover(id) }
-            catch {
-                // See `allOff`'s matching catch: whole-entity comparison, not just `state`, so a
-                // mid-flight push that happens to also read "closed" doesn't get overwritten by
-                // the tap-time snapshot.
-                if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
-                throw error
-            }
-        }
-    }
+    // `runBulk` moved to `BulkActionRunner.run`, together with the whole of its reasoning —
+    // including the note about why this must not be "tidied" back into a task group.
+    // MARK: - History
+    //
+    // The caches, the in-flight guard, the cache-lifetime rules and the never-cache-a-failure
+    // reasoning all moved to `HistoryCache`. These forward, so the views and their tests keep the
+    // call sites they had — and, because each read happens through this store inside a `body`, the
+    // observation dependency still lands on the cache's own storage. `ObservationTests` pins that.
 
-    /// Runs `work` over `targets` in bounded batches, then records how many threw against this
-    /// room's (`areaId`'s) roll-up of `rollup.kind` — kind alone is not a safe key, because
-    /// `RoomSectionView`/`RoomDetailView` render one roll-up row per room, and a kind-only key
-    /// would print a Kitchen failure on the identical-kind row of every other room on the floor.
-    ///
-    /// The optimistic flip is **not** done here — `allOff`/`closeAll` do it synchronously, before
-    /// this is ever called. `work` only runs inside a batch's child tasks, so a flip placed there
-    /// would wait on *earlier batches' network round-trips* rather than on nothing: a 40-light
-    /// room would then staircase its tiles off in visible blocks of six over a couple of seconds
-    /// instead of the whole grid snapping off the instant the button is tapped, which defeats the
-    /// entire point of optimistic state. Bounding the network must not also bound the UI.
-    ///
-    /// Each entity keeps its own optimistic flip and rollback — flip done by the caller up front,
-    /// rollback done here in `work`, conditionally, only if the entity still holds the *whole*
-    /// `EntityState` the flip wrote (not just its `state` string) — so a late failure can't clobber
-    /// a state that changed in the meantime, e.g. a WebSocket push that landed mid-flight and
-    /// happens to also report the flipped-to state: comparing `state` alone would call that a
-    /// match and overwrite the pushed reading's attributes and `lastUpdated` with the stale
-    /// tap-time snapshot, which a state-only guard on a caller-side flip is exactly wide enough to
-    /// let through. One failure never disturbs another entity; that property predates this and
-    /// must survive it. What is new is that the failures are counted rather than discarded.
-    ///
-    /// **The isolation here is fiddly and was arrived at by compiling, not by reasoning.** Two
-    /// shapes that look obviously right do not build under `SWIFT_STRICT_CONCURRENCY: complete`:
-    ///
-    /// - A `@Sendable` closure cannot touch `states`, which is `@MainActor` — so `work` is
-    ///   `@MainActor`, and only the `await` on the connection actually suspends. That is enough:
-    ///   MainActor tasks interleave at suspension points, so the network round-trips still overlap.
-    /// - `withTaskGroup` + `group.addTask { @MainActor in … }` fails with *"pattern that the
-    ///   region-based isolation checker does not understand how to check. Please file a bug"* —
-    ///   a compiler limitation, not a mistake in the code. Plain child `Task`s collected into an
-    ///   array avoid it entirely and read more simply.
-    ///
-    /// Do not "tidy" this back into a task group.
-    private func runBulk(_ rollup: Rollup, in areaId: String, targets: [String],
-                         _ work: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
-        guard let connection else { return }
-        recordBulkFailures(0, for: rollup.kind, in: areaId)
-        Task { @MainActor in
-            var failed = 0
-            var index = 0
-            while index < targets.count {
-                let slice = Array(targets[index..<min(index + Self.bulkConcurrency, targets.count)])
-                index += slice.count
-                let running = slice.map { id in
-                    Task { @MainActor in
-                        do { try await work(connection, id); return true } catch { return false }
-                    }
-                }
-                for task in running {
-                    if await task.value == false { failed += 1 }
-                }
-            }
-            recordBulkFailures(failed, for: rollup.kind, in: areaId)
-        }
-    }
-
-    /// The cache key for one series.
-    ///
-    /// `attribute` is part of it because a thermostat-only room reads two series off a single
-    /// entity at a single range — `current_temperature` and `current_humidity`. Keyed on entity
-    /// and range alone those collide, and the room's chart plots one series twice under two
-    /// labels, which looks like data rather than like a bug.
-    ///
-    /// Internal rather than private so the cache's separation can be asserted directly; the
-    /// alternative is a test that drives a live connection to prove a dictionary key.
     static func historyKey(_ entityId: String, _ range: HistoryRange, _ attribute: String?) -> String {
-        "\(entityId)#\(attribute ?? "")#\(range)"
+        HistoryCache.key(entityId, range, attribute)
     }
 
-    /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
-    /// (or the load failed) — callers should render an empty/loading state, not crash.
     func history(_ entityId: String, _ range: HistoryRange, attribute: String? = nil) -> HistorySeries? {
-        historyByKey[Self.historyKey(entityId, range, attribute)]?.series
+        historyCache.series(entityId, range, attribute: attribute)
     }
 
-    /// Fetches and caches a history series for `entityId`/`range`/`attribute`. Reuses the cache
-    /// while the entry is still within `range.cacheLifetime` (a range or attribute switch always
-    /// misses, since the key changes); never caches a failure, so a transient error doesn't
-    /// permanently block a later retry.
     func loadHistory(_ entityId: String, range: HistoryRange, attribute: String? = nil) async {
-        let key = Self.historyKey(entityId, range, attribute)
-        let now = Date()
-        if let cached = historyByKey[key], now.timeIntervalSince(cached.fetched) < range.cacheLifetime {
-            return
-        }
-        guard !historyInFlight.contains(key), let connection else { return }
-        historyInFlight.insert(key)
-        defer { historyInFlight.remove(key) }
-        do {
-            let series = try await connection.history(entityId: entityId, attribute: attribute,
-                                                      range: range, now: now)
-            historyByKey[key] = (series, now)
-        } catch {
-            // Leave the cache untouched so a later attempt can retry — and note that a *stale*
-            // entry deliberately survives a failed refresh. An old chart beats a blank one.
-        }
+        await historyCache.load(entityId, range: range, attribute: attribute)
     }
 
-    /// Cached recent state changes, ignoring `fetched` age — a stale list beats a blank one, exactly
-    /// as `history(_:_:attribute:)` reads `historyByKey`. `nil` means "not loaded yet, or every
-    /// attempt so far has failed"; callers distinguish the two with `stateChangesLoadFailed`.
-    func stateChanges(_ entityId: String) -> [StateChange]? { stateChangesByEntity[entityId]?.changes }
+    func stateChanges(_ entityId: String) -> [StateChange]? { historyCache.stateChanges(entityId) }
 
-    /// Whether the most recent fetch for `entityId` failed with nothing cached to fall back to. The
-    /// binary-sensor modal uses this to tell "not asked yet" (render nothing conclusive, a loading
-    /// state is fine) apart from "asked, and it failed" (say so, rather than show "Loading…"
-    /// forever — the state before this existed, on an install without the `history` integration or
-    /// an entity `recorder` excludes).
-    func stateChangesLoadFailed(_ entityId: String) -> Bool { stateChangesFailed.contains(entityId) }
+    func stateChangesLoadFailed(_ entityId: String) -> Bool { historyCache.loadFailed(entityId) }
 
-    /// Fetches and caches recent state changes. Reuses the cache while the entry is still within
-    /// `HistoryRange.day.cacheLifetime` — the same lifetime and reasoning as `loadHistory`'s Day
-    /// range, since this is always a Day query. Never caches a failure (so a transient error doesn't
-    /// permanently block a retry) and never *clears* a stale cache on failure either — an old list
-    /// beats a blank one.
     func loadStateChanges(_ entityId: String) async {
-        let now = Date()
-        if let cached = stateChangesByEntity[entityId],
-           now.timeIntervalSince(cached.fetched) < HistoryRange.day.cacheLifetime {
-            return
-        }
-        guard let connection else { return }
-        do {
-            let changes = try await connection.stateChanges(entityId: entityId, range: .day, now: now)
-            stateChangesByEntity[entityId] = (changes, now)
-            stateChangesFailed.remove(entityId)
-        } catch {
-            // Leave the cache untouched so a later attempt can retry, but note the failure so a
-            // caller with nothing cached can say so instead of showing "Loading…" forever.
-            stateChangesFailed.insert(entityId)
-        }
+        await historyCache.loadStateChanges(entityId)
     }
 }

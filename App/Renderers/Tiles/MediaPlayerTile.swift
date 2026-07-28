@@ -21,6 +21,7 @@ struct MediaPlayerTile: View {
     let entityId: String
     var size: MediaTileSize = .small
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     /// Non-nil only while dragging the volume slider — the preview the drag moves, so no command
     /// goes out until the finger lifts. Exactly `MediaPlayerModal.dragVolume`.
     @State private var dragVolume: Double?
@@ -37,13 +38,13 @@ struct MediaPlayerTile: View {
             case .large: large(s, name: name, deviceClass: e?.deviceClass)
             }
         }
-        .onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         // `.contain`, not `.combine`: these tiles hold real buttons, and combining would fold them
         // into a single label a VoiceOver user could read but not operate. The label below is the
         // container's, spoken on entry, and each button keeps its own.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.mediaPlayer(name, $0) } ?? name)
-        .accessibilityAction(named: "Open controls") { store.presented = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
     }
 
     // MARK: - 1×1
@@ -61,7 +62,8 @@ struct MediaPlayerTile: View {
                 Text(name)
                     .font(.system(size: 10.5, weight: .semibold))
                     .lineLimit(1)
-                    .foregroundStyle(unavailable ? .secondary : ((s?.isActive ?? false) ? .primary : .secondary))
+                    .foregroundStyle(tileColor((s?.isActive ?? false) ? .primary : .secondary,
+                                               unavailable: unavailable, accent: accent))
             }
             .frame(maxWidth: .infinity)
         }
@@ -90,7 +92,7 @@ struct MediaPlayerTile: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .onTapGesture { store.presented = entityId }
+                    .onTapGesture { navigation.presentedEntityId = entityId }
                     playPauseButton(s, size: 22)
                     if s?.features.contains(.nextTrack) ?? false {
                         transportButton("forward.end.fill", label: "Next track", size: 15) {
@@ -139,7 +141,7 @@ struct MediaPlayerTile: View {
                 .clipped()
                 .overlay(alignment: .bottom) { transportScrim(s) }
                 .contentShape(Rectangle())
-                .onTapGesture { store.presented = entityId }
+                .onTapGesture { navigation.presentedEntityId = entityId }
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s?.title ?? name)
@@ -155,7 +157,7 @@ struct MediaPlayerTile: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .onTapGesture { store.presented = entityId }
+                .onTapGesture { navigation.presentedEntityId = entityId }
                 Spacer(minLength: 0)
                 volumeRow(s)
             }
@@ -424,7 +426,7 @@ private struct ScrollingText: View {
     private var lines: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(text).font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(unavailable ? .secondary : .primary)
+                .foregroundStyle(tileColor(.primary, unavailable: unavailable, accent: .gray))
             if let secondary {
                 Text(secondary).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }
