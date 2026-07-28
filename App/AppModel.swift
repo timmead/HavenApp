@@ -557,6 +557,9 @@ final class AppModel {
             // cancellation check), or the abandoned socket + its 10s heartbeat loop leak
             // for as long as the app runs.
             var client: HAWebSocketClient?
+            // Reset per attempt, so the in-place retry after a forced refresh is timed as its own
+            // dial rather than accumulating onto the one that failed.
+            var timing = ConnectTiming()
             do {
                 // Must happen before `validAccessToken`: a refresh triggered for this
                 // candidate has to POST to *this* candidate's host, not whichever one a
@@ -566,12 +569,15 @@ final class AppModel {
                 // the remote candidate, defeating failover before a socket is ever opened.
                 await tokenProvider.setBaseURL(candidate.url)
                 let token = try await tokenProvider.validAccessToken(now: Date())
+                timing.mark("token")
                 if Task.isCancelled { return result(.cancelled) }
                 havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(round, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")
                 let conn = makeConnection(wsURL)
                 let c = HAWebSocketClient(connection: conn)
                 client = c
+                timing.mark("socket")
                 try await c.authenticate(token: token)
+                timing.mark("auth")
                 if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
                 havenLog.info("WS auth_ok")
                 didForceRefreshAfterAuthInvalid = false
@@ -580,8 +586,9 @@ final class AppModel {
                 let home = HomeConnection(client: c)
                 store.attach(home)
                 try await store.bootstrap()
+                timing.mark("bootstrap")
                 if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
-                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
+                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities [\(timing.summary, privacy: .public)]")
                 defaults.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
                 // The UI must become usable now, not after `fetchInstanceConfig` in
                 // `finishConnecting` below: `request(_:)` (and so `get_config`) is deliberately
@@ -651,7 +658,7 @@ final class AppModel {
             } catch {
                 await client?.disconnect()
                 if Task.isCancelled { return result(.cancelled) }
-                havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed: \(error, privacy: .public)")
+                havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed after \(timing.summary, privacy: .public): \(error, privacy: .public)")
                 // Move on to the next candidate (or, if this was the last, the
                 // round-level backoff in `connect()`) — not a per-candidate backoff.
             }
