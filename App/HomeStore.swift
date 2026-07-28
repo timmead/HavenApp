@@ -5,7 +5,12 @@ import HavenCore
 final class HomeStore {
     var home = ResolvedHome(floors: [])
     var states: [String: EntityState] = [:]
-    var historyByKey: [String: HistorySeries] = [:]
+    /// Fetched series, with the moment each was fetched — see `HistoryRange.cacheLifetime`.
+    var historyByKey: [String: (series: HistorySeries, fetched: Date)] = [:]
+    /// Keys with a fetch currently in flight. Without this, flicking across the range picker fires
+    /// a request per tap and the last one to *arrive* wins, which is not necessarily the one the
+    /// user is looking at.
+    private var historyInFlight: Set<String> = []
     /// Recent state changes per entity, for the binary-sensor modal. Keyed by entity id alone —
     /// unlike `historyByKey` there is one range (Day) and no attribute variant to disambiguate.
     var stateChangesByEntity: [String: [StateChange]] = [:]
@@ -621,21 +626,29 @@ final class HomeStore {
     /// Cached read for a previously-loaded history series. `nil` means "not loaded yet"
     /// (or the load failed) — callers should render an empty/loading state, not crash.
     func history(_ entityId: String, _ range: HistoryRange, attribute: String? = nil) -> HistorySeries? {
-        historyByKey[Self.historyKey(entityId, range, attribute)]
+        historyByKey[Self.historyKey(entityId, range, attribute)]?.series
     }
 
     /// Fetches and caches a history series for `entityId`/`range`/`attribute`. Reuses the cache
-    /// when already populated (a range or attribute switch always misses, since the key changes);
-    /// never caches a failure, so a transient error doesn't permanently block a later retry.
+    /// while the entry is still within `range.cacheLifetime` (a range or attribute switch always
+    /// misses, since the key changes); never caches a failure, so a transient error doesn't
+    /// permanently block a later retry.
     func loadHistory(_ entityId: String, range: HistoryRange, attribute: String? = nil) async {
         let key = Self.historyKey(entityId, range, attribute)
-        guard historyByKey[key] == nil else { return }
-        guard let connection else { return }
+        let now = Date()
+        if let cached = historyByKey[key], now.timeIntervalSince(cached.fetched) < range.cacheLifetime {
+            return
+        }
+        guard !historyInFlight.contains(key), let connection else { return }
+        historyInFlight.insert(key)
+        defer { historyInFlight.remove(key) }
         do {
-            historyByKey[key] = try await connection.history(entityId: entityId, attribute: attribute,
-                                                             range: range, now: Date())
+            let series = try await connection.history(entityId: entityId, attribute: attribute,
+                                                      range: range, now: now)
+            historyByKey[key] = (series, now)
         } catch {
-            // Leave the cache untouched so a later attempt (e.g. reopening the modal) can retry.
+            // Leave the cache untouched so a later attempt can retry — and note that a *stale*
+            // entry deliberately survives a failed refresh. An old chart beats a blank one.
         }
     }
 

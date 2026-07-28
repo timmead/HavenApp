@@ -35,6 +35,22 @@ public enum HistoryRange: Sendable, CaseIterable {
         case .year: "month"
         }
     }
+
+    /// How long a fetched series stays usable before it is re-fetched.
+    ///
+    /// Scaled to how fast the underlying data actually moves rather than picked as one number: a
+    /// Day chart is drawn from hourly buckets and goes stale within the hour, while a Year chart
+    /// built from monthly ones cannot meaningfully change between two glances on the same evening.
+    /// Before this the cache had no expiry at all, so a chart opened at breakfast still showed
+    /// breakfast's data at dinner without the app ever having been quit.
+    public var cacheLifetime: TimeInterval {
+        switch self {
+        case .day: 300            // 5 minutes
+        case .week: 1_800         // 30 minutes
+        case .month, .threeMonths: 3_600
+        case .year: 21_600        // 6 hours
+        }
+    }
 }
 
 public struct HistoryPoint: Sendable, Equatable {

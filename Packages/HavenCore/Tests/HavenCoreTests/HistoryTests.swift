@@ -160,3 +160,25 @@ import Foundation
     #expect(s.points.isEmpty)
     #expect(s.min == nil)
 }
+
+/// A range's data is worth re-fetching on roughly the cadence at which it changes. A Day chart
+/// drawn from hourly buckets goes stale within the hour; a Year chart built from monthly ones does
+/// not change meaningfully between two glances on the same day.
+@Test func cacheLifetimeGrowsWithTheRange() {
+    #expect(HistoryRange.day.cacheLifetime < HistoryRange.week.cacheLifetime)
+    #expect(HistoryRange.week.cacheLifetime <= HistoryRange.month.cacheLifetime)
+    #expect(HistoryRange.month.cacheLifetime <= HistoryRange.year.cacheLifetime)
+}
+
+/// Every range must actually expire. An infinite lifetime is the bug this replaced.
+@Test func everyRangeExpires() {
+    for range in HistoryRange.allCases {
+        #expect(range.cacheLifetime > 0, "\(range.label) never expires")
+        #expect(range.cacheLifetime.isFinite, "\(range.label) has an infinite lifetime")
+    }
+}
+
+/// Short enough that a chart left open across a few minutes is not lying about "now".
+@Test func theDayRangeExpiresWithinFiveMinutes() {
+    #expect(HistoryRange.day.cacheLifetime <= 300)
+}
