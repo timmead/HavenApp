@@ -20,8 +20,67 @@ private enum DefaultsKeys {
 
 @MainActor @Observable
 final class AppModel {
-    enum Phase { case loggedOut, connecting, retrying(attempt: Int), ready, error(String) }
-    var phase: Phase = .loggedOut
+    enum Phase {
+        /// Launched, and not yet knowing whether there is a session to restore.
+        ///
+        /// **The initial value, and the fix for a flicker that was there from the beginning.**
+        /// `phase` used to start at `.loggedOut`, which is an assertion the app has not earned:
+        /// nothing has looked in the Keychain yet. `RootView` therefore rendered `LoginView` on the
+        /// very first frame, and `restoreIfPossible` replaced it a moment later — a sign-in screen
+        /// flashing past on every launch of an app that was signed in the whole time.
+        ///
+        /// Resolving it is `restoreIfPossible`'s job and nobody else's: to `.loggedOut` when there
+        /// is genuinely no session, and onward to `.connecting` when there is.
+        case launching
+        case loggedOut
+        case connecting
+        /// A round of candidates failed and the next is pending after a backoff.
+        ///
+        /// `isReconnect` distinguishes the two situations that look identical from inside the loop
+        /// and completely different to the person holding the phone: a live session that dropped,
+        /// versus a first connection that has not landed yet. Saying "Connection lost" to someone
+        /// who has just opened the app claims something untrue and reads as a fault in their setup.
+        /// Carried on the case rather than as a second property beside `phase`, so there is one
+        /// value to switch on and no way for the two to disagree.
+        case retrying(attempt: Int, isReconnect: Bool)
+        case ready
+        case error(String)
+
+        /// What to tell the user about a connection in progress — and, by being non-`nil` at all,
+        /// *that* one is in progress.
+        ///
+        /// **One switch, so the two answers cannot disagree.** These were briefly separate, and a
+        /// phase that was reported as connecting but had no message (or the reverse) would either
+        /// strand the user on a screen with no way out or flash one that should have been held
+        /// back. Deriving `isConnectionInProgress` from this makes that unrepresentable.
+        ///
+        /// Exhaustive with no `default`, so a phase added later has to answer rather than fall
+        /// through to "not connecting" and silently reintroduce the flicker this replaced. And it
+        /// lives on the phase rather than as a predicate in the view for the reason recorded on
+        /// `RootView.showingConnectionSettings`: a second copy of a decision that a change to the
+        /// `switch` could contradict is how this project has been bitten before.
+        var connectionProgressMessage: String? {
+            switch self {
+            case .launching, .connecting:
+                return "Connecting to Home Assistant…"
+            case .retrying(let attempt, let isReconnect):
+                // Two different sentences because they describe two different situations, and the
+                // wrong one is actively misleading. "Connection lost" to someone who has just
+                // opened the app asserts that something broke — it reads as a fault in their Home
+                // Assistant or their network, when the ordinary cause is a first connect that
+                // simply has not landed yet.
+                return isReconnect
+                    ? "Connection lost — retrying… (attempt \(attempt))"
+                    : "Connecting to Home Assistant… (attempt \(attempt))"
+            case .loggedOut, .ready, .error:
+                return nil
+            }
+        }
+
+        /// Whether the app is actively trying to reach Home Assistant right now.
+        var isConnectionInProgress: Bool { connectionProgressMessage != nil }
+    }
+    var phase: Phase = .launching
     var serverURLText = "http://homeassistant.local:8123"
     let store = HomeStore()
     /// Guided setup for the `havenapp` integration. Created once and re-`attach`ed on every
@@ -105,6 +164,14 @@ final class AppModel {
     private let customRemoteURLStore: CustomRemoteURLStore
     private var baseURL: URL?
     private var tokenProvider: TokenProvider?
+    /// Whether this signed-in session has ever reached `.ready`.
+    ///
+    /// The only input to `Phase.retrying`'s `isReconnect`, and deliberately keyed on the *session*
+    /// rather than on which function started the connect: `reconnectAfterConnectionLoss` is not the
+    /// only way a working connection can be retried, and a first connect that fails its first round
+    /// must not be described as a lost one no matter what called it. Cleared wherever the session
+    /// ends, so signing in again starts over as a first connect.
+    private var hasConnectedSinceSignIn = false
 
     /// Loads images that live behind Home Assistant's authentication — media-player artwork and
     /// camera snapshots — for the current session. `nil` while signed out.
@@ -221,8 +288,15 @@ final class AppModel {
         await startConnecting()
     }
 
+    /// Resolves `.launching` — the one place that decides whether this launch has a session.
+    ///
+    /// The `else` is load-bearing: without it a launch with no saved session would sit in
+    /// `.launching` forever, showing the connecting screen to someone who has never signed in.
     func restoreIfPossible() async {
-        guard tokens.load() != nil, let url = savedBaseURL() else { return }
+        guard tokens.load() != nil, let url = savedBaseURL() else {
+            phase = .loggedOut
+            return
+        }
         baseURL = url
         // So `requireReauthentication()`'s "re-authorize, don't retype the host" holds even on a
         // cold launch — LoginView binds to `serverURLText`, not `baseURL`.
@@ -315,6 +389,7 @@ final class AppModel {
         // Dropped, not just cleared: these are pictures of the user's home, fetched with their
         // token, and nothing signed out has any business still holding them in memory.
         imageLoader = nil
+        hasConnectedSinceSignIn = false
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
@@ -331,6 +406,7 @@ final class AppModel {
         tokens.clear()
         tokenProvider = nil
         imageLoader = nil
+        hasConnectedSinceSignIn = false
         await store.reset()
         onboarding.reset()
         remoteAccessOffer.reset()
@@ -478,7 +554,7 @@ final class AppModel {
             }
             attempt += 1
             havenLog.error("all candidates failed this round — backing off (attempt \(attempt, privacy: .public))")
-            phase = .retrying(attempt: attempt)
+            phase = .retrying(attempt: attempt, isReconnect: hasConnectedSinceSignIn)
             try? await Task.sleep(for: policy.delay(forAttempt: attempt))
         }
     }
@@ -557,6 +633,9 @@ final class AppModel {
             // cancellation check), or the abandoned socket + its 10s heartbeat loop leak
             // for as long as the app runs.
             var client: HAWebSocketClient?
+            // Reset per attempt, so the in-place retry after a forced refresh is timed as its own
+            // dial rather than accumulating onto the one that failed.
+            var timing = ConnectTiming()
             do {
                 // Must happen before `validAccessToken`: a refresh triggered for this
                 // candidate has to POST to *this* candidate's host, not whichever one a
@@ -566,12 +645,15 @@ final class AppModel {
                 // the remote candidate, defeating failover before a socket is ever opened.
                 await tokenProvider.setBaseURL(candidate.url)
                 let token = try await tokenProvider.validAccessToken(now: Date())
+                timing.mark("token")
                 if Task.isCancelled { return result(.cancelled) }
                 havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(round, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")
                 let conn = makeConnection(wsURL)
                 let c = HAWebSocketClient(connection: conn)
                 client = c
+                timing.mark("socket")
                 try await c.authenticate(token: token)
+                timing.mark("auth")
                 if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
                 havenLog.info("WS auth_ok")
                 didForceRefreshAfterAuthInvalid = false
@@ -580,8 +662,9 @@ final class AppModel {
                 let home = HomeConnection(client: c)
                 store.attach(home)
                 try await store.bootstrap()
+                timing.mark("bootstrap")
                 if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
-                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
+                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities [\(timing.summary, privacy: .public)]")
                 defaults.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
                 // The UI must become usable now, not after `fetchInstanceConfig` in
                 // `finishConnecting` below: `request(_:)` (and so `get_config`) is deliberately
@@ -589,6 +672,7 @@ final class AppModel {
                 // `get_config` must not pin the connecting spinner forever over a socket that is
                 // otherwise perfectly live and usable.
                 phase = .ready
+                hasConnectedSinceSignIn = true
                 // Read here because only this scope holds the `NWWebSocketConnection` — see
                 // `finishConnecting` for what it is used to decide and why it is read off the
                 // socket rather than derived from the URL.
@@ -651,7 +735,7 @@ final class AppModel {
             } catch {
                 await client?.disconnect()
                 if Task.isCancelled { return result(.cancelled) }
-                havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed: \(error, privacy: .public)")
+                havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed after \(timing.summary, privacy: .public): \(error, privacy: .public)")
                 // Move on to the next candidate (or, if this was the last, the
                 // round-level backoff in `connect()`) — not a per-candidate backoff.
             }

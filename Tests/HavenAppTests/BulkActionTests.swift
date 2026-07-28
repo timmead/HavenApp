@@ -71,6 +71,19 @@ import HavenCore
         func connect() async throws {}
         nonisolated func close() {}
 
+        /// **The latency is in the response, not in the write** — and this fake used to put it in
+        /// the write, which measured the wrong thing.
+        ///
+        /// A real `send` completes when Network.framework has taken the frame, in microseconds; it
+        /// does not wait for Home Assistant. Sleeping inside `send` therefore modelled a socket
+        /// nobody has, and `maxOutstanding` counted *concurrent writes* rather than concurrent
+        /// in-flight commands. That distinction did not matter until `HAWebSocketClient` began
+        /// serialising its writes to keep command ids in increasing order — at which point this
+        /// test failed, reporting a peak of 1, while the thing it exists to check (that a bulk
+        /// action overlaps its round trips, six at a time) was entirely unaffected.
+        ///
+        /// So the reply is now scheduled off the send path. `outstanding` spans send → reply,
+        /// which is what "outstanding command" means.
         func send(_ data: Data) async throws {
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let id = obj["id"] as? Int, let type = obj["type"] as? String,
@@ -78,10 +91,16 @@ import HavenCore
             outstanding += 1
             maxOutstanding = max(maxOutstanding, outstanding)
             let entityId = ((obj["target"] as? [String: Any])?["entity_id"] as? String) ?? ""
-            // Long enough that every task in a 6-wide batch has certainly reached `send` before
-            // any of them gets its answer back, so `maxOutstanding` reflects real overlap rather
-            // than however fast this fake happens to run.
-            try? await Task.sleep(for: .milliseconds(30))
+            Task { [weak self] in
+                // Long enough that every task in a 6-wide batch has certainly reached `send`
+                // before any of them gets its answer back, so `maxOutstanding` reflects real
+                // overlap rather than however fast this fake happens to run.
+                try? await Task.sleep(for: .milliseconds(30))
+                await self?.reply(id: id, entityId: entityId)
+            }
+        }
+
+        private func reply(id: Int, entityId: String) {
             outstanding -= 1
             if failing.contains(entityId) {
                 enqueue(#"{"id":\#(id),"type":"result","success":false,"error":{"code":"unknown_error","message":"nope"}}"#)

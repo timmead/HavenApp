@@ -278,7 +278,13 @@ import HavenCore
 
         #expect(tokens.clearCount == 0,
                 "one candidate's word is not enough to end the session, whatever the others did")
-        if case .retrying = app.phase {} else {
+        // `isReconnect: false` is the point as much as `.retrying` is: this session has never
+        // reached `.ready`, so the screen must not tell the user their connection was *lost*. It
+        // was never made. That sentence claims a fault in their setup that does not exist, and it
+        // is the one the app used to show on every slow first connect.
+        if case .retrying(_, let isReconnect) = app.phase {
+            #expect(!isReconnect, "a first connect that has not landed yet is not a lost connection")
+        } else {
             Issue.record("expected .retrying after a failed round, got \(app.phase)")
         }
 

@@ -89,7 +89,18 @@ extension ConnectionClass {
         if dialledRemoteCandidate { return .remote }
 
         if let peerAddress, !peerAddress.isEmpty {
-            if let octets = strictIPv4Octets(peerAddress) {
+            // The interface qualifier is stripped for the IPv4 parse and **only** for it.
+            // `NWPath.remoteEndpoint` reports the interface a socket is bound to — `192.168.1.42%en0`
+            // is a real observed value, from a device log — and `strictIPv4Octets` splits on `.`
+            // and then fails on `"42%en0"`, so an unmistakably private LAN address fell through to
+            // the fail-closed branch and every local connection was classified `.remote`.
+            //
+            // `IPv6Address` needs no such help: it accepts a zone identifier natively, which is why
+            // the IPv6 side of this never broke (see `ipv6LinkLocalIsLocalIncludingWithAZoneSuffix`,
+            // written at the time; the IPv4 equivalent simply never was). So the v6 branch below is
+            // deliberately given the *original* string, zone and all — that is a spelling it
+            // understands, and narrowing it here would be a change with no benefit to justify it.
+            if let octets = strictIPv4Octets(withoutZoneIdentifier(peerAddress)) {
                 // Definitive both ways: a LAN never hands out a public IPv4, so a public one here
                 // means the bytes left the network — the SSID does not get to overrule it.
                 return isPrivateIPv4(octets) ? .local : .remote
@@ -106,6 +117,23 @@ extension ConnectionClass {
         // No usable address: unresolved, unreportable, or not an IP literal at all. Ambiguous in the
         // same way, so the SSID is the only evidence left — and absent that, fail closed.
         return onKnownHomeNetwork == true ? .local : .remote
+    }
+
+    /// The address with any interface qualifier removed — `"192.168.1.42%en0"` → `"192.168.1.42"`.
+    ///
+    /// **This can only ever make a string parseable; it can never change which address is judged.**
+    /// A zone identifier says which interface a link-scoped address is reachable on. It is not part
+    /// of the address, carries none of its bits, and sits entirely after the `%`. So `8.8.8.8%en0`
+    /// strips to `8.8.8.8` and stays public, and nothing that was `.remote` can become `.local` by
+    /// way of this — which is the property `aZoneSuffixDoesNotMakeAPublicAddressLocal` exists to
+    /// hold, including for the shorthand spellings the strict parser refuses.
+    ///
+    /// Taken up to the *first* `%`, so a string with several leaves the remainder in the parsed
+    /// portion, where the strict parser rejects it. Deliberately applied at the call site rather
+    /// than inside `strictIPv4Octets`: that function's contract is that it accepts exactly one
+    /// spelling and nothing else, and it is worth keeping it that literal.
+    private static func withoutZoneIdentifier(_ address: String) -> String {
+        String(address.prefix { $0 != "%" })
     }
 
     /// Strict dotted-quad parsing, deliberately hand-rolled rather than using `IPv4Address(String)`.

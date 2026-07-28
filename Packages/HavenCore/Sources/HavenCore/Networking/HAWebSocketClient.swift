@@ -20,6 +20,22 @@ public actor HAWebSocketClient {
     /// transport whose `send` succeeds regardless (the test fake, and any real one that buffers)
     /// it would not.
     private var isClosed = false
+    /// The tail of the outgoing chain: every frame waits for its predecessor's write to finish
+    /// before starting its own.
+    ///
+    /// **Home Assistant requires command ids to arrive in increasing order and closes the
+    /// connection over it** — `id_reuse`, "Identifier values have to increase." Ids are allocated
+    /// under actor isolation and so are correctly ordered, but the *write* used to be handed to an
+    /// unstructured `Task` per request, and nothing related the order those tasks reached the
+    /// transport to the order their ids were taken. `loadStructure()` fires four registry queries
+    /// with `async let`, so four writes raced; measured on a fake transport with realistic latency,
+    /// **all eight of eight concurrent requests were in flight at once.** Whether HA saw them in
+    /// order was down to the scheduler, which is why connecting took a variable number of attempts.
+    ///
+    /// This costs the *writes* their parallelism and nothing else: handing a frame to the socket
+    /// takes microseconds, and the four responses still arrive concurrently, so `loadStructure`
+    /// keeps the overlap that actually matters.
+    private var sendChain: Task<Void, Never>?
     public let events: AsyncStream<ServerFrame>
 
     public init(connection: WebSocketConnection) {
@@ -73,9 +89,15 @@ public actor HAWebSocketClient {
         defer { expiry?.cancel() }
         return try await withCheckedThrowingContinuation { cont in
             pending[id] = cont
-            Task {
-                do { try await connection.send(data) }
-                catch { if self.pending.removeValue(forKey: id) != nil { cont.resume(throwing: error) } }
+            // Chained rather than fired independently — see `sendChain`. The continuation is
+            // registered first, synchronously, exactly as before: the write must not be able to
+            // complete and its answer arrive before there is anything to resolve.
+            let previous = sendChain
+            sendChain = Task { [weak self] in
+                await previous?.value
+                guard let self else { return }
+                do { try await self.connection.send(data) }
+                catch { await self.fail(id: id, with: error) }
             }
         }
     }
@@ -205,7 +227,19 @@ public actor HAWebSocketClient {
     private func teardown(reason: Error) {
         receiveLoop?.cancel(); receiveLoop = nil
         heartbeat?.cancel(); heartbeat = nil
+        // Dropped, not awaited: anything still queued to write is writing to a socket that is
+        // about to close, and `failAll` below resolves its caller either way.
+        sendChain?.cancel(); sendChain = nil
         connection.close()
         failAll(with: reason)
+    }
+
+    /// Resolves one pending request with an error, if it is still outstanding.
+    ///
+    /// Its own method so the send chain — which runs on this actor but outside `request`'s frame —
+    /// has an isolated way to say "this one's write failed" without reaching into `pending`
+    /// directly from a closure.
+    private func fail(id: Int, with error: Error) {
+        if let cont = pending.removeValue(forKey: id) { cont.resume(throwing: error) }
     }
 }
