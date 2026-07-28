@@ -16,9 +16,9 @@ struct SwitchModal: View {
             ModalHeader(systemImage: IconMap.symbol(domain: .switchOutlet, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
                         subtitle: unavailable ? "Unavailable" : (unknown ? "Unknown" : (on ? "On" : "Off")),
-                        accent: unavailable ? .secondary : HavenColor.domain(.switchOutlet),
+                        accent: HavenColor.domain(.switchOutlet), unavailable: unavailable,
                         toggle: Binding(get: { on }, set: { store.setSwitch(entityId, on: $0) }),
-                        toggleEnabled: !unavailable)
+                        )
         }
     }
 }

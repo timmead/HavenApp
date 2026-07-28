@@ -6,7 +6,12 @@ struct GenericModal: View {
     var body: some View {
         let e = store.state(entityId)
         VStack(spacing: 12) {
-            ModalHeader(systemImage: IconMap.symbol(domain: .unknown, deviceClass: e?.deviceClass), title: TileName.of(entityId, e), subtitle: e?.state ?? "—", accent: .gray)
+            // The accent here was already `.gray`, so this modal never *looked* wrong — but it
+            // named the state only by echoing the raw string. Answering the question explicitly
+            // gets it the same "Unavailable" wording as every other header.
+            ModalHeader(systemImage: IconMap.symbol(domain: .unknown, deviceClass: e?.deviceClass),
+                        title: TileName.of(entityId, e), subtitle: e?.state ?? "—",
+                        accent: .gray, unavailable: e?.isUnavailable ?? false)
             FacetCard(title: "Attributes") {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach((e?.attributes.keys.sorted() ?? []), id: \.self) { k in

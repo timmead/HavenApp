@@ -35,9 +35,9 @@ struct LightModal: View {
             ModalHeader(systemImage: IconMap.symbol(domain: .light, deviceClass: e?.deviceClass), title: name,
                         subtitle: unavailable ? "Unavailable"
                             : (unknown ? "Unknown" : ((s?.isOn ?? false) ? "On" : "Off")),
-                        accent: unavailable ? .secondary : accent,
+                        accent: accent, unavailable: unavailable,
                         toggle: Binding(get: { s?.isOn ?? false }, set: { store.setLight(entityId, on: $0) }),
-                        toggleEnabled: !unavailable)
+                        )
             if s?.supportsBrightness ?? false {
                 FacetCard(title: "Brightness") {
                     Slider(value: Binding(get: { dragPercent ?? live },

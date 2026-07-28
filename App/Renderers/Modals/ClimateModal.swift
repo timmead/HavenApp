@@ -20,9 +20,9 @@ struct ClimateModal: View {
                         title: TileName.of(entityId, e),
                         subtitle: unavailable ? "Unavailable"
                             : (unknown ? "Unknown" : (s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "")),
-                        accent: unavailable ? .secondary : accent,
+                        accent: accent, unavailable: unavailable,
                         toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") }),
-                        toggleEnabled: !unavailable)
+                        )
             FacetCard {
                 HStack {
                     Button { if let t = s?.targetTemp { store.setClimateTemp(entityId, temp: t - 1) } } label: { Image(systemName: "minus.circle.fill").font(.title) }

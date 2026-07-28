@@ -45,7 +45,7 @@ struct BinarySensorModal: View {
             ModalHeader(systemImage: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
                         subtitle: unavailable ? "Unavailable" : (active ? "Active" : "Clear"),
-                        accent: unavailable ? .secondary : (active ? HavenColor.warning : .gray))
+                        accent: active ? HavenColor.warning : .gray, unavailable: unavailable)
 
             FacetCard(title: "Recent") {
                 if let changes = store.stateChanges(entityId) {

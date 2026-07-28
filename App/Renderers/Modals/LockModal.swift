@@ -43,7 +43,12 @@ struct LockModal: View {
         let accent = (unavailable || unknown) ? Color.secondary : (jammed ? HavenColor.warning : HavenColor.domain(.lock))
         VStack(spacing: 20) {
             // No `toggle:` at all, in either state — see the type's doc comment.
-            ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle, accent: accent)
+            // `accent` and `subtitle` above already account for unreachability *and* for `unknown`,
+            // which the header cannot know about — so they stay this file's, and the header is told
+            // the one thing it needs to resolve the rest. The overlap is idempotent: it resolves an
+            // already-secondary accent to secondary.
+            ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle,
+                        accent: accent, unavailable: unavailable)
             actionButton(locked: locked, jammed: jammed, unavailable: unavailable, unknown: unknown, accent: accent)
         }
     }
