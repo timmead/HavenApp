@@ -150,6 +150,28 @@ depth four.
 
 ### P2 — `HomeStore` is six responsibilities in one `@Observable`
 
+> **Update — the blocker is gone, and the first extraction is done (commits 12–13).**
+>
+> This was deferred because splitting an `@Observable` changes *observation granularity*, whose
+> failure mode is "the view silently stops redrawing" — invisible to every test here, and
+> **actively hidden by a SwiftUI preview**, which holds a fixed store and looks pixel-perfect while
+> observation is dead.
+>
+> `Tests/HavenAppTests/ObservationTests.swift` closes that. `withObservationTracking` records
+> exactly what SwiftUI records when it evaluates a `body` — the properties actually read — so
+> "would this view redraw?" becomes a `#expect`. It is written against the accessors the views
+> really call (`state(_:)`, `isOn`, `bulkFailureCount`, `rooms()`, `presented`, `history(...)`),
+> plus a negative control so the suite cannot pass by reporting `true` unconditionally.
+>
+> Proven to bite: marking `bulkFailures` `@ObservationIgnored` — precisely the break a careless
+> extraction causes — turns one test red while **the other 75 stay green**.
+>
+> `BulkActionRunner` is extracted on that footing and the observation test for its tally passes
+> through the new child object. **Remaining: `HistoryCache` and `EnvironmentCoordinator`**, in that
+> order. Both are now ordinary refactors rather than gambles. Note `HistoryCache` will need the
+> `connection` forwarded to it on `attach`, and three test files read `historyByKey`/
+> `stateChangesByEntity` directly, so they move with it.
+
 760 lines, 48 methods, and these distinct jobs:
 
 | Responsibility | Evidence |
@@ -297,6 +319,39 @@ cancellation checks in both, 3 `requireReauthentication()` calls in both, and ea
 arms traced by hand to the same successor state. That is weaker than a test, which is exactly why
 P1 is the recommendation it is.
 
+## Second session — what was done, 2026-07-28
+
+Working through the list below. `git log main..refactor/foundation-review` has the detail.
+
+| Item | Status |
+|---|---|
+| **P4** tile chrome | **Done.** `TileEmphasis` (Core, tested) + `TileLabel`; no tile hand-writes the guard now |
+| **P6** move `FlowRow`/`PlayerLayerView` | **Done.** CameraModal 543 → 467 lines |
+| **P1** connection seam | **Done.** `PeerObservableConnection` + injected factory; six loop tests |
+| **P2** HomeStore split | **Started.** Blocker removed (see P2's update); `BulkActionRunner` extracted |
+| **P3** navigation state | **Not started.** See below |
+
+**P4 got real visual verification, which the plan said it needed and assumed it could not have.**
+Xcode's preview canvas renders without a Home Assistant, so `App/Renderers/TileGallery.swift`
+(DEBUG-only) shows every tile in every state — including the four this document called out as
+having historically been got wrong. Baseline captured before any edit, compared after: **pixel
+identical in both halves.** That gallery is now the standing answer to "did every tile get it".
+
+**Two tests were written wrong first, and mutation testing is the only reason anyone knows.** Both
+in `ConnectLoopTests`, both the same shape: the interesting candidate placed *second*, where the
+first already succeeded, so the code under test never ran and the test passed while proving
+nothing. This is the second session running in which that has happened, which promotes it from an
+anecdote to a house rule — **a new test is not finished until you have watched it fail.**
+
+### Still open
+
+- **P3 (navigation state).** Untouched. `presented` is still on `HomeStore`. The work is
+  mechanical but wide — 11 tile files, plus the gallery, `DashboardView` and `HomeStore.reset` —
+  and it relocates a real coupling rather than removing one: something must still close the sheet
+  on sign-out, which would become `AppModel`'s job alongside its existing `store.reset()`. The
+  observation suite already covers the sheet binding, so the risk is churn, not silence.
+- **P2's remaining two extractions**, `HistoryCache` then `EnvironmentCoordinator`.
+
 ## Recommended next steps, in order
 
 1. **P4** (tile chrome) — highest value per unit of risk, wants ten minutes with the app running.
@@ -310,10 +365,13 @@ P1 is the recommendation it is.
 
 ## Verification summary
 
-| Suite | Baseline | Now |
-|---|---|---|
-| HavenCore | 636 passed | 636 passed |
-| HavenApp | 55 passed | **63 passed** (+8) |
+| Suite | Baseline | After session 1 | After session 2 |
+|---|---|---|---|
+| HavenCore | 636 passed | 636 passed | **638 passed** |
+| HavenApp | 55 passed | 63 passed | **76 passed** |
+
+Plus one form of verification neither suite provides: `TileGallery`, rendered before and after the
+tile refactor and compared by eye, both halves.
 
 Both suites were run and green before every commit on this branch. `App/AppModel.swift` and
 `App/HomeStore.swift` were each restored to a byte-identical state after every mutation check, and
