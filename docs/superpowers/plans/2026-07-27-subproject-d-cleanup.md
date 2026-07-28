@@ -282,10 +282,19 @@ The exact edits, per file — the `GlassTile(...)` call gains `, unavailable: un
 | `SensorTile.swift` | `GlassTile(active: false, accent: .gray)` |
 | `SwitchTile.swift` | `GlassTile(active: on, accent: accent)` |
 
-`MediaPlayerTile` and `CameraTile` also render at `.wide`/`.large`/`.square` sizes outside
-`GlassTile`. Leave those renderings alone in this task — `CameraTile` already distinguishes
-"unavailable" from "no picture yet" deliberately (read its doc comment before touching it), and the
-wide media rendering is a different surface that the spec item did not name.
+**`MediaPlayerTile` has three renderings and they are not equivalent — get this right or the
+feature is invisible for media players.** `small()` *and* `wide()` both call `GlassTile`, so both
+take the flag. `large()` does not — it is a full-bleed `HStack` with its own artwork and scrim,
+structurally like `CameraTile` — so it is deliberately left unstruck; add a short comment there
+saying so, or the next reader reads it as an oversight.
+
+Why this matters more than it looks: `RoomSectionView.swift:95` renders media players at `.wide`
+and deliberately filters them *out* of the 4-column grid, `RoomDetailView.swift:93` uses `.large`,
+and `.small` is only reachable through the grid that just excluded them. Strike only `small()` and
+the strike never appears for a media player in the running app.
+
+`CameraTile` is genuinely outside `GlassTile` and already distinguishes "unavailable" from "no
+picture yet" deliberately — read its doc comment before touching it. Leave it alone.
 
 - [ ] **Step 4: Build**
 

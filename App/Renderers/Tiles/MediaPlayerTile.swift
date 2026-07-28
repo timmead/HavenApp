@@ -67,7 +67,8 @@ struct MediaPlayerTile: View {
     // MARK: - 2×1
 
     private func wide(_ s: MediaPlayerState?, name: String) -> some View {
-        GlassTile(active: s?.isPlaying ?? false, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        return GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             // `spacing: 0` with a `Spacer` between the two rows, rather than a spaced `VStack`:
             // a `VStack(spacing: 6)` over three children adds *two* 6pt gaps, which would push the
             // ideal height to 72 and grow the tile past the floor — the exact state-dependent
@@ -120,6 +121,11 @@ struct MediaPlayerTile: View {
 
     // MARK: - 4×2
 
+    // Deliberately not struck when unavailable. Unlike `small()` and `wide()`, this size does
+    // not route through `GlassTile` at all — it is a full-bleed `HStack` with its own artwork,
+    // scrim, and background, structurally the same shape as `CameraTile`. Giving it a strike
+    // would mean designing a treatment for a different surface, not passing a flag to an
+    // existing one, which is out of scope here.
     private func large(_ s: MediaPlayerState?, name: String, deviceClass: String?) -> some View {
         // Two tile rows plus the grid's own row spacing, so a 4×2 lines up with two rows of 1×1s.
         let height: CGFloat = 141
