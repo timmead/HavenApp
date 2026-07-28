@@ -496,17 +496,23 @@ final class HomeStore {
             return
         }
         let targets = rollup.targetEntityIds.filter { states[$0]?.state == "on" }
-        var previous: [String: EntityState] = [:]
+        var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
         for id in targets {
             guard let s = states[id] else { continue }
-            previous[id] = s
-            var next = s; next.state = "off"; states[id] = next
+            var next = s; next.state = "off"
+            flips[id] = (previous: s, flipped: next)
+            states[id] = next
         }
         runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
             guard let self else { return }
             do { try await connection.setLight(id, on: false) }
             catch {
-                if self.states[id]?.state == "off" { self.states[id] = previous[id] }
+                // Whole-entity comparison, not just `state`: a WebSocket push that lands mid-flight
+                // and happens to also report "off" would satisfy a state-only check and overwrite
+                // the pushed reading (and its now-stale attributes/lastUpdated) with the tap-time
+                // snapshot. Comparing the whole `EntityState` — which carries `lastUpdated` — means
+                // any genuine push no longer compares equal, so the rollback correctly stays out.
+                if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
                 throw error
             }
         }
@@ -522,17 +528,21 @@ final class HomeStore {
         let targets = rollup.targetEntityIds.filter {
             let s = states[$0]?.state; return s == "open" || s == "opening"
         }
-        var previous: [String: EntityState] = [:]
+        var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
         for id in targets {
             guard let s = states[id] else { continue }
-            previous[id] = s
-            var next = s; next.state = "closed"; states[id] = next
+            var next = s; next.state = "closed"
+            flips[id] = (previous: s, flipped: next)
+            states[id] = next
         }
         runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
             guard let self else { return }
             do { try await connection.closeCover(id) }
             catch {
-                if self.states[id]?.state == "closed" { self.states[id] = previous[id] }
+                // See `allOff`'s matching catch: whole-entity comparison, not just `state`, so a
+                // mid-flight push that happens to also read "closed" doesn't get overwritten by
+                // the tap-time snapshot.
+                if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
                 throw error
             }
         }
@@ -551,11 +561,14 @@ final class HomeStore {
     /// entire point of optimistic state. Bounding the network must not also bound the UI.
     ///
     /// Each entity keeps its own optimistic flip and rollback — flip done by the caller up front,
-    /// rollback done here in `work`, conditionally, only if the entity still holds the value the
-    /// flip wrote (so a late failure can't clobber a state that changed in the meantime, e.g. a
-    /// WebSocket push that landed mid-flight). One failure never disturbs another entity; that
-    /// property predates this and must survive it. What is new is that the failures are counted
-    /// rather than discarded.
+    /// rollback done here in `work`, conditionally, only if the entity still holds the *whole*
+    /// `EntityState` the flip wrote (not just its `state` string) — so a late failure can't clobber
+    /// a state that changed in the meantime, e.g. a WebSocket push that landed mid-flight and
+    /// happens to also report the flipped-to state: comparing `state` alone would call that a
+    /// match and overwrite the pushed reading's attributes and `lastUpdated` with the stale
+    /// tap-time snapshot, which a state-only guard on a caller-side flip is exactly wide enough to
+    /// let through. One failure never disturbs another entity; that property predates this and
+    /// must survive it. What is new is that the failures are counted rather than discarded.
     ///
     /// **The isolation here is fiddly and was arrived at by compiling, not by reasoning.** Two
     /// shapes that look obviously right do not build under `SWIFT_STRICT_CONCURRENCY: complete`:

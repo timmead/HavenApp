@@ -199,4 +199,34 @@ import HavenCore
         #expect(peak <= 6)
         #expect(peak >= 2)   // sanity: genuinely overlapping, not accidentally serialized to 1
     }
+
+    /// Round-2 review finding: the rollback guard has to compare the *whole* `EntityState` the
+    /// flip wrote, not just its `state` string. `light.a` is scripted to fail; while its command is
+    /// still in flight (the socket delays every response by 30ms) a fresh push lands reporting it
+    /// as `"off"` — the same string the flip wrote, but with new attributes and a new
+    /// `lastUpdated`, standing in for a real device-driven change or a WebSocket `state_changed`
+    /// event. A `state`-only guard would call that a match and, when the command then fails,
+    /// overwrite the pushed reading with the stale tap-time snapshot (`state: "on"`, plus its own
+    /// stale attributes/`lastUpdated`) — exactly the regression review caught. The whole-entity
+    /// guard must see they differ and leave the pushed value alone.
+    @Test func aPushThatArrivesMidFlightSurvivesAFailedCommand() async throws {
+        let id = "light.a"
+        let (store, socket) = try await makeStore(failing: [id])
+        let rollup = lightsOn([id], in: store)
+
+        store.allOff(rollup, in: "kitchen")
+        // The flip already wrote state "off" with the epoch-zero `lastUpdated` from `lightsOn`.
+        // This lands well before the scripted 30ms response delay, so it is unambiguously
+        // "during" the in-flight command, not after it resolved.
+        try await Task.sleep(for: .milliseconds(10))
+        let pushed = EntityState(entityId: id, state: "off",
+                                 attributes: ["source": .string("push")], lastUpdated: Date())
+        store.states[id] = pushed
+
+        await waitForCommands(1, on: socket)
+
+        // Rollback did not fire: the pushed value — not the tap-time "on" snapshot — is what
+        // survives the failed command.
+        #expect(store.states[id] == pushed)
+    }
 }
