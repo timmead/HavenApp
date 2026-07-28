@@ -13,7 +13,7 @@ struct ClimateTile: View {
                 // Unlike the other tiles' icons, this one is always tinted `accent` regardless of
                 // on/off by design — but that means an unreachable thermostat needs its own guard
                 // rather than inheriting one from an `on`/`off` check that was never gating it.
-                Image(systemName: "thermometer.medium").font(.system(size: 20)).foregroundStyle(tileColor(.accent, unavailable: unavailable, accent: accent)).symbolRenderingMode(.hierarchical)
+                Image(systemName: "thermometer.medium").font(.system(size: 20)).foregroundStyle(Emphasis.accent.color(unavailable: unavailable, accent: accent)).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     // Unguarded, this was a bigger version of the same problem the icon above
@@ -21,7 +21,7 @@ struct ClimateTile: View {
                     // an unreachable thermostat that still has a cached `temperature` attribute
                     // would show its last-known target in full accent colour — a state claim in
                     // the tile's most prominent text. Same guard shape as the icon.
-                    Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—").font(.system(size: 24, weight: .bold)).foregroundStyle(tileColor(.accent, unavailable: unavailable, accent: accent))
+                    Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—").font(.system(size: 24, weight: .bold)).foregroundStyle(Emphasis.accent.color(unavailable: unavailable, accent: accent))
                     // Already unconditionally `.secondary` regardless of availability — a
                     // hierarchy choice, not an on/off one — so no guard is needed here to satisfy
                     // "unavailable text is secondary". Left untouched.

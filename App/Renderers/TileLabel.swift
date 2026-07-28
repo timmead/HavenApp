@@ -1,7 +1,7 @@
 import SwiftUI
 import HavenCore
 
-extension TileEmphasis {
+extension Emphasis {
     /// The SwiftUI colour for this emphasis.
     ///
     /// `Color.primary`/`Color.secondary` deliberately, and **not** the `HierarchicalShapeStyle`
@@ -16,18 +16,19 @@ extension TileEmphasis {
         case .secondary: .secondary
         }
     }
-}
 
-/// Resolves an intended emphasis against reachability and maps it to a colour, for the tiles whose
-/// layouts `TileLabel` does not fit — the climate tile's oversized target temperature, and the
-/// media player's two `GlassTile` sizes.
-///
-/// Exists so that **no tile hand-writes `unavailable ? .secondary : …` any more.** That is a
-/// grep-checkable invariant, which is worth more than the handful of characters it costs at each
-/// call site: the defect this whole change addresses is an element that quietly never got the
-/// guard, and an invariant you can check in one command is how that stops recurring.
-func tileColor(_ intended: TileEmphasis, unavailable: Bool, accent: Color) -> Color {
-    intended.resolved(unavailable: unavailable).color(accent: accent)
+    /// Resolve against reachability and map to a colour, in one step — for the surfaces whose
+    /// layout neither `TileLabel` nor `ModalHeader` covers: the climate tile's oversized target
+    /// temperature, and the media player's two `GlassTile` sizes.
+    ///
+    /// Exists so that **nothing hand-writes `unavailable ? .secondary : …` any more.** That is a
+    /// grep-checkable invariant, which is worth more than the handful of characters it costs at
+    /// each call site: the defect this whole line of work addresses is an element that quietly
+    /// never got the guard, and an invariant you can check in one command is how that stops
+    /// recurring.
+    func color(unavailable: Bool, accent: Color) -> Color {
+        resolved(unavailable: unavailable).color(accent: accent)
+    }
 }
 
 /// The icon-over-name stack that eight of the eleven tile renderers are built from.
@@ -36,7 +37,7 @@ func tileColor(_ intended: TileEmphasis, unavailable: Bool, accent: Color) -> Co
 /// that every element had to remember `unavailable ? .secondary : …`. One tile forgot
 /// (`SensorTile`'s name had no `foregroundStyle` at all), which took its own commit to notice and
 /// fix. Here there is no way to *say* what an element should look like except by handing over an
-/// intended `TileEmphasis`, and this applies `resolved(unavailable:)` to it — so the guard is not
+/// intended `Emphasis`, and this applies `resolved(unavailable:)` to it — so the guard is not
 /// something a caller can leave out.
 ///
 /// **The glyph is the caller's, and deliberately so.** `symbol` is passed through untouched: this
@@ -51,10 +52,10 @@ struct TileLabel<Subtitle: View>: View {
     let name: String
     /// What the icon should look like **if the device is reachable**. Resolved against
     /// `unavailable` here, never by the caller.
-    var icon: TileEmphasis = .secondary
+    var icon: Emphasis = .secondary
     /// Likewise for the name. `.primary` is the common case — a tile with no on/off notion of its
     /// own (lock, scene, sensor, binary sensor, generic) keeps its name at full strength.
-    var title: TileEmphasis = .primary
+    var title: Emphasis = .primary
     let accent: Color
     let unavailable: Bool
     /// Optional second line, for the tiles that show a reading under the name. Its own styling is
@@ -79,8 +80,8 @@ struct TileLabel<Subtitle: View>: View {
 }
 
 extension TileLabel where Subtitle == EmptyView {
-    init(symbol: String, name: String, icon: TileEmphasis = .secondary,
-         title: TileEmphasis = .primary, accent: Color, unavailable: Bool) {
+    init(symbol: String, name: String, icon: Emphasis = .secondary,
+         title: Emphasis = .primary, accent: Color, unavailable: Bool) {
         self.init(symbol: symbol, name: name, icon: icon, title: title,
                   accent: accent, unavailable: unavailable) { EmptyView() }
     }

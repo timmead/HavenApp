@@ -21,7 +21,8 @@ struct MediaPlayerModal: View {
         // already was". That is what left a Sonos player's source row clipped below a fixed
         // `.medium`.
         VStack(spacing: 12) {
-            header(s, name: name, deviceClass: e?.deviceClass, accent: accent)
+            header(s, name: name, deviceClass: e?.deviceClass, accent: accent,
+                   unavailable: e?.isUnavailable ?? false)
             nowPlaying(s, name: name, deviceClass: e?.deviceClass, accent: accent)
             transport(s, accent: accent)
             volume(s, accent: accent)
@@ -44,18 +45,22 @@ struct MediaPlayerModal: View {
     /// The platform check is here rather than in `VendorHandoff` because it is a question about
     /// what this header shows; `VendorHandoff` only ever produces candidate URLs.
     @ViewBuilder
-    private func header(_ s: MediaPlayerState?, name: String, deviceClass: String?, accent: Color) -> some View {
+    private func header(_ s: MediaPlayerState?, name: String, deviceClass: String?, accent: Color,
+                        unavailable: Bool) -> some View {
         let subtitle = [s?.playback.label, s?.source].compactMap { $0 }.joined(separator: " · ")
         let icon = IconMap.symbol(domain: .mediaPlayer, deviceClass: deviceClass)
         if isSonos, let url = handoffURL {
             ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent,
+                        unavailable: unavailable,
                         accessory: AnyView(handoffButton(url, accent: accent)))
         } else if s?.features.supportsPower ?? false {
             ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent,
+                        unavailable: unavailable,
                         toggle: Binding(get: { s?.isActive ?? false },
                                         set: { store.setMediaPower(entityId, on: $0) }))
         } else {
-            ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent)
+            ModalHeader(systemImage: icon, title: name, subtitle: subtitle, accent: accent,
+                        unavailable: unavailable)
         }
     }
 

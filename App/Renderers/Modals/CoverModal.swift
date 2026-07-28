@@ -19,12 +19,10 @@ struct CoverModal: View {
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
-                        subtitle: unavailable ? "Unavailable"
-                            : (unknown ? "Unknown" : ((s?.isOpen ?? false) ? "Open" : "Closed")),
-                        accent: unavailable ? .secondary : accent,
+                        subtitle: unknown ? "Unknown" : ((s?.isOpen ?? false) ? "Open" : "Closed"),
+                        accent: accent, unavailable: unavailable,
                         toggle: Binding(get: { s?.isOpen ?? false },
-                                        set: { _ in store.openCloseCover(entityId) }),
-                        toggleEnabled: !unavailable)
+                                        set: { _ in store.openCloseCover(entityId) }))
             if s?.supportsPosition ?? false {
                 FacetCard(title: "Position") {
                     Slider(value: Binding(get: { dragPercent ?? live },

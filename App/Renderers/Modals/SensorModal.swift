@@ -25,7 +25,7 @@ struct SensorModal: View {
             ModalHeader(systemImage: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
                         title: TileName.of(entityId, e),
                         subtitle: unavailable ? "Unavailable" : (unknown ? "Unknown" : ""),
-                        accent: unavailable ? .secondary : accent)
+                        accent: accent, unavailable: unavailable)
 
             FacetCard {
                 let selected = series.flatMap { nearestPoint(to: selectedDate, in: $0.points) }

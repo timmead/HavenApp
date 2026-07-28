@@ -275,6 +275,48 @@ import HavenCore
     ///
     /// A `!= "closed"` predicate — the obvious "simplification" — passes a room of only open and
     /// closed covers and fails here, on all three.
+    /// **The guard that today's callers make redundant, held to something anyway.**
+    ///
+    /// `allOff` and `closeAll` both target with allow-lists (`"on"`, `"open"`/`"opening"`), and the
+    /// string `"unavailable"` is none of those — so unreachable entities were already excluded, but
+    /// only as a side effect of the predicates happening to be written that way. Nothing said so,
+    /// and nothing would have noticed if they changed.
+    ///
+    /// A deny-list is the obvious "simplification" and was genuinely proposed during review:
+    /// `!= "closed"` reads fine, passes a room of open and closed covers, and silently makes every
+    /// unreachable cover a target — flipped to a state it is not in, and sent a command Home
+    /// Assistant answers *success* to without doing anything, because the integration cannot reach
+    /// the device.
+    ///
+    /// So this drives `bulkFlip` directly with exactly that predicate. It is not a predicate any
+    /// shipped code uses, and that is the point: the property being pinned is that the guard does
+    /// not depend on the caller getting its predicate right.
+    @Test func bulkActionsSkipUnreachableEntitiesWhateverThePredicateSays() async throws {
+        let (store, socket) = try await makeStore()
+        let states = ["cover.reachable": "open", "cover.unreachable": "unavailable"]
+        for (id, state) in states {
+            store.states[id] = EntityState(entityId: id, state: state, attributes: [:],
+                                           lastUpdated: Date(timeIntervalSince1970: 0))
+        }
+        let rollup = RoomRollups.compute(entityIds: states.keys.sorted(), states: store.states)
+            .first { $0.kind == .covers }!
+        #expect(rollup.targetEntityIds.count == 2, "both covers must be offered to the predicate")
+
+        // The deny-list that would otherwise sweep the unreachable cover in with the rest.
+        store.bulkFlip(rollup, in: "kitchen", expecting: .covers,
+                       isTarget: { $0.state != "closed" }, flippingTo: "closed") { connection, id in
+            try await connection.closeCover(id)
+        }
+
+        #expect(store.states["cover.reachable"]?.state == "closed")
+        #expect(store.states["cover.unreachable"]?.state == "unavailable",
+                "an unreachable cover was flipped to a state it is not in")
+
+        await waitForCommands(1, on: socket)
+        #expect(await socket.answered == 1,
+                "a command went out to a device Home Assistant cannot reach")
+    }
+
     @Test func closeAllTargetsOpenAndOpeningCoversOnly() async throws {
         let (store, socket) = try await makeStore()
         let states = ["cover.a": "open", "cover.b": "opening", "cover.c": "closed",

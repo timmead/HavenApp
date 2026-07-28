@@ -39,7 +39,7 @@ struct CameraModal: View {
         // No `ScrollView` here — that belongs to `DeviceModalView`, which needs this body's *ideal*
         // height to size the sheet's detent. See `MediaPlayerModal` for the same note.
         VStack(spacing: 12) {
-            header(s, name: name, accent: accent)
+            header(s, name: name, accent: accent, unavailable: e?.isUnavailable ?? false)
             feed(s, accent: accent)
             events(accent: accent)
         }
@@ -87,13 +87,15 @@ struct CameraModal: View {
     /// security camera recording does not belong one tap inside a thumbnail. Where no vendor app
     /// answers, the slot is simply empty — a ladder, never a cliff.
     @ViewBuilder
-    private func header(_ s: CameraState?, name: String, accent: Color) -> some View {
+    private func header(_ s: CameraState?, name: String, accent: Color, unavailable: Bool) -> some View {
         let subtitle = [s?.status.label, s?.brand].compactMap { $0 }.joined(separator: " · ")
         if let url = handoffURL {
             ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent,
+                        unavailable: unavailable,
                         accessory: AnyView(handoffButton(url, accent: accent)))
         } else {
-            ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent)
+            ModalHeader(systemImage: "video.fill", title: name, subtitle: subtitle, accent: accent,
+                        unavailable: unavailable)
         }
     }
 
