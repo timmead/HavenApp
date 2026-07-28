@@ -37,7 +37,7 @@ struct RoomSectionView: View {
             let rollups = store.rollups(room)
             if !rollups.isEmpty {
                 HStack(spacing: 8) {
-                    ForEach(Array(rollups.enumerated()), id: \.offset) { _, rollup in
+                    ForEach(rollups) { rollup in
                         rollupRow(rollup)
                     }
                     Spacer(minLength: 0)

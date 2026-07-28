@@ -1,9 +1,12 @@
-public struct Rollup: Sendable, Equatable {
+public struct Rollup: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Hashable { case lights, covers }
     public let kind: Kind
     public let activeCount: Int
     public let total: Int
     public let targetEntityIds: [String]
+    /// The kind, because a room has at most one roll-up per kind by construction — and position in
+    /// the array is not identity: keying on it makes an inserted roll-up adopt its neighbour's view.
+    public var id: Kind { kind }
 }
 
 public enum RoomRollups {
