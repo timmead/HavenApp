@@ -658,8 +658,17 @@ final class AppModel {
     /// is otherwise indistinguishable from an internet host by address alone, and this is the one
     /// place that gap is closed. `nil` (permission absent / no home network captured yet) flows
     /// through unchanged as "unknown" — never as "home".
-    private func finishConnecting(home: HomeConnection, candidate: ConnectionEndpoint,
-                                  ssidMatch: Bool?, peerAddress: String?) async {
+    ///
+    /// **Internal rather than private so a test can call it** — the same reason, and the same
+    /// wording, as `rememberDiscoveredURLs` below. Those tests cover the write boundary *given* a
+    /// classification; this is where the classification is derived from the three raw signals, and
+    /// until the candidate loop was lifted apart there was no way to reach it. `AppModelTrust`
+    /// `Tests` now pins the wiring: that `peerAddress`, `ssidMatch` and `candidate.isRemote` reach
+    /// `ConnectionClass.observed` in their proper roles. Every one of those arguments is testable
+    /// in isolation over in HavenCore, and all three still being connected up correctly here is
+    /// exactly the kind of thing that stayed green through two rounds of "fixing" the last time.
+    func finishConnecting(home: HomeConnection, candidate: ConnectionEndpoint,
+                          ssidMatch: Bool?, peerAddress: String?) async {
         // `dialledRemoteCandidate` is our own record of which slot this candidate
         // came from, not a guess from its hostname (review finding I-1): if we
         // deliberately went out to the internet, nothing observed afterwards makes
