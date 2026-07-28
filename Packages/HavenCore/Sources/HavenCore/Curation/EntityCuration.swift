@@ -24,6 +24,43 @@ public enum CurationTier: String, Sendable, Equatable, Codable {
     case hidden
 }
 
+/// A rule about how one physical device's entities relate to one another.
+///
+/// **Why a table rather than a heuristic.** Home Assistant integrations model devices however they
+/// please, and no single rule describes all of them: a UniFi Protect doorbell is a camera that owns
+/// a speaker, while a three-gang wall switch is one device that genuinely is three switches. So
+/// these are rows to be added as devices are observed, not a general theory of what a device is —
+/// and each row is one line plus a test.
+///
+/// Every rule may only ever **demote**, and only from `.primary` to `.companion`. None of them can
+/// promote, none touches `.hidden` — what the user hid in Home Assistant outranks every heuristic
+/// here — and none touches `.secondary`, which is already off the overview grid. The one direction
+/// that could cost someone a control they can reach today is the direction none of this takes;
+/// `rulesNeverRaiseATier` holds it to that.
+public enum DeviceCurationRule: Sendable, Equatable, Hashable {
+    /// A domain that defines what a device **is**.
+    ///
+    /// When a device has a `.primary` entity in `domain`, that device's `.primary` entities in
+    /// *other* domains drop to `.companion`. A doorbell camera's speaker and chime stop being
+    /// devices you own and go back to being parts of the doorbell.
+    ///
+    /// Same-domain siblings are deliberately untouched, and that is the whole reason this is not
+    /// "one tile per device": a three-gang switch is one device with three switch entities, and all
+    /// three are things you press.
+    case container(domain: String)
+
+    /// For an integration that exposes one physical thing as several unrelated controls.
+    ///
+    /// When a device's entities come from `platform`, only the highest-ranked one survives —
+    /// ranked by `preferring`, earliest domain first, ties broken by lowest entity id so the same
+    /// home renders the same way on every launch. Everything else on that device drops to
+    /// `.companion`.
+    ///
+    /// **Ships with no rows.** It exists because the shape is foreseeable, not because a device has
+    /// been observed needing it; `defaultRules` is deliberately just the camera.
+    case singlePrimary(platform: String, preferring: [String])
+}
+
 /// The deterministic first pass of entity curation (design spec §11, first bullet). Pure and
 /// registry-only — every input is already fetched by `HomeConnection.loadStructure()`, and no
 /// state, history or user preference is consulted. Relevance ranking, usage-based promotion
@@ -81,9 +118,18 @@ public enum EntityCuration {
     /// `.primary` — controllable things our own heuristics hid first, then ordinary sensors,
     /// then device companions, then anything else we hid. Entities the user hid in HA are never
     /// rescued, and an area with genuinely no entities stays empty; there is nothing to show.
-    public static func tiers(for entries: [EntityRegistryEntry]) -> [String: CurationTier] {
+    /// - Parameter rules: the device-shape rules to apply. Defaulted so callers get the shipped
+    ///   table, and injectable so tests can drive a rule *kind* without depending on which rows
+    ///   happen to ship.
+    public static func tiers(for entries: [EntityRegistryEntry],
+                             rules: [DeviceCurationRule] = defaultRules) -> [String: CurationTier] {
         var result = [String: CurationTier](minimumCapacity: entries.count)
         for entry in entries { result[entry.entityId] = tier(of: entry) }
+        // **Between the per-entity pass and the rescue, deliberately.** After, because a rule needs
+        // to know what each entity would have been on its own. Before, because a room that these
+        // rules empty must still be rescued rather than rendering blank — which is exactly what
+        // happens to a room holding only a doorbell's speaker and chime.
+        applyDeviceRules(rules, to: &result, entries: entries)
         guard !result.values.contains(.primary) else { return result }
 
         let rescuable = entries.filter { $0.hiddenBy == nil }
@@ -102,6 +148,76 @@ public enum EntityCuration {
             break
         }
         return result
+    }
+
+    /// The rules that ship.
+    ///
+    /// One row, because one device shape has actually been observed getting this wrong: a UniFi
+    /// Protect doorbell exposing `camera`, `media_player` (its speaker) and `button` (its chime) as
+    /// three separate tiles. Rows are added from observation — see `DeviceCurationRule`.
+    public static let defaultRules: [DeviceCurationRule] = [
+        .container(domain: "camera"),
+    ]
+
+    /// Applies every rule to every device represented in `entries`.
+    ///
+    /// Entities are grouped by `deviceId`; anything without one has no parent to be part of and is
+    /// left alone. Note the grouping is within *this area's* entries: an entity carrying its own
+    /// `areaId` is resolved into that area by `RegistryResolver`, so deliberately moving a camera's
+    /// speaker to another room in Home Assistant leaves it a tile there. That is HA configuration
+    /// outranking our heuristic, the same order of authority `tier(of:)` already applies to
+    /// `hidden_by`.
+    private static func applyDeviceRules(_ rules: [DeviceCurationRule],
+                                         to result: inout [String: CurationTier],
+                                         entries: [EntityRegistryEntry]) {
+        guard !rules.isEmpty else { return }
+        var byDevice: [String: [EntityRegistryEntry]] = [:]
+        for entry in entries {
+            guard let deviceId = entry.deviceId else { continue }
+            byDevice[deviceId, default: []].append(entry)
+        }
+        // Sorted so the outcome cannot depend on dictionary iteration order.
+        for deviceId in byDevice.keys.sorted() {
+            let device = byDevice[deviceId]!.sorted { $0.entityId < $1.entityId }
+            for rule in rules { apply(rule, to: &result, device: device) }
+        }
+    }
+
+    /// One rule against one device's entities, already sorted by entity id.
+    ///
+    /// Only ever writes `.companion`, and only over `.primary` — see `DeviceCurationRule` for why
+    /// that is the whole safety argument.
+    private static func apply(_ rule: DeviceCurationRule,
+                              to result: inout [String: CurationTier],
+                              device: [EntityRegistryEntry]) {
+        func isPrimary(_ entry: EntityRegistryEntry) -> Bool { result[entry.entityId] == .primary }
+        func demote(_ entry: EntityRegistryEntry) { result[entry.entityId] = .companion }
+
+        switch rule {
+        case .container(let domain):
+            // Gated on the container actually being *shown*. If the camera was hidden in HA, this
+            // device has no tile to be a part of, and taking the speaker away as well would leave
+            // the user with nothing for a device they hid one entity of.
+            guard device.contains(where: { isPrimary($0) && Domain.serviceDomain(of: $0.entityId) == domain })
+            else { return }
+            for entry in device where isPrimary(entry)
+                && Domain.serviceDomain(of: entry.entityId) != domain {
+                demote(entry)
+            }
+
+        case .singlePrimary(let platform, let preferring):
+            guard device.allSatisfy({ $0.platform == platform }) else { return }
+            let candidates = device.filter(isPrimary)
+            guard candidates.count > 1 else { return }
+            // Earliest domain in `preferring` wins; `preferring.count` parks anything unlisted
+            // behind all of them. `device` is already sorted by entity id, and `min(by:)` keeps the
+            // first of equal ranks, so the tie-break is the lowest id.
+            func rank(_ entry: EntityRegistryEntry) -> Int {
+                preferring.firstIndex(of: Domain.serviceDomain(of: entry.entityId)) ?? preferring.count
+            }
+            guard let winner = candidates.min(by: { rank($0) < rank($1) }) else { return }
+            for entry in candidates where entry.entityId != winner.entityId { demote(entry) }
+        }
     }
 
     private static func isCompanionSuffix(_ entityId: String) -> Bool {
