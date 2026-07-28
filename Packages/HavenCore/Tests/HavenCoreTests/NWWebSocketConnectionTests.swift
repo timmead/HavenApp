@@ -43,6 +43,39 @@ private final class TestContinuationBox<T: Sendable>: @unchecked Sendable {
         #expect(Date().timeIntervalSince(start) < 8)
     }
 
+    /// **A name that does not resolve *yet* must be waited on, not failed instantly.**
+    ///
+    /// `NWConnection` reports `.waiting(NWError)` for conditions it expects to recover from on its
+    /// own — DNS that has not answered, an interface still coming up, no route at this instant —
+    /// and it retries them internally until it either succeeds or the caller gives up. Resuming the
+    /// continuation on `.waiting` converts all of that into a hard candidate failure.
+    ///
+    /// Measured, before this was fixed: an unresolvable host threw in **15 milliseconds**
+    /// (`-65554 NoSuchRecord`), versus 2.003s for a routable-but-dead address. That 15ms is the
+    /// whole bug. On a cold launch `homeassistant.local` frequently has not resolved yet — the
+    /// phone may have only just associated with Wi-Fi — so every candidate failed instantly, the
+    /// round failed, and `AppModel` went to its 3s/6s/9s backoff. Three or four visible "retrying"
+    /// states later, mDNS was warm and it connected. The app was never unable to reach Home
+    /// Assistant; it was refusing to wait 200ms for a name.
+    ///
+    /// `.local` is the case that actually bites, but `.invalid` (RFC 2606, guaranteed never to
+    /// resolve) is what a test can rely on. The assertion is deliberately "rode the deadline",
+    /// not "succeeded": what is being pinned is that the *decision to give up* belongs to the
+    /// deadline, which is bounded and tested, rather than to the first discouraging word from DNS.
+    @Test func aNameThatDoesNotResolveIsWaitedOnUntilTheDeadlineRatherThanFailingInstantly() async throws {
+        let url = URL(string: "ws://haven-does-not-exist.invalid:8123/api/websocket")!
+        let conn = NWWebSocketConnection(url: url, deadline: .seconds(1))
+        let start = Date()
+        await #expect(throws: Error.self) {
+            try await conn.connect()
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        // Comfortably above the 15ms instant-failure and comfortably below the 1s deadline plus
+        // scheduling slack, so this cannot pass by accident in either direction.
+        #expect(elapsed > 0.5, "gave up after \(String(format: "%.3f", elapsed))s — DNS said no and the connection took its word for it")
+        #expect(elapsed < 4)
+    }
+
     @Test func aConnectionThatNeverBecameReadyReportsNoPeerAddressAndSoFailsClosed() async throws {
         let conn = NWWebSocketConnection(url: URL(string: "ws://192.0.2.1:8123/api/websocket")!)
         _ = try? await conn.connect()

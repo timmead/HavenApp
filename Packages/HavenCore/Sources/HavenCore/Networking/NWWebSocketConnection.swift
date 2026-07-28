@@ -156,7 +156,29 @@ public final class NWWebSocketConnection: PeerObservableConnection, @unchecked S
                             self?.recordPeerAddress()
                             box.resume(returning: ())
                         case .failed(let e):    box.resume(throwing: e)
-                        case .waiting(let e):   box.resume(throwing: e)
+                        case .waiting(let e):
+                            // **Deliberately not a failure.** `.waiting` is Network.framework's
+                            // "cannot connect *at this instant*, and I will keep trying as
+                            // conditions change" — DNS that has not answered yet, an interface
+                            // still coming up, no route this millisecond. It is the state a
+                            // connection passes *through* on a cold launch, not one it ends in.
+                            //
+                            // Resuming here used to turn all of that into an instant candidate
+                            // failure: measured at **15ms** for an unresolved name, against the
+                            // 2s deadline that exists to bound exactly this wait. On a cold
+                            // launch `homeassistant.local` has often not resolved yet, so every
+                            // candidate failed in milliseconds, the round failed, and `AppModel`
+                            // went to its 3s/6s/9s backoff — three or four visible "retrying"
+                            // states before a connection that was always available. The app was
+                            // not unable to reach Home Assistant; it was refusing to wait for a
+                            // name.
+                            //
+                            // So: log it and stay parked. Giving up is `withDeadline`'s decision,
+                            // which is bounded, tested, and the same for every reason a connect
+                            // can be slow. The cost is that a permanently-unresolvable candidate
+                            // now takes the full deadline instead of failing fast — which is
+                            // precisely what that deadline was chosen to be affordable for.
+                            havenCoreLog.debug("connection waiting (\(String(describing: e), privacy: .public)) — staying parked until the deadline rather than treating this as failure")
                         case .cancelled:        box.resume(throwing: WSError(code: "cancelled", message: "connection cancelled"))
                         default:                break
                         }
