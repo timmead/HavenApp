@@ -21,6 +21,17 @@ private enum DefaultsKeys {
 @MainActor @Observable
 final class AppModel {
     enum Phase {
+        /// Launched, and not yet knowing whether there is a session to restore.
+        ///
+        /// **The initial value, and the fix for a flicker that was there from the beginning.**
+        /// `phase` used to start at `.loggedOut`, which is an assertion the app has not earned:
+        /// nothing has looked in the Keychain yet. `RootView` therefore rendered `LoginView` on the
+        /// very first frame, and `restoreIfPossible` replaced it a moment later — a sign-in screen
+        /// flashing past on every launch of an app that was signed in the whole time.
+        ///
+        /// Resolving it is `restoreIfPossible`'s job and nobody else's: to `.loggedOut` when there
+        /// is genuinely no session, and onward to `.connecting` when there is.
+        case launching
         case loggedOut
         case connecting
         /// A round of candidates failed and the next is pending after a backoff.
@@ -35,24 +46,41 @@ final class AppModel {
         case ready
         case error(String)
 
-        /// Whether the app is actively trying to reach Home Assistant right now.
+        /// What to tell the user about a connection in progress — and, by being non-`nil` at all,
+        /// *that* one is in progress.
         ///
-        /// Exhaustive on purpose, with no `default`: this is the input to the quiet period before
-        /// `RootView` says anything about connecting, and a new phase that quietly fell through to
-        /// "not connecting" would either flash a screen it shouldn't or hide one it should show.
-        /// The compiler asks the question instead.
+        /// **One switch, so the two answers cannot disagree.** These were briefly separate, and a
+        /// phase that was reported as connecting but had no message (or the reverse) would either
+        /// strand the user on a screen with no way out or flash one that should have been held
+        /// back. Deriving `isConnectionInProgress` from this makes that unrepresentable.
         ///
-        /// Lives on the phase rather than as a predicate in the view for the reason recorded on
+        /// Exhaustive with no `default`, so a phase added later has to answer rather than fall
+        /// through to "not connecting" and silently reintroduce the flicker this replaced. And it
+        /// lives on the phase rather than as a predicate in the view for the reason recorded on
         /// `RootView.showingConnectionSettings`: a second copy of a decision that a change to the
-        /// `switch` could silently contradict is how this project has been bitten before.
-        var isConnectionInProgress: Bool {
+        /// `switch` could contradict is how this project has been bitten before.
+        var connectionProgressMessage: String? {
             switch self {
-            case .connecting, .retrying: return true
-            case .loggedOut, .ready, .error: return false
+            case .launching, .connecting:
+                return "Connecting to Home Assistant…"
+            case .retrying(let attempt, let isReconnect):
+                // Two different sentences because they describe two different situations, and the
+                // wrong one is actively misleading. "Connection lost" to someone who has just
+                // opened the app asserts that something broke — it reads as a fault in their Home
+                // Assistant or their network, when the ordinary cause is a first connect that
+                // simply has not landed yet.
+                return isReconnect
+                    ? "Connection lost — retrying… (attempt \(attempt))"
+                    : "Connecting to Home Assistant… (attempt \(attempt))"
+            case .loggedOut, .ready, .error:
+                return nil
             }
         }
+
+        /// Whether the app is actively trying to reach Home Assistant right now.
+        var isConnectionInProgress: Bool { connectionProgressMessage != nil }
     }
-    var phase: Phase = .loggedOut
+    var phase: Phase = .launching
     var serverURLText = "http://homeassistant.local:8123"
     let store = HomeStore()
     /// Guided setup for the `havenapp` integration. Created once and re-`attach`ed on every
@@ -260,8 +288,15 @@ final class AppModel {
         await startConnecting()
     }
 
+    /// Resolves `.launching` — the one place that decides whether this launch has a session.
+    ///
+    /// The `else` is load-bearing: without it a launch with no saved session would sit in
+    /// `.launching` forever, showing the connecting screen to someone who has never signed in.
     func restoreIfPossible() async {
-        guard tokens.load() != nil, let url = savedBaseURL() else { return }
+        guard tokens.load() != nil, let url = savedBaseURL() else {
+            phase = .loggedOut
+            return
+        }
         baseURL = url
         // So `requireReauthentication()`'s "re-authorize, don't retype the host" holds even on a
         // cold launch — LoginView binds to `serverURLText`, not `baseURL`.

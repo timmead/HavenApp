@@ -61,33 +61,40 @@ struct RootView: View {
             }
     }
 
+    /// The screen for a connection that has been going long enough to owe the user an explanation
+    /// and a way out.
+    ///
+    /// The message is `Phase.connectionProgressMessage`'s — this view does not decide what to say,
+    /// only when to say it, which is the split that keeps the wording testable.
+    private func trouble(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            ProgressView(message)
+            // Offered ahead of "Change server", which signs out and discards the session: this is
+            // the non-destructive way out of a retry loop, and for someone whose only working
+            // address is one Haven doesn't know yet, it is the one that fixes it.
+            Button("Connection settings") { showingConnectionSettings = true }
+            Button("Change server") { Task { await model.signOut() } }
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch model.phase {
         case .loggedOut, .error:
             LoginView(showingConnectionSettings: $showingConnectionSettings)
-        case _ where !connectingIsWorthMentioning && model.phase.isConnectionInProgress:
-            // Deliberately empty, and deliberately not a spinner. The whole point is that a connect
-            // this quick should be invisible: on a cold launch this reads as the app still coming
-            // up, which is what is actually happening.
-            Color(.systemBackground).ignoresSafeArea()
-        case .connecting: ProgressView("Connecting…")
-        case .retrying(let attempt, let isReconnect):
-            VStack(spacing: 16) {
-                // Two different sentences because they describe two different situations, and the
-                // wrong one is actively misleading. "Connection lost" to someone who has just
-                // opened the app asserts that something broke — it reads as a fault in their Home
-                // Assistant or their network, when the ordinary cause is a first connect that
-                // simply has not landed yet. The first-connect copy says what is true and nothing
-                // more. Which of the two applies is `Phase.retrying`'s to say, not this view's.
-                ProgressView(isReconnect
-                             ? "Connection lost — retrying… (attempt \(attempt))"
-                             : "Connecting to Home Assistant… (attempt \(attempt))")
-                // Offered ahead of "Change server", which signs out and discards the session: this
-                // is the non-destructive way out of a retry loop, and for someone whose only
-                // working address is one Haven doesn't know yet, it is the one that fixes it.
-                Button("Connection settings") { showingConnectionSettings = true }
-                Button("Change server") { Task { await model.signOut() } }
+        case .launching, .connecting, .retrying:
+            // **The connecting screen shows immediately; only the *trouble* screen is delayed.**
+            //
+            // An earlier version held everything back for the quiet period and rendered a blank
+            // screen in the meantime. That removed the flashing spinner but replaced it with a gap,
+            // and a gap is its own kind of wrong on a cold launch. `ConnectingView` is calm enough
+            // to be the launch experience, so there is nothing to hold back — what needs holding
+            // back is the attempt count and the two escape hatches, which say "something is wrong"
+            // and should not appear while nothing is.
+            if let message = model.phase.connectionProgressMessage, connectingIsWorthMentioning {
+                trouble(message)
+            } else {
+                ConnectingView()
             }
         case .ready:
             // Onboarding rides *over* the dashboard rather than replacing it: the rest of the app
