@@ -14,10 +14,20 @@ struct BinarySensorModal: View {
     /// defers.
     private static let maximumChanges = 10
 
-    /// The Recent list's vocabulary, made to match the header's: `"on"`/`"off"` (the only two values
-    /// `HistoryParsing.stateChanges` ever returns for a binary sensor — `unavailable`/`unknown` rows
-    /// are dropped there) become the same "Active"/"Clear" words the header above shows.
-    private static func label(for state: String) -> String { state == "on" ? "Active" : "Clear" }
+    /// The Recent list's vocabulary, made to match the header's. `HistoryParsing.stateChanges`
+    /// drops `unavailable`/`unknown` rows and, for a binary sensor, its raw state is strictly
+    /// "on"/"off" — a device class only changes how that reading is displayed, never the string
+    /// recorded — so the `on`/`off` branches below are the only ones a real row can hit. Written
+    /// as an explicit three-way switch anyway, rather than a bare `state == "on"` ternary: if that
+    /// invariant is ever wrong, this falls back to `TileName.words` instead of mislabeling a value
+    /// nobody has seen as "Clear".
+    private static func label(for state: String) -> String {
+        switch state {
+        case "on": return "Active"
+        case "off": return "Clear"
+        default: return TileName.words(state)
+        }
+    }
 
     var body: some View {
         let e = store.state(entityId)

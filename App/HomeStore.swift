@@ -29,10 +29,15 @@ final class HomeStore {
     /// 09:00 and again at 18:00 and the header (read live off `states`) said "Active" while this
     /// list still ended at 08:12's "Off" — the modal contradicting itself for the whole session.
     var stateChangesByEntity: [String: (changes: [StateChange], fetched: Date)] = [:]
-    /// Entity ids whose most recent `loadStateChanges` attempt threw, with no cached entry (of any
-    /// age) to fall back to. See `loadStateChanges`: a failure never touches the cache, so a stale
-    /// list survives a failed refresh exactly like `historyByKey` does — this only exists to tell
-    /// "never asked" apart from "asked and it failed" when there is nothing to show at all.
+    /// Entity ids whose most recent `loadStateChanges` attempt threw. Inserted unconditionally on
+    /// failure — including for an id with a stale cached list already sitting in
+    /// `stateChangesByEntity`, since `loadStateChanges` never touches the cache on error — so this
+    /// set is *not* itself "ids with no cached entry of any age"; that framing only holds for the
+    /// callers that consult it, because `stateChangesLoadFailed` is only ever checked once
+    /// `stateChanges(_:)` has already returned `nil`. See `loadStateChanges`: a failure never
+    /// touches the cache, so a stale list survives a failed refresh exactly like `historyByKey`
+    /// does — this exists to tell "never asked" apart from "asked and it failed" for an entity
+    /// with nothing cached to show.
     var stateChangesFailed: Set<String> = []
     /// Each room's nominated temperature/humidity source, keyed by area id.
     ///
@@ -270,8 +275,12 @@ final class HomeStore {
         }
     }
 
+    /// Same class of bug as `toggleLock`, at lower stakes, and guarded the same way: keyed on
+    /// `state == "unavailable"` alone, not `isUnavailable`, so an `unavailable` cover can no longer
+    /// be optimistically flipped to "open"/"closed" with nothing left to correct it, while an
+    /// `unknown` cover — reachable, just unreported — still responds to a tap.
     func openCloseCover(_ id: String) {
-        guard let connection, var s = states[id] else { return }
+        guard let connection, var s = states[id], s.state != "unavailable" else { return }
         let previous = s
         let open = s.state == "open" || s.state == "opening"
         let optimisticValue = open ? "closed" : "open"
@@ -283,8 +292,23 @@ final class HomeStore {
         }
     }
 
+    /// Guarded on `state == "unavailable"` alone — not `EntityState.isUnavailable`, which also
+    /// covers `unknown`.
+    ///
+    /// An `unavailable` lock accepts `call_service` without throwing (Home Assistant's integration
+    /// fails quietly) and pushes no state update to correct a wrong guess, since an unreachable
+    /// entity reports nothing at all. Writing the optimistic flip anyway — as this used to,
+    /// computing `locked = (state == "locked")`, `false` for `unavailable` exactly as for a
+    /// genuinely unlocked door — claimed "Locked" the instant the button was tapped and left that
+    /// claim standing forever: the only rollback path is `setLock` throwing, and nothing here
+    /// ever does that for a device HA merely cannot reach. See `LockModal`'s matching guard on the
+    /// button that fires this.
+    ///
+    /// `unknown` is deliberately let through: that lock *is* reachable and has simply not reported
+    /// a position, so refusing to command it would strand the user in the one state a tap could
+    /// resolve — the same reasoning `LockModal.actionButton` already applies to a jammed lock.
     func toggleLock(_ id: String) {
-        guard let connection, var s = states[id] else { return }
+        guard let connection, var s = states[id], s.state != "unavailable" else { return }
         let previous = s
         let locked = s.state == "locked"
         let optimisticValue = locked ? "unlocked" : "locked"

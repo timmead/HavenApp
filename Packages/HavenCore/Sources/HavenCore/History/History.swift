@@ -172,8 +172,10 @@ public enum HistoryParsing {
     }
 
     /// Parses `history/history_during_period` rows as a sequence of state *changes*, for an entity
-    /// whose value is a word rather than a number — a binary sensor's "on"/"off", or its
-    /// device-class reading of "open"/"closed".
+    /// whose value is a word rather than a number — currently only used for a binary sensor's raw
+    /// state, which is strictly "on"/"off". A device class ("door", "motion", …) only changes how
+    /// that reading is *displayed* elsewhere (`BinarySensorModal`'s "Open"/"Closed" for a door,
+    /// say) — it is never a different string recorded here.
     ///
     /// Deliberately not `fromHistory`: that one parses each row's state as a `Double` and drops
     /// what does not convert, which for a binary sensor is every row. The wire response needs no

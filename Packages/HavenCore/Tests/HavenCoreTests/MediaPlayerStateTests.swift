@@ -181,6 +181,19 @@ private func mp(_ st: String, _ a: [String: JSONValue] = [:]) -> EntityState {
     #expect(!s.features.supportsPower)
 }
 
+/// `unknown` is different from `unavailable`: the player is reachable and has simply not reported
+/// a value, and the power toggle in particular is the one control that might resolve that. Pinned
+/// as its own test rather than left to `unavailablePlayerExposesNoFeatures` covering `isUnavailable`
+/// incidentally — `features` must key on `state == "unavailable"` alone, not `EntityState.
+/// isUnavailable`, which also matches `unknown`.
+@Test func unknownPlayerStillExposesFeatures() {
+    let attrs: [String: JSONValue] = ["supported_features": .int(1 | 4 | 8 | 16 | 32 | 128 | 256 | 16384)]
+    let s = MediaPlayerState(mp("unknown", attrs))
+    #expect(!s.features.isEmpty)
+    #expect(s.features.supportsPower)
+    #expect(s.showsPlayPause)
+}
+
 // MARK: - Volume vs mute
 
 /// Dragging a volume control on a muted speaker must clear the mute, because the alternative is a

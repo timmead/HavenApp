@@ -118,7 +118,8 @@ public struct MediaPlayerState: Sendable, Equatable {
     public let position: Double?
     public let positionUpdatedAt: Date?
     public let duration: Double?
-    /// `[]` whenever the entity is unavailable — **not** whatever `supported_features` says.
+    /// `[]` whenever the entity's `state` is `"unavailable"` — **not** whatever `supported_features`
+    /// says, and **not** for `"unknown"` too.
     ///
     /// Home Assistant keeps `supported_features` on an unavailable entity, because it is a
     /// *capability* of the device rather than a live reading, unlike `media_title`/`volume_level`,
@@ -128,6 +129,13 @@ public struct MediaPlayerState: Sendable, Equatable {
     /// every control gated on a feature bit (play/pause on all three tile sizes and the modal's
     /// transport, volume, source and power toggle) in one place, rather than threading an
     /// `unavailable` flag through each renderer that reads `features`.
+    ///
+    /// Keyed on `state == "unavailable"` alone rather than `EntityState.isUnavailable` (which also
+    /// covers `unknown`): an `unknown` player is reachable and has simply not reported a value yet,
+    /// and its power toggle in particular is the one control that might resolve that. Stripping
+    /// `features` there too — as this used to, before `isUnavailable`'s two states were told
+    /// apart — silently removed the power button from an `unknown` player along with everything
+    /// else, for a device the app can still command.
     public let features: MediaPlayerFeatures
 
     public init(_ e: EntityState) {
@@ -150,8 +158,11 @@ public struct MediaPlayerState: Sendable, Equatable {
         duration = e.attributes["media_duration"]?.asDouble
         // See `features`' own doc: an unavailable entity still carries `supported_features` (it is
         // a capability, not a reading), so this must not read it verbatim or every transport
-        // control survives a device Home Assistant cannot reach.
-        features = e.isUnavailable ? [] : MediaPlayerFeatures(attribute: e.attributes["supported_features"])
+        // control survives a device Home Assistant cannot reach. Checked against the raw `state`
+        // string rather than `e.isUnavailable`, which would also zero this for `unknown` — a
+        // reachable player that simply hasn't reported yet, and whose power toggle is exactly the
+        // control that might resolve that.
+        features = e.state == "unavailable" ? [] : MediaPlayerFeatures(attribute: e.attributes["supported_features"])
     }
 
     public var isPlaying: Bool { playback.isPlaying }
