@@ -32,8 +32,20 @@ Two things follow from that, and they shape every finding below:
    are deliberately **not** `isUnavailable`). A refactor that deletes rationale passes every test
    and is a real regression — the reasoning has to be re-derived from scratch by whoever hits the
    bug next. **Comment loss was treated as a failing check throughout this pass.**
-2. **The structural debt is concentrated in exactly two files**, both in `App/`, both grown by
-   accretion rather than designed: `AppModel.swift` (780 lines) and `HomeStore.swift` (760 lines).
+2. **The structural debt is concentrated in two files**, both in `App/`, both grown by accretion
+   rather than designed: `AppModel.swift` (780 lines) and `HomeStore.swift` (760 lines). Both were
+   read in full. The next two largest files were read specifically to check that claim, and neither
+   is debt:
+   - `HavenCore/Session/CloudStatus.swift` (584) — **308 of those lines are comments.** ~276 lines
+     of code covering one cohesive domain (the `cloud/status` wire type, the classification, the
+     offer, and the URL-adoption rules), backed by a 654-line test suite. Long, not sprawling.
+   - `App/Renderers/Modals/CameraModal.swift` (543, 197 of them comments) — the obvious suspicion
+     is a lifecycle state machine wanting extraction, and it does not hold: the decision is
+     *already* extracted as `CameraPlaybackPlan`, a pure `Equatable` value with its own tests, and
+     what remains (`start`/`replace`/`teardown`/`stopPlayer`/`setMuted`/`releaseAudioSession`) is
+     six small functions with one job each and carefully-reasoned audio-session ownership. See P6
+     for the one small thing it *is* worth doing here.
+
    Everything else is proportionate.
 
 ---
@@ -84,6 +96,17 @@ the most (it holds the security-relevant trust decision that feeds `ConnectionCl
 ---
 
 ### P1 — `connect()` cannot be tested end to end, and the code says so twice
+
+> **Update — the security-critical half of this is now closed (commit 7).** Lifting the candidate
+> loop apart (L3) left `finishConnecting` taking `peerAddress` as a plain parameter rather than
+> reading it from an inline `NWWebSocketConnection`, which made the fail-closed trust decision
+> injectable *without* widening any protocol. It is now `internal` (same justification, same
+> wording, as `rememberDiscoveredURLs` beside it) and `AppModelTrustTests` pins the wiring —
+> including, by mutation, that dropping `candidate.isRemote` or `ssidMatch` from the call makes a
+> test go red. **The seam design below is therefore no longer needed for the security property**;
+> it is now only about covering the *candidate loop* (iteration order, the one-forced-refresh rule,
+> the all-candidates-agree escalations), which is ordinary correctness rather than a silent
+> vulnerability. Re-prioritise accordingly: this dropped from "highest value" to "worth doing".
 
 `AppModel.swift:334-337` and `:132-137` both admit it: `NWWebSocketConnection` and `OAuthClient`
 are constructed inline, so no test can drive the candidate loop with a fake transport. The
@@ -190,6 +213,18 @@ active:unavailable:accent:)` component would make that impossible to miss again.
 ship silently. This is the highest-value *proposed* item after P1 — it removes a whole class of
 "the sweep missed one" defect — but it wants a person looking at the screen.
 
+### P6 — two general-purpose pieces live in one modal's file
+
+`App/Renderers/Modals/CameraModal.swift` ends with `PlayerLayerView` (a generic
+`UIViewRepresentable` wrapping `AVPlayerLayer`) and `FlowRow` (a general-purpose `Layout` that
+wraps chips onto multiple lines). Neither is camera-specific; `FlowRow` in particular is what any
+future chip row would want, and the second caller who needs it will either import it from a camera
+modal or write it again.
+
+They belong in `App/DesignSystem/`. This is the smallest item in this document and the only reason
+it is not landed is the rule below: moving a file under `App/` requires `xcodegen generate`, and a
+file move is a poor thing to leave unattended when no test renders either type. Ten-minute job.
+
 ### P5 — minor, no action needed
 
 - **`UserDefaults` key ownership is already correct.** `DefaultsKeys` in `AppModel` aliases the
@@ -234,6 +269,9 @@ main..refactor/foundation-review`.
    arguments, which nothing covered.
 4. `refactor(app): lift one candidate's connect attempt out of the loop` — L3. `connect()`
    287 lines → ~100, plus `attemptCandidate` and `finishConnecting`.
+5. `docs:` this document, updated with what the work itself taught.
+6. `test(app): pin the trust decision's wiring, not just its parts` — the security half of P1,
+   which L3 made reachable. See the update on that section.
 
 ### Two things worth knowing that came out of doing the work
 
@@ -262,7 +300,21 @@ P1 is the recommendation it is.
 ## Recommended next steps, in order
 
 1. **P4** (tile chrome) — highest value per unit of risk, wants ten minutes with the app running.
-2. **P1** (connection seam) — unlocks the first real test of `connect()`; L3 has already done the
-   structural half.
-3. **P2 / P3** (HomeStore split, navigation state) — largest, and the one that most wants a person
+   It removes a whole class of "the sweep missed one" defect, which has already happened once.
+2. **P6** (move `FlowRow`/`PlayerLayerView` to `DesignSystem`) — trivial, do it while you're in
+   there. Remember `xcodegen generate` after.
+3. **P1** (connection seam) — now about covering the candidate loop, not about the trust decision;
+   see the update on that section.
+4. **P2 / P3** (HomeStore split, navigation state) — largest, and the one that most wants a person
    watching a live dashboard redraw.
+
+## Verification summary
+
+| Suite | Baseline | Now |
+|---|---|---|
+| HavenCore | 636 passed | 636 passed |
+| HavenApp | 55 passed | **63 passed** (+8) |
+
+Both suites were run and green before every commit on this branch. `App/AppModel.swift` and
+`App/HomeStore.swift` were each restored to a byte-identical state after every mutation check, and
+`git diff` was used to confirm it rather than memory. Nothing in `HavenCore/` was modified.
