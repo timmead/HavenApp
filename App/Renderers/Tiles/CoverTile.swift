@@ -16,7 +16,10 @@ struct CoverTile: View {
                     // definition never changing. The symbol itself needs no such guard: it is
                     // already the neutral domain glyph in every case, not an open/closed variant.
                     Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (open ? accent : .secondary)).symbolRenderingMode(.hierarchical)
-                    Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(open ? .primary : .secondary)
+                    // Same guard as the icon above: `open` already reads `false` for an
+                    // `unavailable` state string, so this was already `.secondary` there, but
+                    // incidentally rather than deliberately — stated explicitly like the rest.
+                    Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(unavailable ? .secondary : (open ? .primary : .secondary))
                 }
                 // Unlike the light, this is shown at every position including 0 — a closed shade
                 // has a real, meaningful position — so a drag up from the bottom genuinely opens

@@ -3,16 +3,17 @@ import Foundation
 import HavenCore
 @testable import HavenApp
 
-/// `HomeStore.toggleLock`/`openCloseCover` against an `unavailable` vs an `unknown` entity.
+/// `HomeStore.toggleLock`/`openCloseCover`/`toggle` against an `unavailable` vs an `unknown` entity.
 ///
 /// The bug this pins: Home Assistant does not throw `call_service` for an entity it cannot reach
 /// — the integration fails quietly — and an `unavailable` entity pushes no state update to correct
 /// a wrong guess either. So a guard keyed on `EntityState.isUnavailable` catching the optimistic
 /// write but not the command (or vice versa) would still leave a false claim standing, or would
-/// needlessly refuse a device that can still be commanded. Both `toggleLock` and `openCloseCover`
-/// must, for `unavailable`: change no local state *and* send no command. For `unknown` — reachable,
-/// simply unreported — both must still act normally, since a tap is the one thing that might
-/// resolve the unknown.
+/// needlessly refuse a device that can still be commanded. `toggleLock`, `openCloseCover`, and now
+/// `toggle` (via the `optimistic(_:on:_:)` primitive it delegates to, shared by lights, switches,
+/// and input booleans) must, for `unavailable`: change no local state *and* send no command. For
+/// `unknown` — reachable, simply unreported — all three must still act normally, since a tap is the
+/// one thing that might resolve the unknown.
 @Suite @MainActor struct UnavailableCommandGuardTests {
     /// Records every `call_service` frame sent and answers each one successfully. Asserting the
     /// frame count directly (not just the resulting `states` entry) matters here specifically: a
@@ -110,6 +111,35 @@ import HavenCore
 
         store.openCloseCover("cover.blinds")
         #expect(store.states["cover.blinds"]?.state == "open")
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await socket.commandCount == 1)
+    }
+
+    // MARK: - toggle (light) — the `optimistic(_:on:_:)` primitive
+
+    /// This is the defect the user actually hit: `optimistic(_:on:_:)` used to write
+    /// `states[id].state = "on"`/`"off"` unconditionally, so tapping an unreachable light made
+    /// `isUnavailable` read `false` and the tile render as a working, switched-on device — while
+    /// still sending the command to a device that cannot act on it.
+    @Test func anUnavailableLightTapChangesNoStateAndSendsNoCommand() async throws {
+        let (store, socket) = try await makeStore()
+        set(store, "light.kitchen", "unavailable")
+
+        store.toggle("light.kitchen")
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(store.states["light.kitchen"]?.state == "unavailable")
+        #expect(await socket.commandCount == 0)
+    }
+
+    @Test func anUnknownLightTapStillTurnsItOnAndSendsTheCommand() async throws {
+        let (store, socket) = try await makeStore()
+        set(store, "light.kitchen", "unknown")
+
+        store.toggle("light.kitchen")
+        // The optimistic flip happens synchronously, before any network round-trip.
+        #expect(store.states["light.kitchen"]?.state == "on")
 
         try await Task.sleep(for: .milliseconds(50))
         #expect(await socket.commandCount == 1)

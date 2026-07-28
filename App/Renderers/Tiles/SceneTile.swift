@@ -12,7 +12,10 @@ struct SceneTile: View {
                 // to gate it, so the unavailable guard has to be added on its own rather than
                 // inherited from a state check.
                 Image(systemName: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : accent).symbolRenderingMode(.hierarchical)
+                // Had no `foregroundStyle` at all, which defaults to `.primary` regardless of
+                // reachability.
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                    .foregroundStyle(unavailable ? .secondary : .primary)
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }

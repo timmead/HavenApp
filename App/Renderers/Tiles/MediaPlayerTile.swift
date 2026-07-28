@@ -54,10 +54,14 @@ struct MediaPlayerTile: View {
                 Spacer(minLength: 0)
                 playPauseButton(s, size: 26)
                 Spacer(minLength: 0)
+                // `isActive` already reads `false` for an `unavailable` state string (see
+                // `MediaPlayerState.Playback.isActive`), so this was already `.secondary` there —
+                // incidentally rather than deliberately, same as the other tiles' on/off-derived
+                // name colours. Stated explicitly like the rest.
                 Text(name)
                     .font(.system(size: 10.5, weight: .semibold))
                     .lineLimit(1)
-                    .foregroundStyle((s?.isActive ?? false) ? .primary : .secondary)
+                    .foregroundStyle(unavailable ? .secondary : ((s?.isActive ?? false) ? .primary : .secondary))
             }
             .frame(maxWidth: .infinity)
         }
@@ -81,7 +85,8 @@ struct MediaPlayerTile: View {
                     ScrollingText(
                         text: s?.title ?? name,
                         secondary: s?.secondaryLine,
-                        windowHeight: 30
+                        windowHeight: 30,
+                        unavailable: unavailable
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -367,6 +372,12 @@ private struct ScrollingText: View {
     let text: String
     var secondary: String?
     let windowHeight: CGFloat
+    /// Had no `foregroundStyle` at all on the main line, which defaults to `.primary` regardless
+    /// of reachability — the only caller is `MediaPlayerTile.wide()`, which now threads its own
+    /// `unavailable` through here rather than leaving this window as the one text element on the
+    /// tile the strike didn't reach. `large()` has its own title `Text` and does not use this
+    /// view — see its doc comment for why it stays out of this feature entirely.
+    var unavailable: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var contentHeight: CGFloat = 0
@@ -413,6 +424,7 @@ private struct ScrollingText: View {
     private var lines: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(text).font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(unavailable ? .secondary : .primary)
             if let secondary {
                 Text(secondary).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }

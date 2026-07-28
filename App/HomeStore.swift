@@ -263,8 +263,17 @@ final class HomeStore {
     /// Flip local state immediately, run the command, roll back on failure — but only if the
     /// entity still holds the value we optimistically wrote, so a late failure can't clobber
     /// state that changed in the meantime (e.g. attributes from a WS push while in flight).
+    ///
+    /// Guarded on `state == "unavailable"` alone, not `isUnavailable` — same class of bug as
+    /// `toggleLock`/`openCloseCover`, and this is the primitive `toggle` (lights, switches, input
+    /// booleans) delegates to, so it was the one gap those two didn't close. Without this, a tap
+    /// on an unreachable light wrote `states[id].state = "on"` unconditionally: `isUnavailable`
+    /// then read `false`, the strike vanished, and the tile looked exactly like a working light
+    /// that was just switched on — and the command still went out to a device that cannot act on
+    /// it. `unknown` is deliberately let through: that entity is reachable and simply hasn't
+    /// reported yet, and a tap is the one thing that might resolve it.
     private func optimistic(_ id: String, on: Bool, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
-        guard let connection, var s = states[id] else { return }
+        guard let connection, var s = states[id], s.state != "unavailable" else { return }
         let previous = s
         let optimisticValue = on ? "on" : "off"
         s.state = optimisticValue
@@ -321,8 +330,12 @@ final class HomeStore {
     }
 
     /// Fire-and-forget scene/script/button activation. No optimistic local state to update.
+    ///
+    /// Guarded on `state == "unavailable"` the same one-line way as the primitives above: there is
+    /// no optimistic write here to make the entity look available, but an unreachable scene/script
+    /// still has no business receiving a command it cannot act on.
     func run(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.activate(sceneOrScript: id) }
     }
 
@@ -344,38 +357,41 @@ final class HomeStore {
     /// `dragKelvin` covers the in-flight preview, and it is the only place a kelvin value can be
     /// set. Writing one into `states` here would be inventing a reading for an attribute nothing
     /// on the grid displays, with a rollback to get right for no visible gain.
+    // Fire-and-forget, no optimistic write to make an unreachable device look available — but
+    // guarded the same one-line way as `run` above, so none of these send a command into the void
+    // for an entity `state == "unavailable"`. `unknown` still goes through.
     func setColorTemp(_ id: String, kelvin: Int) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.setColorTemp(id, kelvin: kelvin) }
     }
 
     func setClimateMode(_ id: String, mode: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.setClimateMode(id, mode: mode) }
     }
 
     func setClimateTemp(_ id: String, temp: Double) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.setClimateTemp(id, temp: temp) }
     }
 
     func setFanMode(_ id: String, mode: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.setFanMode(id, mode: mode) }
     }
 
     func openCover(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.openCover(id) }
     }
 
     func stopCover(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.stopCover(id) }
     }
 
     func closeCover(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.closeCover(id) }
     }
 
@@ -404,13 +420,15 @@ final class HomeStore {
 
     /// No optimistic state: what the next track *is* is unknowable until the device says so, and
     /// blanking the title in the meantime would flash an empty now-playing card between two songs.
+    /// Guarded on `state == "unavailable"` the same one-line way as the rest of this fire-and-forget
+    /// group.
     func mediaNextTrack(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.mediaNextTrack(id) }
     }
 
     func mediaPreviousTrack(_ id: String) {
-        guard let connection else { return }
+        guard let connection, states[id]?.state != "unavailable" else { return }
         Task { try? await connection.mediaPreviousTrack(id) }
     }
 
@@ -468,9 +486,16 @@ final class HomeStore {
     /// Rollback compares the whole entity, not one field, and so is strictly safer than the on/off
     /// version: any state push that landed while the command was in flight leaves the comparison
     /// unequal and the rollback is skipped, exactly as intended.
+    ///
+    /// Guarded on `state == "unavailable"` alone, not `isUnavailable` — same reasoning as
+    /// `optimistic(_:on:_:)` above, and this is the primitive brightness, cover position, and
+    /// media volume/mute/source/power all route through. Left unguarded, any of them could write
+    /// a confident-looking `next` state over an unreachable device and send the matching command
+    /// into the void. `unknown` still goes through: that entity is reachable and simply hasn't
+    /// reported, so refusing to command it would remove the one interaction that could resolve it.
     private func optimisticState(_ id: String, _ next: EntityState,
                                  _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
-        guard let connection, let previous = states[id] else { return }
+        guard let connection, let previous = states[id], previous.state != "unavailable" else { return }
         states[id] = next
         Task {
             do { try await work(connection) }

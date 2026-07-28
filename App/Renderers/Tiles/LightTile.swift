@@ -19,8 +19,11 @@ struct LightTile: View {
                     Image(systemName: IconMap.symbol(domain: .light, deviceClass: nil))
                         .font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (on ? accent : .secondary)).symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 2)
+                    // Same guard as the icon above, and for the same reason: `on` already reads
+                    // `false` for an `unavailable` state string, so this is currently redundant
+                    // with that — but stated explicitly rather than left to depend on it.
                     Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
-                        .foregroundStyle(on ? .primary : .secondary)
+                        .foregroundStyle(unavailable ? .secondary : (on ? .primary : .secondary))
                 }
                 // Shown only while the light is on, unchanged: an off light has no brightness, and
                 // `LightModal` makes the same call ("don't show a stale percentage"). So the

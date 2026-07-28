@@ -31,7 +31,11 @@ struct LockTile: View {
         GlassTile(active: false, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : accent).symbolRenderingMode(.hierarchical)
+                // No `on`/`open`-style boolean to fall back on here — unlike the other tiles, this
+                // name had no `foregroundStyle` at all, which defaults to `.primary` regardless of
+                // reachability. Same guard shape as the icon just above.
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                    .foregroundStyle(unavailable ? .secondary : .primary)
             }
         }
         .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }

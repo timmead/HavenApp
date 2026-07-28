@@ -17,7 +17,10 @@ struct SwitchTile: View {
                 // never changing.
                 Image(systemName: IconMap.symbol(domain: .switchOutlet, deviceClass: nil)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (on ? accent : .secondary)).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)
-                Text(name).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(on ? .primary : .secondary)
+                // Same guard as the icon above, and for the same reason: `on` already reads
+                // `false` for an `unavailable` state string, so this is currently redundant with
+                // that — but stated explicitly rather than left to depend on it.
+                Text(name).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(unavailable ? .secondary : (on ? .primary : .secondary))
             }
         }
         .contentShape(Rectangle())
