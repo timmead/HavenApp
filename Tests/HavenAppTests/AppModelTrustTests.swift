@@ -96,6 +96,30 @@ import HavenCore
         #expect(defaults.string(forKey: externalKey) == "https://ha.example.com")
     }
 
+    /// **The address a real device actually reports**, complete with the interface qualifier
+    /// `NWPath.remoteEndpoint` appends to it.
+    ///
+    /// From the log that found this: `peer address 192.168.1.42%en0 … → classified remote`,
+    /// followed by `no remote URL adopted`. The `%en0` defeated the strict IPv4 parser, so every
+    /// local connection classified `.remote` and nothing was ever learned from one — no
+    /// `internal_url`, no `external_url`, no Nabu Casa address. The app failed safe and, in doing
+    /// so, permanently failed to configure the remote access it needs when away from home.
+    ///
+    /// Asserted here as well as in `ObservedConnectionClassTests` on purpose: that suite pins the
+    /// classification, this one pins what the classification is *for*. The bug was only visible as
+    /// the second thing.
+    @Test func aLocalAddressWithAnInterfaceQualifierStillAdopts() async throws {
+        let defaults = makeTestDefaults()
+        let app = AppModel(defaults: defaults, tokens: FakeTokenStore())
+
+        await app.finishConnecting(home: try await connection(),
+                                   candidate: .local(URL(string: "http://192.168.1.20:8123")!),
+                                   ssidMatch: nil,
+                                   peerAddress: "192.168.1.20%en0")
+
+        #expect(adopted(defaults), "a LAN address with a zone suffix is still a LAN address")
+    }
+
     /// **Fail closed.** No peer address (the socket could not report one) and no SSID signal
     /// (Location Services not granted — the expected, common case) must resolve `.remote`, not
     /// "probably fine": the two mistakes cost wildly different amounts. Nothing is adopted.

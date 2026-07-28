@@ -50,6 +50,57 @@ import Network
         #expect(ConnectionClass.observed(peerAddress: "169.255.10.20", dialledRemoteCandidate: false) == .remote)
     }
 
+    /// **The address Network.framework actually reports, from a real device log:**
+    ///
+    /// ```
+    /// peer address 192.168.1.42%en0, SSID match unknown → classified remote
+    /// cloud/status → remoteAvailable(https://….ui.nabu.casa); no remote URL adopted
+    /// ```
+    ///
+    /// `NWPath.remoteEndpoint` appends the interface the socket is bound to, and it does so for
+    /// IPv4 as well as IPv6. `strictIPv4Octets` splits on `.` and then fails on `"42%en0"`, so a
+    /// plainly private LAN address fell through to the fail-closed branch and the whole connection
+    /// was classified `.remote`.
+    ///
+    /// It failed *safe* — nothing untrusted was ever adopted — but the cost is that nothing
+    /// trusted was either: `get_config`'s URLs were discarded, the home Wi-Fi was never captured,
+    /// and the Nabu Casa remote URL was never remembered. Which means that away from home the app
+    /// has no remote address to fall back on, and the entire local/remote failover it is built
+    /// around never engages.
+    ///
+    /// The IPv6 side of this was thought about and tested from the start
+    /// (`ipv6LinkLocalIsLocalIncludingWithAZoneSuffix`) — `IPv6Address` accepts a zone identifier
+    /// natively, so it never broke. The IPv4 equivalent was simply never written, which is why a
+    /// bug this visible survived: the parser had 100% of the spellings anyone thought to test.
+    @Test func ipv4IsLocalIncludingWithAZoneSuffix() {
+        #expect(ConnectionClass.observed(peerAddress: "192.168.1.42%en0",
+                                         dialledRemoteCandidate: false) == .local)
+        #expect(ConnectionClass.observed(peerAddress: "10.0.0.5%en0",
+                                         dialledRemoteCandidate: false) == .local)
+        #expect(ConnectionClass.observed(peerAddress: "127.0.0.1%lo0",
+                                         dialledRemoteCandidate: false) == .local)
+    }
+
+    /// **The half of the fix that must not move.** Stripping the interface qualifier may only ever
+    /// make an address *parseable*; it must never make a public one look private. A zone is not
+    /// address data, so the bits being judged are identical either way — and this is what holds
+    /// that true.
+    @Test func aZoneSuffixDoesNotMakeAPublicAddressLocal() {
+        #expect(ConnectionClass.observed(peerAddress: "8.8.8.8%en0",
+                                         dialledRemoteCandidate: false) == .remote)
+        #expect(ConnectionClass.observed(peerAddress: "100.64.0.1%utun0",
+                                         dialledRemoteCandidate: false) == .remote)
+        // Nothing before the qualifier is not an address at all.
+        #expect(ConnectionClass.observed(peerAddress: "%en0",
+                                         dialledRemoteCandidate: false) == .remote)
+        // The strictness the parser exists for survives the strip: shorthand and hex spellings are
+        // still refused rather than expanded into private ranges.
+        #expect(ConnectionClass.observed(peerAddress: "10.1%en0",
+                                         dialledRemoteCandidate: false) == .remote)
+        #expect(ConnectionClass.observed(peerAddress: "0x7f000001%en0",
+                                         dialledRemoteCandidate: false) == .remote)
+    }
+
     @Test func ordinaryPublicAddressesAreRemote() {
         #expect(ConnectionClass.observed(peerAddress: "8.8.8.8", dialledRemoteCandidate: false) == .remote)
         #expect(ConnectionClass.observed(peerAddress: "1.1.1.1", dialledRemoteCandidate: false) == .remote)
