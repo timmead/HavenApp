@@ -29,14 +29,14 @@ struct LockTile: View {
         let symbol = unavailable ? "questionmark.circle"
             : (jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill"))
         GlassTile(active: false, accent: accent, unavailable: unavailable) {
-            VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : accent).symbolRenderingMode(.hierarchical)
-                // No `on`/`open`-style boolean to fall back on here — unlike the other tiles, this
-                // name had no `foregroundStyle` at all, which defaults to `.primary` regardless of
-                // reachability. Same guard shape as the icon just above.
-                Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
-                    .foregroundStyle(unavailable ? .secondary : .primary)
-            }
+            // `symbol` is resolved above, by this file, and **must** stay that way: `TileLabel`
+            // resolves an element's style and never its glyph, precisely because the right glyph
+            // for an unreachable lock is domain knowledge (see the comment on `symbol`). The
+            // emphases below are the ordinary ones; it is the picture that is special here.
+            TileLabel(symbol: symbol,
+                      name: TileName.of(entityId, e),
+                      icon: .accent,
+                      accent: accent, unavailable: unavailable)
         }
         .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { store.presented = entityId }
         .accessibilityElement(children: .combine)

@@ -10,18 +10,15 @@ struct SwitchTile: View {
         let name = TileName.of(entityId, e)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
-            VStack(alignment: .leading, spacing: 5) {
-                // `on` already reads `false` for an `unavailable` state string, same as for a
-                // genuinely off switch, so this guard is currently redundant with that — but
-                // stated explicitly rather than left to depend on the `state == "on"` check above
-                // never changing.
-                Image(systemName: IconMap.symbol(domain: .switchOutlet, deviceClass: nil)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (on ? accent : .secondary)).symbolRenderingMode(.hierarchical)
-                Spacer(minLength: 2)
-                // Same guard as the icon above, and for the same reason: `on` already reads
-                // `false` for an `unavailable` state string, so this is currently redundant with
-                // that — but stated explicitly rather than left to depend on it.
-                Text(name).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(unavailable ? .secondary : (on ? .primary : .secondary))
-            }
+            // Both emphases are stated as what the tile wants *when reachable*; `TileLabel`
+            // applies the unavailable rule. `on` already reads `false` for an `unavailable` state
+            // string, so these would resolve to `.secondary` there anyway — but incidentally, via
+            // the `state == "on"` check, rather than because anything decided it.
+            TileLabel(symbol: IconMap.symbol(domain: .switchOutlet, deviceClass: nil),
+                      name: name,
+                      icon: on ? .accent : .secondary,
+                      title: on ? .primary : .secondary,
+                      accent: accent, unavailable: unavailable)
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }

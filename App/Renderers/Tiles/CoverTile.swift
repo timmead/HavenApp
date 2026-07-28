@@ -9,18 +9,15 @@ struct CoverTile: View {
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: open, accent: accent, unavailable: unavailable) {
             HStack(alignment: .top, spacing: 0) {
-                VStack(alignment: .leading, spacing: 5) {
-                    // `open` already reads `false` for an `unavailable` state string, same as for a
-                    // genuinely closed cover, so this guard is currently redundant with that — but
-                    // stated explicitly rather than left to depend on `CoverState.isOpen`'s exact
-                    // definition never changing. The symbol itself needs no such guard: it is
-                    // already the neutral domain glyph in every case, not an open/closed variant.
-                    Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (open ? accent : .secondary)).symbolRenderingMode(.hierarchical)
-                    // Same guard as the icon above: `open` already reads `false` for an
-                    // `unavailable` state string, so this was already `.secondary` there, but
-                    // incidentally rather than deliberately — stated explicitly like the rest.
-                    Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).foregroundStyle(unavailable ? .secondary : (open ? .primary : .secondary))
-                }
+                // The symbol needs no unavailable-specific choice: it is the neutral domain glyph
+                // in every case, not an open/closed variant. Only the tint and the name do, and
+                // `open` reading `false` for an `unavailable` state string made them right
+                // incidentally rather than deliberately.
+                TileLabel(symbol: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
+                          name: TileName.of(entityId, e),
+                          icon: open ? .accent : .secondary,
+                          title: open ? .primary : .secondary,
+                          accent: accent, unavailable: unavailable)
                 // Unlike the light, this is shown at every position including 0 — a closed shade
                 // has a real, meaningful position — so a drag up from the bottom genuinely opens
                 // it, and `CoverOptimistic.position` moves the open/closed state along with the

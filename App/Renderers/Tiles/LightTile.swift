@@ -11,20 +11,14 @@ struct LightTile: View {
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
             HStack(alignment: .top, spacing: 0) {
-                VStack(alignment: .leading, spacing: 5) {
-                    // `on` already reads `false` for an `unavailable` state string, same as for a
-                    // genuinely off light, so this guard is currently redundant with that — but
-                    // stated explicitly rather than left to depend on `LightState.isOn`'s exact
-                    // definition never changing.
-                    Image(systemName: IconMap.symbol(domain: .light, deviceClass: nil))
-                        .font(.system(size: 20)).foregroundStyle(unavailable ? .secondary : (on ? accent : .secondary)).symbolRenderingMode(.hierarchical)
-                    Spacer(minLength: 2)
-                    // Same guard as the icon above, and for the same reason: `on` already reads
-                    // `false` for an `unavailable` state string, so this is currently redundant
-                    // with that — but stated explicitly rather than left to depend on it.
-                    Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
-                        .foregroundStyle(unavailable ? .secondary : (on ? .primary : .secondary))
-                }
+                // `on` already reads `false` for an `unavailable` state string, so these would
+                // resolve to `.secondary` there regardless — but incidentally, via
+                // `LightState.isOn`'s definition, rather than because anything decided it.
+                TileLabel(symbol: IconMap.symbol(domain: .light, deviceClass: nil),
+                          name: TileName.of(entityId, e),
+                          icon: on ? .accent : .secondary,
+                          title: on ? .primary : .secondary,
+                          accent: accent, unavailable: unavailable)
                 // Shown only while the light is on, unchanged: an off light has no brightness, and
                 // `LightModal` makes the same call ("don't show a stale percentage"). So the
                 // volume tiles' turn-it-on-when-you-drag case cannot arise here — there is nothing

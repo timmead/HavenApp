@@ -61,7 +61,8 @@ struct MediaPlayerTile: View {
                 Text(name)
                     .font(.system(size: 10.5, weight: .semibold))
                     .lineLimit(1)
-                    .foregroundStyle(unavailable ? .secondary : ((s?.isActive ?? false) ? .primary : .secondary))
+                    .foregroundStyle(tileColor((s?.isActive ?? false) ? .primary : .secondary,
+                                               unavailable: unavailable, accent: accent))
             }
             .frame(maxWidth: .infinity)
         }
@@ -424,7 +425,7 @@ private struct ScrollingText: View {
     private var lines: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(text).font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(unavailable ? .secondary : .primary)
+                .foregroundStyle(tileColor(.primary, unavailable: unavailable, accent: .gray))
             if let secondary {
                 Text(secondary).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }
