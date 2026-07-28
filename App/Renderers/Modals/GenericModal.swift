@@ -24,7 +24,14 @@ struct GenericModal: View {
         switch v {
         case .string(let s): return s
         case .int(let i): return String(i)
-        case .double(let d): return String(d)
+        // Home Assistant sends integral values as JSON doubles routinely (a `42` brightness
+        // arrives as `42.0`), and `String(_: Double)` always writes the decimal point. Rendering a
+        // whole number as "42.0" in an attribute list makes it look like a precision the device
+        // does not have.
+        case .double(let d):
+            return d == d.rounded() && abs(d) < 1e15
+                ? String(Int(d))
+                : String(d)
         case .bool(let b): return b ? "true" : "false"
         case .null: return "—"
         case .array(let a): return a.map(display).joined(separator: ", ")
