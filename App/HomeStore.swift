@@ -61,9 +61,20 @@ final class HomeStore {
         subscriptionTask?.cancel()
         subscriptionTask = Task { [weak self] in
             for await s in stream { self?.states[s.entityId] = s }
-            // The stream only ends when the underlying socket's receive loop does — either
-            // `reset()` deliberately tore it down (in which case `isResetting` is still true; see
-            // its documentation), or it dropped on its own and nobody has been told yet.
+            // **Three ways to arrive here, and only one of them is a disconnection.**
+            //
+            // `onDisconnected` drives a full reconnect in `AppModel`, which cancels whatever
+            // connect loop is running and starts a new one. So a spurious fire does not just waste
+            // work — it aborts an attempt that may have been about to succeed.
+            //
+            // 1. This task was cancelled, because `attach` is replacing it with the subscription
+            //    for a new connection. Deliberate, and *not* a drop — reporting it as one makes
+            //    the act of connecting trigger a reconnect. This check is what stops that; it was
+            //    missing, and `DisconnectSignalTests` is what noticed.
+            // 2. `reset()` tore it down, in which case `isResetting` is still true.
+            // 3. The stream genuinely finished because the socket's receive loop ended. That is
+            //    the one the reconnect exists for.
+            if Task.isCancelled { return }
             guard let self, !self.isResetting else { return }
             self.onDisconnected?()
         }
