@@ -397,213 +397,37 @@ final class AppModel {
 
             for candidate in candidates {
                 if Task.isCancelled { return }
-                let wsURL = HAConfig(baseURL: candidate.url).webSocketURL
-                // Retried at most once in place (after a forced token refresh) without moving on
-                // to the next candidate or counting as a backoff attempt.
-                var retryThisCandidate = true
-                candidateAttempt: while retryThisCandidate {
-                    retryThisCandidate = false
-                    // Declared fresh each iteration: whichever client this attempt creates must
-                    // be torn down on every non-success exit (every catch below, and every
-                    // cancellation check), or the abandoned socket + its 10s heartbeat loop leak
-                    // for as long as the app runs.
-                    var client: HAWebSocketClient?
-                    do {
-                        // Must happen before `validAccessToken`: a refresh triggered for this
-                        // candidate has to POST to *this* candidate's host, not whichever one a
-                        // previous candidate (or the last app launch) left the provider pointed
-                        // at — otherwise a refresh needed on a cold launch away from home would
-                        // try to reach the now-unreachable local address even while attempting
-                        // the remote candidate, defeating failover before a socket is ever opened.
-                        await tokenProvider.setBaseURL(candidate.url)
-                        let token = try await tokenProvider.validAccessToken(now: Date())
-                        if Task.isCancelled { return }
-                        havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(attempt + 1, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")
-                        let conn = NWWebSocketConnection(url: wsURL)
-                        let c = HAWebSocketClient(connection: conn)
-                        client = c
-                        try await c.authenticate(token: token)
-                        if Task.isCancelled { await c.disconnect(); return }
-                        havenLog.info("WS auth_ok")
-                        didForceRefreshAfterAuthInvalid = false
-                        await c.startHeartbeat()
-                        if Task.isCancelled { await c.disconnect(); return }
-                        let home = HomeConnection(client: c)
-                        store.attach(home)
-                        try await store.bootstrap()
-                        if Task.isCancelled { await c.disconnect(); return }
-                        havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
-                        defaults.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
-                        // The UI must become usable now, not after `fetchInstanceConfig` below:
-                        // `request(_:)` (and so `get_config`) is deliberately unbounded — a server
-                        // that authenticates and bootstraps fine but never answers `get_config`
-                        // must not pin the connecting spinner forever over a socket that is
-                        // otherwise perfectly live and usable.
-                        phase = .ready
-                        // Best-effort, fire-and-forget: learning the instance's own URLs is a
-                        // nice-to-have for the *next* connection, never a reason to hold up (or
-                        // fail) this one. The `!Task.isCancelled` guard covers the `UserDefaults`
-                        // write specifically — without it, a `connect()` cancelled while this
-                        // await was in flight (e.g. by a sign-out that started after
-                        // `phase = .ready`) could still persist a URL for a session already gone.
-                        // **The trust decision, and it is made from the socket — plus one more
-                        // signal.** Not from the URL we dialled, not from its hostname, not from
-                        // DNS — from the address the kernel is actually sending bytes to, read off
-                        // this connection once it reached `.ready`. A hostname cannot answer "is
-                        // this on my LAN", and on a hostile network neither can the resolver;
-                        // `ha.example.com` looks exactly like a LAN address in every respect except
-                        // the one that matters. Unavailable address ⇒ `.remote` ⇒ nothing adopted:
-                        // fail closed, because the two mistakes cost wildly different amounts (see
-                        // `ConnectionClass.observed`).
-                        //
-                        // `ssidMatch` (computed once per round, above) is passed straight through as
-                        // the second signal rather than re-derived here: a globally-routable IPv6
-                        // home network (SLAAC GUA) is otherwise indistinguishable from an internet
-                        // host by address alone, and this is the one place that gap is closed. `nil`
-                        // (permission absent / no home network captured yet) flows through unchanged
-                        // as "unknown" — never as "home".
-                        let peerAddress = conn.observedPeerAddress
-                        // `dialledRemoteCandidate` is our own record of which slot this candidate
-                        // came from, not a guess from its hostname (review finding I-1): if we
-                        // deliberately went out to the internet, nothing observed afterwards makes
-                        // the connection local — not the peer address, not the SSID.
-                        let learnedOver = ConnectionClass.observed(
-                            peerAddress: peerAddress,
-                            onKnownHomeNetwork: ssidMatch,
-                            dialledRemoteCandidate: candidate.isRemote
-                        )
-                        // Logged because "remote access never appeared" otherwise has several
-                        // indistinguishable causes, and two of them are signals we simply couldn't
-                        // read (address unavailable, SSID unknown).
-                        havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public), SSID match \(ssidMatch.map(String.init(describing:)) ?? "unknown", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
-                        // `do`/`catch` rather than `try?` (review M-2): a throw here costs the URL
-                        // adoption *and* the `components` signal the onboarding probe falls back
-                        // from, and `fetchInstanceConfig`'s own comment promises the wire-shape risk
-                        // is "logged loudly at the earliest possible point". That promise only holds
-                        // for a successful decode with empty components — a transport failure
-                        // mid-`get_config`, or a payload that fails to decode at all, was swallowed
-                        // here with no log anywhere. Silent, and this project's recurring shape.
-                        do {
-                            let config = try await home.fetchInstanceConfig()
-                            if !Task.isCancelled {
-                                rememberDiscoveredURLs(config, learnedOver: learnedOver)
-                            }
-                        } catch {
-                            havenLog.error("get_config failed: \(error, privacy: .public) — no URLs learned from this connection, and the components signal is unavailable to the onboarding probe")
-                        }
-                        // Capture the home Wi-Fi network automatically, so the user never types an
-                        // SSID for the common case — gated on `learnedOver`, which the SSID match
-                        // itself now feeds. When it was the *peer address* that said local, this is
-                        // positive independent evidence, so a café's SSID still can never be
-                        // recorded as home that way. When it was the SSID match that said local
-                        // (the GUA case), this simply re-records the same network already on file —
-                        // `rememberCurrentNetworkAsHome` no-ops once the current SSID already equals
-                        // `homeSSID`, so nothing new is captured either way. A no-op without
-                        // Location Services; granting it later simply means the next local
-                        // connection captures it.
-                        if learnedOver == .local, !Task.isCancelled {
-                            await homeNetwork.rememberCurrentNetworkAsHome()
-                        }
-                        // Same best-effort footing, and read-only: `probeHavenIntegration` only
-                        // ever asks questions. Nothing that changes the user's Home Assistant can
-                        // happen without them confirming it first (see
-                        // `OnboardingModel.confirmPendingMutation`), so this is safe to run
-                        // unattended on every connect — which is also what
-                        // lets the flow pick itself back up after the restart step drops the
-                        // socket.
-                        if !Task.isCancelled {
-                            onboarding.attach(home)
-                            await onboarding.probe()
-                        }
-                        // Same live connection, for Task 3's offer — see `RemoteAccessOfferModel`.
-                        remoteAccessOffer.attach(home)
-                        // Nabu Casa bootstrap: ask the instance whether it has remote access and
-                        // at what domain, so remote access needs zero configuration. Same
-                        // best-effort footing as `get_config` above — `fetchCloudStatus` never
-                        // throws, and an instance without the `cloud` component simply answers
-                        // `unknown_command`, which is the ordinary self-hosted user rather than a
-                        // failure. Deliberately runs on *every* connection, local or remote: the
-                        // classification is safe to know either way, and gating the probe itself
-                        // on the connection class would put a security decision here, in code with
-                        // no coverage of this loop, instead of in the one function that owns it.
-                        //
-                        // **Last, deliberately.** `HAWebSocketClient.request` has no deadline (see
-                        // the `phase = .ready` comment above), so every unbounded call added here
-                        // can starve the ones after it. An instance that authenticates, bootstraps
-                        // and answers `get_config` but hangs on `cloud/status` must not be able to
-                        // stop the guided-install probe from ever running — that would surface as
-                        // "the havenapp setup flow never appears", with nothing logged. Nothing
-                        // here depends on ordering except that it follow `rememberDiscoveredURLs`,
-                        // which it still does, so `cloud/status` keeps precedence over
-                        // `external_url` for the discovered-remote slot.
-                        let cloudStatus = await home.fetchCloudStatus()
-                        if !Task.isCancelled {
-                            rememberNabuCasaRemoteAccess(cloudStatus, learnedOver: learnedOver)
-                        }
-                        return
-                    } catch TokenProviderError.reauthenticationRequired {
-                        await client?.disconnect()
-                        if Task.isCancelled { return }
-                        havenLog.error("token refresh requires reauthentication — signing out")
-                        await requireReauthentication()
-                        return
-                    } catch TokenProviderError.insecureTransportBlocked(let host) {
-                        await client?.disconnect()
-                        if Task.isCancelled { return }
-                        candidatesBlockedByATS += 1
-                        // The message is HavenCore's, not assembled here — see
-                        // `TokenProviderError.message`.
-                        atsBlockedMessage = TokenProviderError.insecureTransportBlocked(host: host).message
-                        // Logged by name, at error level, because the whole point of classifying
-                        // this is that it stops being invisible: before, a blocked refresh arrived
-                        // as an opaque URLError, was retried forever, and left the user on
-                        // "connecting…" with nothing anywhere naming ATS.
-                        havenLog.error("App Transport Security refused the token refresh to \(host, privacy: .public) — cleartext http:// to a host iOS judges public. This candidate cannot succeed until the address is https, or a local-network address; see the ATS comment in Info.plist.")
-                        // Nothing is retried in place and the session is left intact (the grant is
-                        // fine, the address isn't); the next candidate gets its turn.
-                    } catch let wsError as WSError where wsError.isAuthInvalid {
-                        await client?.disconnect()
-                        if Task.isCancelled { return }
-                        guard !didForceRefreshAfterAuthInvalid else {
-                            // A second auth_invalid after this call's one forced refresh is
-                            // already spent could mean the token really is dead — or it could be
-                            // a rogue device answering on *this* candidate's address (e.g. port
-                            // 8123 on the LAN) returning auth_invalid to induce a sign-out before
-                            // the genuine remaining candidates are ever tried. Don't trust a
-                            // single candidate's word for it: fail just this candidate, and only
-                            // actually sign out once every candidate this round has said the same
-                            // thing (checked right after the candidate loop below).
-                            candidatesWithPersistentAuthInvalid += 1
-                            havenLog.error("token still invalid after a forced refresh — treating the \(candidate.isRemote ? "remote" : "local", privacy: .public) candidate as failed, not signing out yet")
-                            break candidateAttempt
-                        }
-                        didForceRefreshAfterAuthInvalid = true
-                        havenLog.error("Home Assistant rejected the access token as invalid — forcing a refresh")
-                        do {
-                            _ = try await tokenProvider.forceRefresh()
-                            if Task.isCancelled { return }
-                            // Retry immediately with the fresh token; doesn't count as a backoff
-                            // attempt or advance to the next candidate.
-                            retryThisCandidate = true
-                            continue candidateAttempt
-                        } catch TokenProviderError.reauthenticationRequired {
-                            if Task.isCancelled { return }
-                            havenLog.error("forced refresh requires reauthentication — signing out")
-                            await requireReauthentication()
-                            return
-                        } catch {
-                            if Task.isCancelled { return }
-                            havenLog.error("forced refresh failed: \(error, privacy: .public)")
-                            // This candidate is done for; move on to the next one (or, if this
-                            // was the last, the round-level backoff below).
-                        }
-                    } catch {
-                        await client?.disconnect()
-                        if Task.isCancelled { return }
-                        havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed: \(error, privacy: .public)")
-                        // Move on to the next candidate (or, if this was the last, the
-                        // round-level backoff below) — not a per-candidate backoff.
-                    }
+                // One candidate's whole attempt — including its at-most-one in-place retry after a
+                // forced refresh — lives in `attemptCandidate`. What is left here is only the
+                // round-level bookkeeping, which is the part that has to see every candidate: a
+                // single candidate's ATS refusal or persistent `auth_invalid` is never acted on
+                // alone (see the two checks after this loop for why), so each one is counted rather
+                // than obeyed.
+                let tried = await attemptCandidate(
+                    candidate,
+                    round: attempt + 1,
+                    ssidMatch: ssidMatch,
+                    tokenProvider: tokenProvider,
+                    didForceRefreshAfterAuthInvalid: didForceRefreshAfterAuthInvalid
+                )
+                // The one-forced-refresh budget is a property of the token, not of the candidate,
+                // so it is threaded back out and carried to the next candidate and the next round.
+                didForceRefreshAfterAuthInvalid = tried.didForceRefreshAfterAuthInvalid
+                switch tried.outcome {
+                case .connected, .cancelled, .signedOut:
+                    // Each of these is terminal for this `connect()` call, and `attemptCandidate`
+                    // has already done what it needs: reached `.ready`, bailed on cancellation, or
+                    // run `requireReauthentication()`. Nothing is left to try.
+                    return
+                case .blockedByATS(let message):
+                    candidatesBlockedByATS += 1
+                    // The message is HavenCore's, not assembled here — see
+                    // `TokenProviderError.message`.
+                    atsBlockedMessage = message
+                case .persistentAuthInvalid:
+                    candidatesWithPersistentAuthInvalid += 1
+                case .failed:
+                    break
                 }
             }
 
@@ -632,6 +456,286 @@ final class AppModel {
             havenLog.error("all candidates failed this round — backing off (attempt \(attempt, privacy: .public))")
             phase = .retrying(attempt: attempt)
             try? await Task.sleep(for: policy.delay(forAttempt: attempt))
+        }
+    }
+
+    /// What trying one candidate settled, and the state the caller has to carry forward.
+    private struct CandidateAttempt {
+        let outcome: CandidateOutcome
+        /// `connect()`'s one-forced-refresh-per-call budget as it stands after this attempt: set
+        /// when this attempt spent it, cleared when this attempt got past authentication (so two
+        /// `auth_invalid`s separated by hours of ordinary retrying each still get their own
+        /// chance), and otherwise passed through untouched.
+        let didForceRefreshAfterAuthInvalid: Bool
+    }
+
+    /// The five ways one candidate's attempt can end.
+    ///
+    /// The distinction that matters is between the three that end `connect()` outright and the two
+    /// that are merely *counted*. A candidate refused by App Transport Security, or still rejecting
+    /// the token after its forced-refresh chance, is not on its own evidence of anything: a rogue
+    /// device answering on one LAN address could return `auth_invalid` purely to bait a sign-out
+    /// before the genuine remote candidate is ever tried. Only when *every* candidate in a round
+    /// says the same thing does the caller act on it.
+    private enum CandidateOutcome {
+        /// Authenticated, bootstrapped, `phase` is `.ready`, post-connect work done.
+        case connected
+        /// `Task.isCancelled` was observed; any client this attempt opened has been torn down.
+        case cancelled
+        /// `requireReauthentication()` has already run. The session is gone.
+        case signedOut
+        /// This candidate cannot succeed until its address changes. Carries the message to show if
+        /// every other candidate says the same — optional because `TokenProviderError.message` is,
+        /// and the round-level check in `connect()` unwraps it there exactly as it always did: no
+        /// message means no `.error` phase, so the round falls through to the ordinary backoff
+        /// rather than stranding the user on a blank terminal screen.
+        case blockedByATS(message: String?)
+        /// Still `auth_invalid` after this `connect()` call's one forced refresh was already spent.
+        case persistentAuthInvalid
+        /// Ordinary failure — unreachable, refused, timed out. Try the next candidate.
+        case failed
+    }
+
+    /// Tries one candidate: refresh-if-needed, open a socket, authenticate, bootstrap, and on
+    /// success do the post-connect work in `finishConnecting`.
+    ///
+    /// Lifted out of `connect()`'s candidate loop, where it sat four levels deep (`while true` →
+    /// `for candidate` → `while retryThisCandidate` → `do`/six `catch`es) and could not be read in
+    /// one sitting. Nothing about the sequence or the error handling changed in the lift; what
+    /// changed is that the round-level bookkeeping is no longer interleaved with it — the two
+    /// accumulators are now updated by the caller from a returned outcome rather than mutated from
+    /// inside a labelled `break`.
+    ///
+    /// Still not driveable by a test: `NWWebSocketConnection` is constructed inline below, so there
+    /// is no seam to hand a fake transport. That is the standing gap recorded on `connect()`, and
+    /// this extraction is deliberately the *structural* half of closing it — the factory, when it
+    /// is added, has exactly one call site and it is here.
+    private func attemptCandidate(
+        _ candidate: ConnectionEndpoint,
+        round: Int,
+        ssidMatch: Bool?,
+        tokenProvider: TokenProvider,
+        didForceRefreshAfterAuthInvalid: Bool
+    ) async -> CandidateAttempt {
+        var didForceRefreshAfterAuthInvalid = didForceRefreshAfterAuthInvalid
+        func result(_ outcome: CandidateOutcome) -> CandidateAttempt {
+            CandidateAttempt(outcome: outcome,
+                             didForceRefreshAfterAuthInvalid: didForceRefreshAfterAuthInvalid)
+        }
+        let wsURL = HAConfig(baseURL: candidate.url).webSocketURL
+        // Retried at most once in place (after a forced token refresh) without moving on
+        // to the next candidate or counting as a backoff attempt.
+        var retryThisCandidate = true
+        while retryThisCandidate {
+            retryThisCandidate = false
+            // Declared fresh each iteration: whichever client this attempt creates must
+            // be torn down on every non-success exit (every catch below, and every
+            // cancellation check), or the abandoned socket + its 10s heartbeat loop leak
+            // for as long as the app runs.
+            var client: HAWebSocketClient?
+            do {
+                // Must happen before `validAccessToken`: a refresh triggered for this
+                // candidate has to POST to *this* candidate's host, not whichever one a
+                // previous candidate (or the last app launch) left the provider pointed
+                // at — otherwise a refresh needed on a cold launch away from home would
+                // try to reach the now-unreachable local address even while attempting
+                // the remote candidate, defeating failover before a socket is ever opened.
+                await tokenProvider.setBaseURL(candidate.url)
+                let token = try await tokenProvider.validAccessToken(now: Date())
+                if Task.isCancelled { return result(.cancelled) }
+                havenLog.info("WS connecting to \(wsURL.absoluteString, privacy: .public) (round \(round, privacy: .public), \(candidate.isRemote ? "remote" : "local", privacy: .public))")
+                let conn = NWWebSocketConnection(url: wsURL)
+                let c = HAWebSocketClient(connection: conn)
+                client = c
+                try await c.authenticate(token: token)
+                if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
+                havenLog.info("WS auth_ok")
+                didForceRefreshAfterAuthInvalid = false
+                await c.startHeartbeat()
+                if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
+                let home = HomeConnection(client: c)
+                store.attach(home)
+                try await store.bootstrap()
+                if Task.isCancelled { await c.disconnect(); return result(.cancelled) }
+                havenLog.info("bootstrap OK — \(self.store.home.floors.count, privacy: .public) floors, \(self.store.states.count, privacy: .public) entities")
+                defaults.set(candidate.url.absoluteString, forKey: DefaultsKeys.lastWorkingURL)
+                // The UI must become usable now, not after `fetchInstanceConfig` in
+                // `finishConnecting` below: `request(_:)` (and so `get_config`) is deliberately
+                // unbounded — a server that authenticates and bootstraps fine but never answers
+                // `get_config` must not pin the connecting spinner forever over a socket that is
+                // otherwise perfectly live and usable.
+                phase = .ready
+                // Read here because only this scope holds the `NWWebSocketConnection` — see
+                // `finishConnecting` for what it is used to decide and why it is read off the
+                // socket rather than derived from the URL.
+                await finishConnecting(home: home, candidate: candidate, ssidMatch: ssidMatch,
+                                       peerAddress: conn.observedPeerAddress)
+                return result(.connected)
+            } catch TokenProviderError.reauthenticationRequired {
+                await client?.disconnect()
+                if Task.isCancelled { return result(.cancelled) }
+                havenLog.error("token refresh requires reauthentication — signing out")
+                await requireReauthentication()
+                return result(.signedOut)
+            } catch TokenProviderError.insecureTransportBlocked(let host) {
+                await client?.disconnect()
+                if Task.isCancelled { return result(.cancelled) }
+                // Logged by name, at error level, because the whole point of classifying
+                // this is that it stops being invisible: before, a blocked refresh arrived
+                // as an opaque URLError, was retried forever, and left the user on
+                // "connecting…" with nothing anywhere naming ATS.
+                havenLog.error("App Transport Security refused the token refresh to \(host, privacy: .public) — cleartext http:// to a host iOS judges public. This candidate cannot succeed until the address is https, or a local-network address; see the ATS comment in Info.plist.")
+                // Nothing is retried in place and the session is left intact (the grant is
+                // fine, the address isn't); the next candidate gets its turn.
+                return result(.blockedByATS(
+                    message: TokenProviderError.insecureTransportBlocked(host: host).message))
+            } catch let wsError as WSError where wsError.isAuthInvalid {
+                await client?.disconnect()
+                if Task.isCancelled { return result(.cancelled) }
+                guard !didForceRefreshAfterAuthInvalid else {
+                    // A second auth_invalid after this call's one forced refresh is
+                    // already spent could mean the token really is dead — or it could be
+                    // a rogue device answering on *this* candidate's address (e.g. port
+                    // 8123 on the LAN) returning auth_invalid to induce a sign-out before
+                    // the genuine remaining candidates are ever tried. Don't trust a
+                    // single candidate's word for it: fail just this candidate, and only
+                    // actually sign out once every candidate this round has said the same
+                    // thing — which is the caller's decision, made after the candidate loop.
+                    havenLog.error("token still invalid after a forced refresh — treating the \(candidate.isRemote ? "remote" : "local", privacy: .public) candidate as failed, not signing out yet")
+                    return result(.persistentAuthInvalid)
+                }
+                didForceRefreshAfterAuthInvalid = true
+                havenLog.error("Home Assistant rejected the access token as invalid — forcing a refresh")
+                do {
+                    _ = try await tokenProvider.forceRefresh()
+                    if Task.isCancelled { return result(.cancelled) }
+                    // Retry immediately with the fresh token; doesn't count as a backoff
+                    // attempt or advance to the next candidate.
+                    retryThisCandidate = true
+                    continue
+                } catch TokenProviderError.reauthenticationRequired {
+                    if Task.isCancelled { return result(.cancelled) }
+                    havenLog.error("forced refresh requires reauthentication — signing out")
+                    await requireReauthentication()
+                    return result(.signedOut)
+                } catch {
+                    if Task.isCancelled { return result(.cancelled) }
+                    havenLog.error("forced refresh failed: \(error, privacy: .public)")
+                    // This candidate is done for; move on to the next one (or, if this
+                    // was the last, the round-level backoff in `connect()`).
+                }
+            } catch {
+                await client?.disconnect()
+                if Task.isCancelled { return result(.cancelled) }
+                havenLog.error("candidate \(wsURL.absoluteString, privacy: .public) failed: \(error, privacy: .public)")
+                // Move on to the next candidate (or, if this was the last, the
+                // round-level backoff in `connect()`) — not a per-candidate backoff.
+            }
+        }
+        return result(.failed)
+    }
+
+    /// The best-effort work that follows a connection reaching `.ready`: classify what kind of
+    /// network this turned out to be, and learn what the instance is willing to tell us.
+    ///
+    /// **Nothing here may fail the connection.** `phase` is already `.ready` when this is called
+    /// and the socket is live and usable; every step below is a nice-to-have for the *next*
+    /// connection or for a screen the user may never open. Each is individually guarded, and each
+    /// `!Task.isCancelled` check exists for the same reason: a `connect()` cancelled while one of
+    /// these awaits was in flight (a sign-out that started just after `phase = .ready`) must not
+    /// then persist anything for a session that is already gone.
+    ///
+    /// **The trust decision, and it is made from the socket — plus one more signal.** Not from the
+    /// URL we dialled, not from its hostname, not from DNS — from the address the kernel is
+    /// actually sending bytes to, read off the connection once it reached `.ready` and passed in
+    /// as `peerAddress`. A hostname cannot answer "is this on my LAN", and on a hostile network
+    /// neither can the resolver; `ha.example.com` looks exactly like a LAN address in every respect
+    /// except the one that matters. Unavailable address ⇒ `.remote` ⇒ nothing adopted: fail closed,
+    /// because the two mistakes cost wildly different amounts (see `ConnectionClass.observed`).
+    ///
+    /// `ssidMatch` (computed once per round by `connect()`) is passed straight through as the
+    /// second signal rather than re-derived here: a globally-routable IPv6 home network (SLAAC GUA)
+    /// is otherwise indistinguishable from an internet host by address alone, and this is the one
+    /// place that gap is closed. `nil` (permission absent / no home network captured yet) flows
+    /// through unchanged as "unknown" — never as "home".
+    private func finishConnecting(home: HomeConnection, candidate: ConnectionEndpoint,
+                                  ssidMatch: Bool?, peerAddress: String?) async {
+        // `dialledRemoteCandidate` is our own record of which slot this candidate
+        // came from, not a guess from its hostname (review finding I-1): if we
+        // deliberately went out to the internet, nothing observed afterwards makes
+        // the connection local — not the peer address, not the SSID.
+        let learnedOver = ConnectionClass.observed(
+            peerAddress: peerAddress,
+            onKnownHomeNetwork: ssidMatch,
+            dialledRemoteCandidate: candidate.isRemote
+        )
+        // Logged because "remote access never appeared" otherwise has several
+        // indistinguishable causes, and two of them are signals we simply couldn't
+        // read (address unavailable, SSID unknown).
+        havenLog.info("peer address \(peerAddress ?? "unavailable", privacy: .public), SSID match \(ssidMatch.map(String.init(describing:)) ?? "unknown", privacy: .public) → classified \(learnedOver == .local ? "local" : "remote", privacy: .public)")
+        // `do`/`catch` rather than `try?` (review M-2): a throw here costs the URL
+        // adoption *and* the `components` signal the onboarding probe falls back
+        // from, and `fetchInstanceConfig`'s own comment promises the wire-shape risk
+        // is "logged loudly at the earliest possible point". That promise only holds
+        // for a successful decode with empty components — a transport failure
+        // mid-`get_config`, or a payload that fails to decode at all, was swallowed
+        // here with no log anywhere. Silent, and this project's recurring shape.
+        do {
+            let config = try await home.fetchInstanceConfig()
+            if !Task.isCancelled {
+                rememberDiscoveredURLs(config, learnedOver: learnedOver)
+            }
+        } catch {
+            havenLog.error("get_config failed: \(error, privacy: .public) — no URLs learned from this connection, and the components signal is unavailable to the onboarding probe")
+        }
+        // Capture the home Wi-Fi network automatically, so the user never types an
+        // SSID for the common case — gated on `learnedOver`, which the SSID match
+        // itself now feeds. When it was the *peer address* that said local, this is
+        // positive independent evidence, so a café's SSID still can never be
+        // recorded as home that way. When it was the SSID match that said local
+        // (the GUA case), this simply re-records the same network already on file —
+        // `rememberCurrentNetworkAsHome` no-ops once the current SSID already equals
+        // `homeSSID`, so nothing new is captured either way. A no-op without
+        // Location Services; granting it later simply means the next local
+        // connection captures it.
+        if learnedOver == .local, !Task.isCancelled {
+            await homeNetwork.rememberCurrentNetworkAsHome()
+        }
+        // Same best-effort footing, and read-only: `probeHavenIntegration` only
+        // ever asks questions. Nothing that changes the user's Home Assistant can
+        // happen without them confirming it first (see
+        // `OnboardingModel.confirmPendingMutation`), so this is safe to run
+        // unattended on every connect — which is also what
+        // lets the flow pick itself back up after the restart step drops the
+        // socket.
+        if !Task.isCancelled {
+            onboarding.attach(home)
+            await onboarding.probe()
+        }
+        // Same live connection, for Task 3's offer — see `RemoteAccessOfferModel`.
+        remoteAccessOffer.attach(home)
+        // Nabu Casa bootstrap: ask the instance whether it has remote access and
+        // at what domain, so remote access needs zero configuration. Same
+        // best-effort footing as `get_config` above — `fetchCloudStatus` never
+        // throws, and an instance without the `cloud` component simply answers
+        // `unknown_command`, which is the ordinary self-hosted user rather than a
+        // failure. Deliberately runs on *every* connection, local or remote: the
+        // classification is safe to know either way, and gating the probe itself
+        // on the connection class would put a security decision here, in code with
+        // no coverage of this loop, instead of in the one function that owns it.
+        //
+        // **Last, deliberately.** `HAWebSocketClient.request` has no deadline (see
+        // the `phase = .ready` comment in `attemptCandidate`), so every unbounded call added here
+        // can starve the ones after it. An instance that authenticates, bootstraps
+        // and answers `get_config` but hangs on `cloud/status` must not be able to
+        // stop the guided-install probe from ever running — that would surface as
+        // "the havenapp setup flow never appears", with nothing logged. Nothing
+        // here depends on ordering except that it follow `rememberDiscoveredURLs`,
+        // which it still does, so `cloud/status` keeps precedence over
+        // `external_url` for the discovered-remote slot.
+        let cloudStatus = await home.fetchCloudStatus()
+        if !Task.isCancelled {
+            rememberNabuCasaRemoteAccess(cloudStatus, learnedOver: learnedOver)
         }
     }
 
