@@ -6,7 +6,8 @@ struct CoverTile: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
-        GlassTile(active: open, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: open, accent: accent, unavailable: unavailable) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 5) {
                     Image(systemName: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(open ? accent : .secondary).symbolRenderingMode(.hierarchical)

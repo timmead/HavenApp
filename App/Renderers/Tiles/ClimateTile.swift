@@ -6,7 +6,8 @@ struct ClimateTile: View {
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let on = s?.isOn ?? false; let accent = HavenColor.domain(.climate)
-        GlassTile(active: on, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: on, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 4) {
                 Image(systemName: "thermometer.medium").font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)

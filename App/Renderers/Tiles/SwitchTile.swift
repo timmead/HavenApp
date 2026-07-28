@@ -8,7 +8,8 @@ struct SwitchTile: View {
         let on = (e?.state == "on")
         let accent = HavenColor.domain(.switchOutlet)
         let name = TileName.of(entityId, e)
-        GlassTile(active: on, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: on, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: IconMap.symbol(domain: .switchOutlet, deviceClass: nil)).font(.system(size: 20)).foregroundStyle(on ? accent : .secondary).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)

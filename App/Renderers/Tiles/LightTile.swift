@@ -8,7 +8,8 @@ struct LightTile: View {
         let s = e.map(LightState.init)
         let on = s?.isOn ?? false
         let accent = HavenColor.domain(.light)
-        GlassTile(active: on, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: on, accent: accent, unavailable: unavailable) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 5) {
                     Image(systemName: IconMap.symbol(domain: .light, deviceClass: nil))

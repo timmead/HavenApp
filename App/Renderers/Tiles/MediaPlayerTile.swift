@@ -48,7 +48,8 @@ struct MediaPlayerTile: View {
     // MARK: - 1×1
 
     private func small(_ s: MediaPlayerState?, name: String) -> some View {
-        GlassTile(active: s?.isPlaying ?? false, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        return GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             VStack(spacing: 4) {
                 Spacer(minLength: 0)
                 playPauseButton(s, size: 26)

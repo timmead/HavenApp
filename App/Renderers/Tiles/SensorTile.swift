@@ -5,7 +5,8 @@ struct SensorTile: View {
     @Environment(HomeStore.self) private var store
     var body: some View {
         let e = store.state(entityId); let s = e.map(SensorState.init)
-        GlassTile(active: false, accent: .gray) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: false, accent: .gray, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass)).font(.system(size: 20)).foregroundStyle(.secondary).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2)

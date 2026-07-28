@@ -5,7 +5,8 @@ struct GenericTile: View {
     @Environment(HomeStore.self) private var store
     var body: some View {
         let e = store.state(entityId)
-        GlassTile(active: false, accent: .gray) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: false, accent: .gray, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: "square.dashed").font(.system(size: 20)).foregroundStyle(.secondary)
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)

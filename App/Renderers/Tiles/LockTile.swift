@@ -8,7 +8,8 @@ struct LockTile: View {
         let locked = s?.isLocked ?? false; let jammed = s?.isJammed ?? false
         let accent = jammed ? HavenColor.warning : (locked ? HavenColor.domain(.lock) : HavenColor.warning)
         let symbol = jammed ? "lock.trianglebadge.exclamationmark" : (locked ? "lock.fill" : "lock.open.fill")
-        GlassTile(active: false, accent: accent) {
+        let unavailable = store.state(entityId)?.isUnavailable ?? false
+        GlassTile(active: false, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(accent).symbolRenderingMode(.hierarchical)
                 Spacer(minLength: 2); Text(TileName.of(entityId, e)).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
