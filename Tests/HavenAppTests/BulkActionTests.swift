@@ -229,4 +229,61 @@ import HavenCore
         // survives the failed command.
         #expect(store.states[id] == pushed)
     }
+
+    /// `closeAll`'s own parameters, now that they are the only thing distinguishing it from
+    /// `allOff`.
+    ///
+    /// Every test above drives `allOff`, and `closeAll` used to be a second hand-written copy of
+    /// the same body — so the shared machinery (bounded batches, per-room tallies, whole-entity
+    /// rollback) was verified on one copy and merely assumed on the other. Both now run through
+    /// `bulkFlip`, which means those tests net this path too, and what is left uncovered is exactly
+    /// the four arguments `closeAll` passes in. This pins the two that can be silently wrong:
+    /// which covers are targets, and what they are flipped to.
+    ///
+    /// The predicate is an allow-list (`open` or `opening`), and the room deliberately contains
+    /// three covers that a deny-list would get wrong. `Rollup.targetEntityIds` for covers is
+    /// **every** cover in the room, not just the open ones (see `RoomRollups.compute`, which uses
+    /// the open subset for the *count* and the full list for the targets), so this predicate is the
+    /// only thing standing between "close all" and a command sent to every shade in the room.
+    ///
+    /// - `closing` — already going the right way; commanding it again is noise.
+    /// - `unavailable` — the state this codebase keeps having to defend against. Note that
+    ///   `bulkFlip` has **no explicit unavailable guard** of the kind `fireAndForget` and
+    ///   `optimisticState` carry: an unreachable cover is excluded here only because the string
+    ///   `"unavailable"` is neither `"open"` nor `"opening"`. That is correct but incidental, and
+    ///   the same is true of `allOff` (`state == "on"`). A predicate rewritten as a deny-list
+    ///   would silently lose that protection along with the rest.
+    ///
+    /// A `!= "closed"` predicate — the obvious "simplification" — passes a room of only open and
+    /// closed covers and fails here, on all three.
+    @Test func closeAllTargetsOpenAndOpeningCoversOnly() async throws {
+        let (store, socket) = try await makeStore()
+        let states = ["cover.a": "open", "cover.b": "opening", "cover.c": "closed",
+                      "cover.d": "closing", "cover.e": "unavailable"]
+        for (id, state) in states {
+            store.states[id] = EntityState(entityId: id, state: state, attributes: [:],
+                                           lastUpdated: Date(timeIntervalSince1970: 0))
+        }
+        let rollup = RoomRollups.compute(entityIds: states.keys.sorted(), states: store.states)
+            .first { $0.kind == .covers }!
+        // Guards the premise: if this ever became the open-only subset, every assertion below
+        // would still pass while testing nothing.
+        #expect(rollup.targetEntityIds.count == 5)
+
+        store.closeAll(rollup, in: "kitchen")
+
+        // Synchronous, up-front flip — the same property `onlyTheFailedEntitiesRevert` pins for
+        // `allOff`, and asserted before any `await` for the same reason.
+        #expect(store.states["cover.a"]?.state == "closed")
+        #expect(store.states["cover.b"]?.state == "closed")
+        // Untouched: not flipped, and — asserted on the wire below — not commanded either.
+        #expect(store.states["cover.c"]?.state == "closed")
+        #expect(store.states["cover.d"]?.state == "closing")
+        #expect(store.states["cover.e"]?.state == "unavailable")
+
+        await waitForCommands(2, on: socket)
+
+        #expect(await socket.answered == 2)
+        #expect(store.bulkFailureCount(for: .covers, in: "kitchen") == 0)
+    }
 }

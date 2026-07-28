@@ -576,62 +576,66 @@ final class HomeStore {
         RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
     }
 
-    /// Turns off every light in the roll-up. Every target's `states` entry is flipped
-    /// synchronously, before anything is batched — see `runBulk`'s doc comment for why the flip
-    /// must not live inside the batched work — then the commands run at most `bulkConcurrency`
-    /// at a time and however many refuse are recorded against this room.
+    /// Turns off every light in the roll-up.
     func allOff(_ rollup: Rollup, in areaId: String) {
-        guard rollup.kind == .lights else {
-            assertionFailure("allOff called with rollup.kind == \(rollup.kind), expected .lights")
-            return
-        }
-        let targets = rollup.targetEntityIds.filter { states[$0]?.state == "on" }
-        var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
-        for id in targets {
-            guard let s = states[id] else { continue }
-            var next = s; next.state = "off"
-            flips[id] = (previous: s, flipped: next)
-            states[id] = next
-        }
-        runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
-            guard let self else { return }
-            do { try await connection.setLight(id, on: false) }
-            catch {
-                // Whole-entity comparison, not just `state`: a WebSocket push that lands mid-flight
-                // and happens to also report "off" would satisfy a state-only check and overwrite
-                // the pushed reading (and its now-stale attributes/lastUpdated) with the tap-time
-                // snapshot. Comparing the whole `EntityState` — which carries `lastUpdated` — means
-                // any genuine push no longer compares equal, so the rollback correctly stays out.
-                if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
-                throw error
-            }
+        bulkFlip(rollup, in: areaId, expecting: .lights,
+                 isTarget: { $0.state == "on" }, flippingTo: "off") { connection, id in
+            try await connection.setLight(id, on: false)
         }
     }
 
-    /// Closes every open cover in the roll-up — same up-front synchronous flip, then bounded and
-    /// counted commands, as `allOff`.
+    /// Closes every open cover in the roll-up. `opening` counts as a target: a cover on its way up
+    /// is one the user asking for "close all" plainly means to include.
     func closeAll(_ rollup: Rollup, in areaId: String) {
-        guard rollup.kind == .covers else {
-            assertionFailure("closeAll called with rollup.kind == \(rollup.kind), expected .covers")
+        bulkFlip(rollup, in: areaId, expecting: .covers,
+                 isTarget: { $0.state == "open" || $0.state == "opening" }, flippingTo: "closed") { connection, id in
+            try await connection.closeCover(id)
+        }
+    }
+
+    /// One room's roll-up, flipped optimistically and then commanded in bounded batches.
+    ///
+    /// `allOff` and `closeAll` were this function twice, differing only in the four things now
+    /// passed in: which kind of roll-up is expected, which entities are targets, what state they
+    /// are flipped to, and which command is sent. Everything else — and it is the part that is
+    /// subtle — was duplicated, including the rollback rule, which had to be explained in both
+    /// copies.
+    ///
+    /// Every target's `states` entry is flipped **synchronously, here**, before anything is
+    /// batched — see `runBulk`'s doc comment for why the flip must not live inside the batched
+    /// work — then the commands run at most `bulkConcurrency` at a time and however many refuse
+    /// are recorded against this room.
+    ///
+    /// The `expecting` check is an internal-consistency assertion, not input validation: the
+    /// callers are `RoomSectionView`/`RoomDetailView` rendering a row whose kind they already
+    /// know, so a mismatch is a programming error and `assertionFailure` names the caller
+    /// (`#function` at the call site) rather than this shared helper.
+    private func bulkFlip(_ rollup: Rollup, in areaId: String, expecting kind: Rollup.Kind,
+                          isTarget: (EntityState) -> Bool, flippingTo flipped: String,
+                          caller: String = #function,
+                          _ command: @escaping @MainActor (HomeConnection, String) async throws -> Void) {
+        guard rollup.kind == kind else {
+            assertionFailure("\(caller) called with rollup.kind == \(rollup.kind), expected \(kind)")
             return
         }
-        let targets = rollup.targetEntityIds.filter {
-            let s = states[$0]?.state; return s == "open" || s == "opening"
-        }
+        let targets = rollup.targetEntityIds.filter { states[$0].map(isTarget) ?? false }
         var flips: [String: (previous: EntityState, flipped: EntityState)] = [:]
         for id in targets {
             guard let s = states[id] else { continue }
-            var next = s; next.state = "closed"
+            var next = s; next.state = flipped
             flips[id] = (previous: s, flipped: next)
             states[id] = next
         }
         runBulk(rollup, in: areaId, targets: targets) { [weak self] connection, id in
             guard let self else { return }
-            do { try await connection.closeCover(id) }
+            do { try await command(connection, id) }
             catch {
-                // See `allOff`'s matching catch: whole-entity comparison, not just `state`, so a
-                // mid-flight push that happens to also read "closed" doesn't get overwritten by
-                // the tap-time snapshot.
+                // Whole-entity comparison, not just `state`: a WebSocket push that lands mid-flight
+                // and happens to also report the flipped-to state would satisfy a state-only check
+                // and overwrite the pushed reading (and its now-stale attributes/lastUpdated) with
+                // the tap-time snapshot. Comparing the whole `EntityState` — which carries
+                // `lastUpdated` — means any genuine push no longer compares equal, so the rollback
+                // correctly stays out.
                 if let flip = flips[id], self.states[id] == flip.flipped { self.states[id] = flip.previous }
                 throw error
             }
