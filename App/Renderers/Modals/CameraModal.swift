@@ -250,23 +250,11 @@ struct CameraModal: View {
                 // doorbell chip nobody sees.
                 FlowRow(spacing: 7) {
                     ForEach(sensors) { sensor in
-                        eventChip(sensor, accent: accent)
+                        EventChip(sensor: sensor, accent: accent)
                     }
                 }
             }
         }
-    }
-
-    private func eventChip(_ sensor: CameraEventSensor, accent: Color) -> some View {
-        let state = store.state(sensor.entityId).map(BinarySensorState.init)
-        let isActive = state?.isActive ?? false
-        // State as a word, not only as a tint — the amber is unreadable to a VoiceOver user and
-        // ambiguous to anyone else, and "Motion" alone doesn't say whether there *is* any.
-        return HavenChip(systemImage: sensor.kind.symbol,
-                         text: "\(sensor.kind.label) · \(isActive ? "Active" : "Clear")",
-                         accent: isActive ? HavenColor.warning : accent.opacity(0.7))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(sensor.kind.label), \(isActive ? "active" : "clear")")
     }
 
     // MARK: - Lifecycle
@@ -441,6 +429,81 @@ enum CameraPlaybackPlan: Equatable {
 }
 
 // MARK: - Pieces
+
+/// One event chip: what kind of event this sensor reports, and **when it last did**.
+///
+/// "Motion · Clear" answered a question nobody asks. A camera's event sensors are clear almost all
+/// of the time, so the card was a row of chips all saying the same word, and the thing the user
+/// opened the modal to find out — has anything happened, and how long ago — was not on it.
+/// `Person · 24m ago` is that answer.
+///
+/// Three renderings, in the order they are decided:
+///
+/// - **Active** while the sensor is active. A time would be strange for something that has not
+///   finished, and this is the one state the chip has always coloured, so the amber and the word go
+///   on meaning what they did.
+/// - **The last activation**, when history has one — `StateChange.lastActivation`, which is where
+///   the newest-first ordering this depends on is pinned by a test.
+/// - **Clear** whenever there is no time to show: nothing loaded yet, the fetch failed, or the
+///   sensor genuinely has not fired inside the rolling 24 hours the query covers. All three are
+///   cases of *not knowing when*; "Clear" is true in every one, is the word `BinarySensorModal`
+///   already speaks, and leaves the chip reading exactly as it does today on an install with no
+///   `history` integration. "None today" would be the false version — a rolling window is not a
+///   calendar day, and a failed fetch knows nothing at all.
+///
+/// **Its own view because it owns state**: which live reading it last fetched history for. That is
+/// what lets it tell its first appearance (use the shared cache, possibly warm from the sensor's
+/// own modal) from a sensor that has just moved (re-ask, the cache is now wrong) — see `task`.
+private struct EventChip: View {
+    let sensor: CameraEventSensor
+    let accent: Color
+    @Environment(HomeStore.self) private var store
+    /// The live reading this chip last loaded history for, or `nil` before the first load.
+    @State private var loadedFor: Bool?
+
+    var body: some View {
+        let isActive = store.state(sensor.entityId).map(BinarySensorState.init)?.isActive ?? false
+        let lastActivation = store.stateChanges(sensor.entityId).flatMap(StateChange.lastActivation)
+        // A one-minute cadence: minutes are the coarsest unit this shows, so a faster tick would
+        // redraw every chip to change nothing, and no tick at all would leave "just now" sitting on
+        // screen over an event that happened twenty minutes ago.
+        return TimelineView(.periodic(from: .now, by: 60)) { context in
+            let detail = Self.detail(isActive: isActive, lastActivation: lastActivation, now: context.date)
+            // State as a word, not only as a tint — the amber is unreadable to a VoiceOver user and
+            // ambiguous to anyone else, and "Motion" alone doesn't say whether there *is* any.
+            HavenChip(systemImage: sensor.kind.symbol,
+                      text: "\(sensor.kind.label) · \(detail.shown)",
+                      accent: isActive ? HavenColor.warning : accent.opacity(0.7))
+                .accessibilityElement(children: .ignore)
+                // Built from the same three-way choice rather than from `isActive` alone: a chip
+                // that reads "24m ago" and speaks "clear" is one sensor described two ways.
+                .accessibilityLabel("\(sensor.kind.label), \(detail.spoken)")
+        }
+        // **Re-asked when the sensor moves, not only when the card appears.** The cached list is
+        // good for five minutes, and a sensor that fires while the modal is open makes it wrong
+        // immediately — a chip confidently reading "12m ago" thirty seconds after a doorbell press
+        // is exactly the plausible-but-false claim this app keeps ruling out. The push that moved
+        // the sensor is the proof the list is stale, so it is also the trigger to re-ask, including
+        // on the transition *back* to clear, which is the one that produces the new time to show.
+        //
+        // `force` only on a *change*, which is why `loadedFor` exists: forcing on first appearance
+        // would throw away a cache that may be seconds old from the sensor's own modal, on every
+        // open, for nothing.
+        .task(id: isActive) {
+            let moved = loadedFor != nil && loadedFor != isActive
+            loadedFor = isActive
+            await store.loadStateChanges(sensor.entityId, force: moved)
+        }
+    }
+
+    /// The chip's second half, shown and spoken, resolved in one place so the two cannot disagree.
+    private static func detail(isActive: Bool, lastActivation: Date?, now: Date) -> (shown: String, spoken: String) {
+        if isActive { return ("Active", "active") }
+        guard let lastActivation else { return ("Clear", "clear") }
+        return (RelativeAge.describe(lastActivation, now: now),
+                "last seen \(RelativeAge.spoken(lastActivation, now: now))")
+    }
+}
 
 /// The live indicator: one dot, pulsing, and nothing else.
 ///

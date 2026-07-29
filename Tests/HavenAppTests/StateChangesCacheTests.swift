@@ -103,4 +103,25 @@ import HavenCore
         await store.loadStateChanges("binary_sensor.door")
         #expect(await socket.requestCount == 1)
     }
+
+    /// `force:` is what the camera modal's event chips use when a sensor they are describing
+    /// actually moves. Without it the five-minute lifetime above means a chip goes on saying
+    /// "12m ago" about a doorbell that rang thirty seconds ago — a confident, specific, false claim
+    /// about the user's home, which is the failure this app spends most of its comments avoiding.
+    ///
+    /// Both halves matter, so both are checked: a forced call re-asks a cache that is still fresh,
+    /// and it is genuinely opt-in — the default path in the test above must stay cheap.
+    @Test func aForcedLoadRefetchesAnEntryThatIsStillFresh() async throws {
+        let (store, socket) = try await makeStore(succeed: true)
+        store.historyCache.stateChangesByEntity["binary_sensor.door"] = (changes: [], fetched: Date())
+
+        await store.loadStateChanges("binary_sensor.door")
+        #expect(await socket.requestCount == 0)      // fresh: no round trip, as before
+
+        await store.loadStateChanges("binary_sensor.door", force: true)
+        #expect(await socket.requestCount == 1)      // forced: asked anyway
+
+        await store.loadStateChanges("binary_sensor.door")
+        #expect(await socket.requestCount == 1)      // and the re-cache is fresh again
+    }
 }

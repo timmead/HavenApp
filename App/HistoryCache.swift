@@ -120,9 +120,17 @@ final class HistoryCache {
     /// since this is always a Day query. Never caches a failure (so a transient error doesn't
     /// permanently block a retry) and never *clears* a stale cache on failure either — an old list
     /// beats a blank one.
-    func loadStateChanges(_ entityId: String) async {
+    ///
+    /// **`force` exists for callers that know the cache is wrong**, and there is exactly one class
+    /// of them: a caller watching the entity's *live* state, which has just seen it change. The
+    /// camera modal's event chips read the last activation out of this list to say "24m ago", and
+    /// a five-minute-old list says that with total confidence about a sensor that fired thirty
+    /// seconds ago. The push that moved the sensor is the proof the list is stale, so the chip
+    /// re-asks on it. Being a parameter rather than a separate entry point keeps the caching in
+    /// one place; being opt-in keeps every other caller on the cheap path.
+    func loadStateChanges(_ entityId: String, force: Bool = false) async {
         let now = Date()
-        if let cached = stateChangesByEntity[entityId],
+        if !force, let cached = stateChangesByEntity[entityId],
            now.timeIntervalSince(cached.fetched) < HistoryRange.day.cacheLifetime {
             return
         }

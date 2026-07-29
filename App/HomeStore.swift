@@ -587,7 +587,7 @@ final class HomeStore {
 
     func stateChangesLoadFailed(_ entityId: String) -> Bool { historyCache.loadFailed(entityId) }
 
-    func loadStateChanges(_ entityId: String) async {
-        await historyCache.loadStateChanges(entityId)
+    func loadStateChanges(_ entityId: String, force: Bool = false) async {
+        await historyCache.loadStateChanges(entityId, force: force)
     }
 }

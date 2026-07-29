@@ -81,3 +81,38 @@ import Foundation
     let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(#"{}"#.utf8))
     #expect(HistoryParsing.stateChanges(v, entityId: "binary_sensor.door").isEmpty)
 }
+
+// MARK: - Last activation
+
+/// `lastActivation` is `first { $0.state == "on" }`, which is only correct because
+/// `HistoryParsing.stateChanges` ends in `out.reversed()` and hands back a newest-first list. That
+/// dependency is invisible from the call site, so it is pinned here: were the ordering ever to
+/// flip, every event chip in the camera modal would quietly report the *oldest* trigger of the day
+/// as though it had just happened.
+@Test func lastActivationReadsTheNewestOnFromAParsedList() {
+    let json = #"""
+    {"binary_sensor.motion":[{"s":"on","lu":100.0},{"s":"off","lu":200.0},
+                             {"s":"on","lu":300.0},{"s":"off","lu":400.0}]}
+    """#
+    let v = try! HACoding.decoder.decode(JSONValue.self, from: Data(json.utf8))
+    let changes = HistoryParsing.stateChanges(v, entityId: "binary_sensor.motion")
+    // Newest first, and the newest row is the *clear* — the case a "last row" or "last on in
+    // reading order" implementation gets wrong in opposite directions.
+    #expect(changes.map(\.state) == ["off", "on", "off", "on"])
+    #expect(StateChange.lastActivation(in: changes) == Date(timeIntervalSince1970: 300))
+}
+
+@Test func lastActivationOfASensorStillActiveIsWhenItBecameActive() {
+    let changes = [StateChange(time: Date(timeIntervalSince1970: 300), state: "on"),
+                   StateChange(time: Date(timeIntervalSince1970: 200), state: "off"),
+                   StateChange(time: Date(timeIntervalSince1970: 100), state: "on")]
+    #expect(StateChange.lastActivation(in: changes) == Date(timeIntervalSince1970: 300))
+}
+
+/// No `on` in the window is `nil`, and `nil` means "we don't know", never "it never happened" —
+/// the query behind this is a rolling 24 hours, so a sensor that last fired last night lands here.
+/// The camera modal renders this case as "Clear" rather than inventing a time.
+@Test func lastActivationIsNilWhenNothingInTheWindowWentActive() {
+    #expect(StateChange.lastActivation(in: []) == nil)
+    #expect(StateChange.lastActivation(in: [StateChange(time: Date(timeIntervalSince1970: 400), state: "off")]) == nil)
+}

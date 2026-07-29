@@ -17,6 +17,14 @@ import SwiftUI
 /// whatever height it is offered, so a sheet containing one measures exactly as tall as it already
 /// is, and the measurement becomes an elaborate way of changing nothing.
 ///
+/// **Every sheet measures**, including the camera. There used to be an opt-out and a settable
+/// initial detent, both for the camera modal alone, on the grounds that a picture reports whatever
+/// height it is given. That was not true of the view in question — `CameraModal`'s feed is
+/// `.aspectRatio(16/9, contentMode: .fit)`, so its height follows the sheet's fixed width, and it
+/// measures to about 405pt on a 6.7" screen where it had been taking the whole 852. Both parameters
+/// went with it: a flag with no caller that passes it is a second code path nobody exercises, and
+/// the next sheet whose content is genuinely unmeasurable is better served by fixing the content.
+///
 /// ## Why measure at all, on iOS 26
 ///
 /// `presentationSizing(.fitted)` (iOS 18+) looks like it should make this whole type unnecessary,
@@ -34,33 +42,27 @@ struct FittedSheet: ViewModifier {
 
     let minimum: CGFloat
     let maximum: CGFloat
-    /// When false the sheet offers `[.medium, .large]` and never measures — for content that will
-    /// happily report whatever height it is given (a picture), where measuring says nothing about
-    /// how big it *wants* to be.
-    let measuresContent: Bool
 
     /// The measured height of the content. `nil` until the first layout pass reports one.
     @State private var contentHeight: CGFloat?
     /// Which detent the sheet is at. A *selection*, not a restriction — the set below always
-    /// offers `.large` too.
-    @State private var detent: PresentationDetent
+    /// offers `.large` too. It starts at `.medium` and moves onto the measured height as soon as
+    /// there is one, which is a single pass and not a visible animation.
+    @State private var detent: PresentationDetent = .medium
 
     init(minimum: CGFloat = FittedSheet.defaultMinimum,
-         maximum: CGFloat = FittedSheet.defaultMaximum,
-         measuresContent: Bool = true,
-         initialDetent: PresentationDetent = .medium) {
+         maximum: CGFloat = FittedSheet.defaultMaximum) {
         self.minimum = minimum
         self.maximum = maximum
-        self.measuresContent = measuresContent
-        // Seeded here rather than assigned on appear, so a sheet that wants to open large does so
-        // instead of being presented at medium and animating upwards, which reads as a twitch.
-        _detent = State(initialValue: initialDetent)
     }
 
     private func clamped(_ height: CGFloat) -> CGFloat { min(max(height, minimum), maximum) }
 
+    /// `[.medium, .large]` only until the first layout pass reports a height — a sheet has to have
+    /// detents before anything has been measured, and `.medium` is the least surprising thing to be
+    /// for the one frame that lasts.
     private var detents: Set<PresentationDetent> {
-        guard measuresContent, let contentHeight else { return [.medium, .large] }
+        guard let contentHeight else { return [.medium, .large] }
         return [.height(clamped(contentHeight)), .large]
     }
 
@@ -110,10 +112,7 @@ private struct ScrollWhenTall: ViewModifier {
 extension View {
     /// Presents this view as a sheet sized to its own content. See `FittedSheet`.
     func fittedSheet(minimum: CGFloat = FittedSheet.defaultMinimum,
-                     maximum: CGFloat = FittedSheet.defaultMaximum,
-                     measuresContent: Bool = true,
-                     initialDetent: PresentationDetent = .medium) -> some View {
-        modifier(FittedSheet(minimum: minimum, maximum: maximum,
-                             measuresContent: measuresContent, initialDetent: initialDetent))
+                     maximum: CGFloat = FittedSheet.defaultMaximum) -> some View {
+        modifier(FittedSheet(minimum: minimum, maximum: maximum))
     }
 }
