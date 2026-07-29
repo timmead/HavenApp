@@ -14,6 +14,32 @@ enum HavenColor {
         case .sensor, .binarySensor, .unknown, .switchOutlet: return Color(red: 0.18, green: 0.44, blue: 0.84)
         }
     }
+    /// A thermostat's colour, by what it is doing — heating red, cooling blue, fan green, drying
+    /// purple.
+    ///
+    /// The one domain whose single accent was not enough. Every other domain has one job; a
+    /// thermostat has four, and "the climate colour" made a room being cooled to 19° look exactly
+    /// like one being heated to 21° — the difference a glance at a dashboard is *for*.
+    ///
+    /// `.unspecified` keeps `domain(.climate)`, which is the honest answer for `heat_cool`, `auto`
+    /// and `off`: a thermostat that will do either and is currently doing neither has no true
+    /// colour, and picking one would be a claim about the house. Which function a thermostat has is
+    /// `ClimateState.function`'s decision, in HavenCore with tests, because it is a reading of Home
+    /// Assistant's vocabulary and not a matter of taste.
+    ///
+    /// Literal RGB and the same in both appearances, on the same footing as `liveIndicator` and the
+    /// colour-temperature pair: warm-means-heating is a fact about the equipment, not a surface
+    /// tint, and a `.primary`-derived version would render two of these as the same grey.
+    static func climate(_ function: ClimateState.Function) -> Color {
+        switch function {
+        case .heat: return Color(red: 0.84, green: 0.21, blue: 0.13)
+        case .cool: return Color(red: 0.13, green: 0.47, blue: 0.86)
+        case .fan: return Color(red: 0.11, green: 0.60, blue: 0.36)
+        case .dry: return Color(red: 0.55, green: 0.29, blue: 0.78)
+        case .unspecified: return domain(.climate)
+        }
+    }
+
     /// Subtle translucent fill for glass surfaces — adapts to light/dark.
     static let glassFill = Color.primary.opacity(0.06)
     /// Hairline edge for glass surfaces — adapts to light/dark.

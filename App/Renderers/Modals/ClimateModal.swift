@@ -5,7 +5,11 @@ struct ClimateModal: View {
     @Environment(HomeStore.self) private var store
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
-        let accent = HavenColor.domain(.climate)
+        // Read from the thermostat's function, exactly as `ClimateTile` does, so the sheet is a
+        // larger version of the tile that opened it rather than a differently-coloured one. The
+        // lock pair is the precedent: a tile and its modal disagreeing about a device's colour is
+        // noticed immediately, and it is noticed as the *sheet* being wrong.
+        let accent = HavenColor.climate(s?.function ?? .unspecified)
         // `ClimateState.isOn` already excludes `unavailable`/`unknown`, so this header did not
         // claim a *mode* for an unreachable thermostat — but it fell through to "Off", which is
         // the same false claim in different words. Named explicitly instead.
