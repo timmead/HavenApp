@@ -14,9 +14,11 @@ final class HomeStore {
     /// `historyCache`, not `history`, because `history(_:_:attribute:)` below is the read the views
     /// already call and that name is worth keeping for them.
     let historyCache = HistoryCache()
-    /// Room temperature/humidity nominations and the shared dashboard document — see
-    /// `EnvironmentCoordinator`.
+    /// Which sensor is each room's — see `EnvironmentCoordinator`. It no longer owns the document
+    /// those nominations are stored in; `config` does.
     let environmentCoordinator = EnvironmentCoordinator()
+    /// Haven's own configuration document, and the only writer of it — see `HavenConfig`.
+    let config = HavenConfig()
     /// Bounded execution and the per-room failure tally for bulk actions — see `BulkActionRunner`.
     let bulk = BulkActionRunner()
 
@@ -48,7 +50,7 @@ final class HomeStore {
         subscriptionTask?.cancel(); subscriptionTask = nil
         self.connection = connection
         historyCache.attach(connection)
-        environmentCoordinator.attach(connection)
+        config.attach(connection)
     }
 
     func bootstrap() async throws {
@@ -87,7 +89,10 @@ final class HomeStore {
         // A config failure still can't fail `bootstrap()` itself: `EnvironmentCoordinator.load`
         // swallows its own errors (see its doc comment) and there is nothing after it in this
         // function that could turn a config problem into a thrown one.
-        await environmentCoordinator.load(home: home, states: states)
+        // Config first, then resolve-and-propose against it. `HavenConfig.load` swallows its own
+        // errors (see its doc comment), so a configuration problem still cannot fail `bootstrap()`.
+        await config.load()
+        await environmentCoordinator.loadAndPropose(home: home, states: states, config: config)
     }
 
     /// Tear down the live session (used on sign-out, and on any reconnect). Clears history too —
@@ -112,6 +117,7 @@ final class HomeStore {
         states = [:]
         historyCache.reset()
         environmentCoordinator.reset()
+        config.reset()
         bulk.reset()
         isResetting = false
     }
@@ -128,9 +134,43 @@ final class HomeStore {
     /// coordinator's storage rather than a copy taken at some earlier moment.
     var environment: [String: RoomEnvironment] { environmentCoordinator.byArea }
 
+    /// Nominates one sensor as a room's temperature or humidity source, and writes it to the
+    /// household's dashboard document.
+    ///
+    /// Re-resolves after a successful write so the room's pills change immediately rather than at
+    /// the next structure load — `byArea` is deliberately not recomputed from live state (see
+    /// `EnvironmentCoordinator`), so nothing else would notice the document had changed.
+    func nominate(_ sensor: UpliftedSensor, areaId: String) async -> HavenConfig.Outcome {
+        let outcome = await config.update { document in
+            var override = document.nominations[areaId] ?? RoomEnvironmentOverride()
+            override[sensor.role] = sensor
+            return document.merging([areaId: override])
+        }
+        if outcome == .written { resolveEnvironment() }
+        return outcome
+    }
+
+    /// What a device is called: Haven's override if the user set one, otherwise Home Assistant's
+    /// name, otherwise the entity id as words. The rule is `DisplayName`'s, in HavenCore with tests.
+    ///
+    /// **Every surface must go through here** rather than reading `friendly_name` itself, or a
+    /// renamed device would keep its old name wherever the sweep was missed. `TileName.of` was
+    /// deleted to make that grep-checkable.
+    func displayName(of entityId: String) -> String {
+        DisplayName.resolve(override: config.document.displayNames[entityId],
+                            friendlyName: states[entityId]?.attributes["friendly_name"]?.asString,
+                            entityId: entityId)
+    }
+
+    /// Sets or clears Haven's own name for a device. Never renames the entity in Home Assistant —
+    /// HA stays the source of truth for structure, and this is Haven's layer on top.
+    func rename(_ entityId: String, to name: String?) async -> HavenConfig.Outcome {
+        await config.update { $0.settingDisplayName(name, for: entityId) }
+    }
+
     /// Re-resolves every room's nomination against the current registry and states.
     func resolveEnvironment() {
-        environmentCoordinator.resolve(home: home, states: states)
+        environmentCoordinator.resolve(home: home, states: states, document: config.document)
     }
 
     func isOn(_ entityId: String) -> Bool { states[entityId]?.state == "on" }
