@@ -147,3 +147,67 @@ private func json(_ text: String) -> JSONValue {
     #expect(doc.nominations["b"] == nil)
     #expect(doc.nominations["c"]?.temperature?.entityId == "sensor.ok")
 }
+
+// MARK: - Display names
+
+@Test func aDisplayNameRoundTrips() {
+    let doc = DashboardDocument().settingDisplayName("Reading Lamp", for: "light.kitchen")
+    #expect(doc.displayNames == ["light.kitchen": "Reading Lamp"])
+}
+
+/// The property this whole type exists to defend, extended to the new subtree: a build that knows
+/// about `entities` must not strip what a newer build wrote — neither unknown top-level keys, nor
+/// unknown keys *inside* an entity it is editing.
+@Test func writingANameKeepsEveryKeyItDoesNotOwn() {
+    let raw = JSONValue.object([
+        "schema": .int(1),
+        "tiles": .object(["order": .array([.string("light.kitchen")])]),
+        "entities": .object([
+            "light.kitchen": .object(["name": .string("Old"), "icon": .string("mdi:lamp")]),
+            "light.hall": .object(["name": .string("Hall")]),
+        ]),
+    ])
+    let doc = DashboardDocument(raw: raw).settingDisplayName("New", for: "light.kitchen")
+    let root = doc.raw.asObject
+    #expect(root?["tiles"] != nil)
+    let kitchen = root?["entities"]?.asObject?["light.kitchen"]?.asObject
+    #expect(kitchen?["name"]?.asString == "New")
+    #expect(kitchen?["icon"]?.asString == "mdi:lamp")
+    #expect(root?["entities"]?.asObject?["light.hall"]?.asObject?["name"]?.asString == "Hall")
+}
+
+/// Clearing an override deletes the key rather than storing an empty string, so the document does
+/// not accumulate a tombstone per device the user ever renamed and changed their mind about.
+@Test func clearingANameRemovesTheKeyButKeepsTheEntitysOtherKeys() {
+    let raw = JSONValue.object([
+        "entities": .object(["light.kitchen": .object(["name": .string("Old"),
+                                                       "icon": .string("mdi:lamp")])]),
+    ])
+    let doc = DashboardDocument(raw: raw).settingDisplayName(nil, for: "light.kitchen")
+    #expect(doc.displayNames.isEmpty)
+    #expect(doc.raw.asObject?["entities"]?.asObject?["light.kitchen"]?.asObject?["icon"]?.asString == "mdi:lamp")
+}
+
+/// A blank name is the same instruction as clearing it — see `DisplayName`, which treats a
+/// whitespace-only override as absent. Storing it would leave a document whose name is present but
+/// means nothing.
+@Test func aBlankNameClearsRatherThanStores() {
+    let doc = DashboardDocument()
+        .settingDisplayName("Reading Lamp", for: "light.kitchen")
+        .settingDisplayName("   ", for: "light.kitchen")
+    #expect(doc.displayNames.isEmpty)
+}
+
+@Test func namesAndNominationsDoNotDisturbEachOther() {
+    let doc = DashboardDocument()
+        .merging(["living": RoomEnvironmentOverride(
+            temperature: UpliftedSensor(role: .temperature, entityId: "sensor.t", source: .state))])
+        .settingDisplayName("Reading Lamp", for: "light.kitchen")
+    #expect(doc.nominations["living"]?.temperature?.entityId == "sensor.t")
+    #expect(doc.displayNames["light.kitchen"] == "Reading Lamp")
+}
+
+@Test func aMalformedEntitiesSubtreeIsIgnoredNotFatal() {
+    let raw = JSONValue.object(["entities": .string("nonsense")])
+    #expect(DashboardDocument(raw: raw).displayNames.isEmpty)
+}

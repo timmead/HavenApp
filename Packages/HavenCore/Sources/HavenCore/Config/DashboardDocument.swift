@@ -29,6 +29,8 @@ public struct DashboardDocument: Sendable, Equatable {
 
     private static let schemaKey = "schema"
     private static let roomsKey = "rooms"
+    private static let entitiesKey = "entities"
+    private static let nameKey = "name"
 
     public let raw: JSONValue
 
@@ -94,6 +96,59 @@ public struct DashboardDocument: Sendable, Equatable {
             rooms[areaId] = .object(room)
         }
         root[Self.roomsKey] = .object(rooms)
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Display names
+
+    /// Haven's own display names, keyed by entity id.
+    ///
+    /// At the document root rather than under a room, deliberately: an entity's name does not depend
+    /// on which room it is in, and moving a device between areas in Home Assistant must not silently
+    /// lose the name a user gave it.
+    ///
+    /// Blank stored names are dropped on the way out as well as refused on the way in — a document
+    /// written by hand, or by a build with a different idea of blankness, must not produce a nameless
+    /// tile. `DisplayName` applies the same rule at the point of use.
+    public var displayNames: [String: String] {
+        guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
+        return entities.compactMapValues { entity in
+            guard let name = entity.asObject?[Self.nameKey]?.asString,
+                  !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return name
+        }
+    }
+
+    /// This document with one entity's display name set, or — for a `nil` or blank name — removed.
+    ///
+    /// One entity at a time rather than a bulk merge, because that is how the feature works: a
+    /// rename sheet edits one device. It merges at every level for the reason in the type's doc
+    /// comment, so an entity's other keys (an icon, a tile size, whatever a later build adds) survive
+    /// a rename, and clearing a name removes only that key rather than the entity's whole record.
+    public func settingDisplayName(_ name: String?, for entityId: String) -> DashboardDocument {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var entities = root[Self.entitiesKey]?.asObject ?? [:]
+        var entity = entities[entityId]?.asObject ?? [:]
+        if let trimmed, !trimmed.isEmpty {
+            entity[Self.nameKey] = .string(trimmed)
+        } else {
+            entity.removeValue(forKey: Self.nameKey)
+        }
+        // An entity record holding nothing at all is removed outright, so clearing the only name a
+        // device ever had leaves the document exactly as it started rather than a shell keyed by
+        // every entity anyone has ever opened.
+        if entity.isEmpty {
+            entities.removeValue(forKey: entityId)
+        } else {
+            entities[entityId] = .object(entity)
+        }
+        if entities.isEmpty {
+            root.removeValue(forKey: Self.entitiesKey)
+        } else {
+            root[Self.entitiesKey] = .object(entities)
+        }
         return DashboardDocument(raw: .object(root))
     }
 
