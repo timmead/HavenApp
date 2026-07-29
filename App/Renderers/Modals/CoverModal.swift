@@ -18,7 +18,7 @@ struct CoverModal: View {
         let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e),
+                        title: store.displayName(of: entityId),
                         subtitle: unknown ? "Unknown" : ((s?.isOpen ?? false) ? "Open" : "Closed"),
                         accent: accent, unavailable: unavailable,
                         toggle: Binding(get: { s?.isOpen ?? false },

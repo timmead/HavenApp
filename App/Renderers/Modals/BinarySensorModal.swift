@@ -43,7 +43,7 @@ struct BinarySensorModal: View {
         let unavailable = e?.isUnavailable ?? false
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e),
+                        title: store.displayName(of: entityId),
                         subtitle: unavailable ? "Unavailable" : (active ? "Active" : "Clear"),
                         accent: active ? HavenColor.warning : .gray, unavailable: unavailable)
 

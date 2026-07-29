@@ -15,7 +15,7 @@ struct CoverTile: View {
                 // `open` reading `false` for an `unavailable` state string made them right
                 // incidentally rather than deliberately.
                 TileLabel(symbol: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
-                          name: TileName.of(entityId, e),
+                          name: store.displayName(of: entityId),
                           icon: open ? .accent : .secondary,
                           title: open ? .primary : .secondary,
                           accent: accent, unavailable: unavailable)
@@ -35,10 +35,10 @@ struct CoverTile: View {
                 }
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(s.map { AccessibilitySummary.cover(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityLabel(s.map { AccessibilitySummary.cover(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 }

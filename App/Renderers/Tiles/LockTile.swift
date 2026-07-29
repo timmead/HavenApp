@@ -35,14 +35,14 @@ struct LockTile: View {
             // for an unreachable lock is domain knowledge (see the comment on `symbol`). The
             // emphases below are the ordinary ones; it is the picture that is special here.
             TileLabel(symbol: symbol,
-                      name: TileName.of(entityId, e),
+                      name: store.displayName(of: entityId),
                       icon: .accent,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.toggleLock(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(s.map { AccessibilitySummary.lock(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityLabel(s.map { AccessibilitySummary.lock(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 }

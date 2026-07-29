@@ -23,7 +23,7 @@ struct SensorModal: View {
         let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e),
+                        title: store.displayName(of: entityId),
                         subtitle: unavailable ? "Unavailable" : (unknown ? "Unknown" : ""),
                         accent: accent, unavailable: unavailable)
 

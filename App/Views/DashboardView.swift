@@ -70,15 +70,32 @@ struct DashboardView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Connection", systemImage: "wifi") {
-                            showingConnectionSettings = true
+                    if navigation.isConfiguring {
+                        // The way out has to be at least as findable as the way in, and it replaces
+                        // the menu rather than joining it: while configuring, "done" is the only
+                        // thing anyone wants from this corner.
+                        Button("Done") { navigation.isConfiguring = false }
+                            .fontWeight(.semibold)
+                    } else {
+                        Menu {
+                            // Shown only to a confirmed HA admin, with a document we actually read
+                            // and can write — see `HavenConfig.canConfigure`, where each of the four
+                            // denials has its own reason. Omitted rather than disabled, which is
+                            // this app's standing rule for a control that cannot act.
+                            if store.config.canConfigure {
+                                Button("Edit Dashboard", systemImage: "slider.horizontal.3") {
+                                    navigation.isConfiguring = true
+                                }
+                            }
+                            Button("Connection", systemImage: "wifi") {
+                                showingConnectionSettings = true
+                            }
+                            Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                Task { await app.signOut() }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
                         }
-                        Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                            Task { await app.signOut() }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
@@ -87,15 +104,41 @@ struct DashboardView: View {
         // replaces did, and the safe-area inset it claims propagates into the pushed detail so
         // that view's own content clears it too.
         .safeAreaInset(edge: .bottom) { floorBar }
+        // Every tap means something different while this is on, so the mode has to be legible
+        // without looking at the toolbar. A strip rather than a tile treatment: dimming or animating
+        // the tiles themselves would collide with the vocabulary this app already uses for
+        // unavailable devices.
+        .safeAreaInset(edge: .top) {
+            if navigation.isConfiguring {
+                Text("Editing dashboard")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(HavenColor.domain(.cover))
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
+        // The mode must not outlive its own preconditions: an admin demoted mid-session, a dropped
+        // connection, or a write that came back `not_authorized` (which records `isAdmin = false`)
+        // all land here and close it, rather than leaving a dashboard that looks editable and
+        // refuses every edit.
+        .onChange(of: store.config.canConfigure) { _, canConfigure in
+            if !canConfigure { navigation.isConfiguring = false }
+        }
         // Floors are rebuilt wholesale on every registry reload and the selected one can vanish
         // across one. Keyed on the ids rather than the floors themselves: a reload changes every
         // floor's contents, so comparing the values would fire on every reload regardless.
         .onChange(of: floors.map(\.id)) { _, _ in
             scrolledFloorId = FloorPaging.selection(current: scrolledFloorId, floors: floors)
         }
-        .sheet(isPresented: Binding(get: { navigation.presentedEntityId != nil },
-                                    set: { if !$0 { navigation.presentedEntityId = nil } })) {
-            if let id = navigation.presentedEntityId { DeviceModalView(entityId: id) }
+        .sheet(item: Binding(get: { navigation.presented },
+                             set: { navigation.presented = $0 })) { presentation in
+            switch presentation {
+            case .control(let entityId): DeviceModalView(entityId: entityId)
+            case .tileConfig(let entityId): TileConfigView(entityId: entityId)
+            case .roomConfig(let areaId): RoomConfigView(areaId: areaId)
+            }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as
         // well as the tiles in the pager.

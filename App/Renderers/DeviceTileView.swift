@@ -5,6 +5,14 @@ struct DeviceTileView: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
     var body: some View {
+        // Every tile in the grid becomes a configuration target while the dashboard is being
+        // edited — see `ConfigurableTile`, which is applied here rather than in each renderer so
+        // that a tile added later inherits it by construction.
+        tile.configurable(entityId: entityId)
+    }
+
+    @ViewBuilder
+    private var tile: some View {
         switch Domain.of(entityId) {
         case .light: LightTile(entityId: entityId)
         case .switchOutlet: SwitchTile(entityId: entityId)

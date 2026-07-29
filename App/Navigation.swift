@@ -13,10 +13,49 @@ import SwiftUI
 /// `phase == .ready`. So sign-out, reauthentication and a mid-session reconnect all tear this down
 /// on their way past — the stale-modal problem `HomeStore.reset` was solving is structurally
 /// impossible rather than solved by remembering to nil something.
+///
+/// Configuration mode lives here for the same reason, and it is the stronger case: a half-edited
+/// dashboard must not survive a sign-out and reappear behind someone else's login.
 @MainActor @Observable
 final class Navigation {
-    /// The entity whose modal is open, or `nil` for none. Written by the tiles (tap or long-press,
-    /// depending on whether the tile has its own primary action) and read by `DashboardView`'s
-    /// sheet.
-    var presentedEntityId: String?
+    /// What is presented above the dashboard.
+    ///
+    /// **One value, not one flag per sheet.** Two independent booleans can both be true, and SwiftUI
+    /// presents whichever it notices first while the other silently does nothing — which is the
+    /// shape of every "the wrong sheet opened" bug.
+    enum Presentation: Equatable {
+        /// The device's controls — the ordinary tap or long-press outside configuration mode.
+        case control(entityId: String)
+        /// The device's configuration — what a tap does *in* configuration mode.
+        case tileConfig(entityId: String)
+        /// A room's configuration, from its title.
+        case roomConfig(areaId: String)
+    }
+
+    var presented: Presentation?
+
+    /// Whether the dashboard is being configured. Written by the toolbar, read by every tile.
+    var isConfiguring = false
+
+    /// What a tile's activation means, resolved in one place: its controls normally, its
+    /// configuration while configuring.
+    ///
+    /// Tiles call this instead of writing `presented` directly, so a tile added later cannot forget
+    /// the mode and stay live during configuration — the failure would be a tap that turns a light
+    /// on while the user is trying to rename it.
+    func open(_ entityId: String) {
+        presented = isConfiguring ? .tileConfig(entityId: entityId) : .control(entityId: entityId)
+    }
+}
+
+extension Navigation.Presentation: Identifiable {
+    /// Identity includes the case, not just the entity id: opening a tile's *configuration* while
+    /// its *controls* are open must be a different sheet, not the same one relabelled.
+    var id: String {
+        switch self {
+        case .control(let entityId): return "control:\(entityId)"
+        case .tileConfig(let entityId): return "tileConfig:\(entityId)"
+        case .roomConfig(let areaId): return "roomConfig:\(areaId)"
+        }
+    }
 }

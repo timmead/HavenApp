@@ -21,7 +21,7 @@ struct ClimateModal: View {
         let unknown = e?.state == "unknown"
         VStack(spacing: 12) {
             ModalHeader(systemImage: IconMap.symbol(domain: .climate, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e),
+                        title: store.displayName(of: entityId),
                         subtitle: unavailable ? "Unavailable"
                             : (unknown ? "Unknown" : (s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "")),
                         accent: accent, unavailable: unavailable,

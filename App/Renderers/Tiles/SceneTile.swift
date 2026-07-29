@@ -12,14 +12,14 @@ struct SceneTile: View {
             // gate it on. That is exactly the case that used to need its unavailable guard written
             // by hand, having no state check to inherit one from.
             TileLabel(symbol: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil),
-                      name: TileName.of(entityId, e),
+                      name: store.displayName(of: entityId),
                       icon: .accent,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(AccessibilitySummary.scene(TileName.of(entityId, e)))
+        .accessibilityLabel(AccessibilitySummary.scene(store.displayName(of: entityId)))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 }

@@ -13,7 +13,7 @@ struct SceneModal: View {
         let unavailable = e?.isUnavailable ?? false
         VStack(spacing: 14) {
             ModalHeader(systemImage: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil),
-                        title: TileName.of(entityId, e), subtitle: "",
+                        title: store.displayName(of: entityId), subtitle: "",
                         accent: HavenColor.domain(.scene), unavailable: unavailable)
             Button { store.run(entityId); dismiss() } label: { Text("Run").frame(maxWidth: .infinity) }
                 .buttonStyle(.borderedProminent).tint(HavenColor.domain(.scene))

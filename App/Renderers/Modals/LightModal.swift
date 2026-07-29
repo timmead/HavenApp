@@ -10,7 +10,7 @@ struct LightModal: View {
         let e = store.state(entityId)
         let s = e.map(LightState.init)
         let accent = HavenColor.domain(.light)
-        let name = TileName.of(entityId, e)
+        let name = store.displayName(of: entityId)
         // An off light has no brightness — don't show a stale percentage.
         let live = Double((s?.isOn ?? false) ? (s?.brightnessPercent ?? 0) : 0)
         let range = s?.colorTempRange

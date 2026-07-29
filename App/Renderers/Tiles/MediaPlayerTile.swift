@@ -29,7 +29,7 @@ struct MediaPlayerTile: View {
     var body: some View {
         let e = store.state(entityId)
         let s = e.map(MediaPlayerState.init)
-        let name = TileName.of(entityId, e)
+        let name = store.displayName(of: entityId)
         let unavailable = e?.isUnavailable ?? false
         Group {
             switch size {
@@ -38,13 +38,13 @@ struct MediaPlayerTile: View {
             case .large: large(s, name: name, deviceClass: e?.deviceClass)
             }
         }
-        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         // `.contain`, not `.combine`: these tiles hold real buttons, and combining would fold them
         // into a single label a VoiceOver user could read but not operate. The label below is the
         // container's, spoken on entry, and each button keeps its own.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.mediaPlayer(name, $0) } ?? name)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 
     // MARK: - 1×1
@@ -92,7 +92,7 @@ struct MediaPlayerTile: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .onTapGesture { navigation.presentedEntityId = entityId }
+                    .onTapGesture { navigation.open(entityId) }
                     playPauseButton(s, size: 22)
                     if s?.features.contains(.nextTrack) ?? false {
                         transportButton("forward.end.fill", label: "Next track", size: 15) {
@@ -141,7 +141,7 @@ struct MediaPlayerTile: View {
                 .clipped()
                 .overlay(alignment: .bottom) { transportScrim(s) }
                 .contentShape(Rectangle())
-                .onTapGesture { navigation.presentedEntityId = entityId }
+                .onTapGesture { navigation.open(entityId) }
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s?.title ?? name)
@@ -157,7 +157,7 @@ struct MediaPlayerTile: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .onTapGesture { navigation.presentedEntityId = entityId }
+                .onTapGesture { navigation.open(entityId) }
                 Spacer(minLength: 0)
                 volumeRow(s)
             }

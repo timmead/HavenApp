@@ -114,15 +114,15 @@ struct ClimateTile: View {
                 }
             }
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }.onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         // `.contain`, not `.combine`: this tile now holds a real button, and combining would fold
         // it into a single label a VoiceOver user could read but not operate — the same reason
         // `MediaPlayerTile` uses `.contain`. The label below is the container's, spoken on entry;
         // the power button keeps its own, and the tap-to-open gesture — which is not a `Button` and
         // so is invisible to VoiceOver either way — becomes a named action.
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(s.map { AccessibilitySummary.climate(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityLabel(s.map { AccessibilitySummary.climate(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 
     /// One degree down or up, without opening the sheet.
