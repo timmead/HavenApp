@@ -161,11 +161,18 @@ struct DashboardView: View {
             // bar turned the whole top of the screen blue and left the toolbar's own Done sitting on
             // it in a mismatched capsule. Tint plus accent text says the same thing without
             // repainting the chrome.
+            //
+            // **Two layers, and the opaque one is not optional.** A safe-area inset raises the scroll
+            // view's content inset; it does not stop content *passing beneath* the inset as it
+            // scrolls. With only the 16%-alpha tint, a room heading and a camera still slid visibly
+            // through the strip. `.background` (the adaptive system background) goes underneath so
+            // the tint composites onto something solid rather than onto whatever is scrolling past.
             .foregroundStyle(HavenColor.domain(.cover))
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
             .background(HavenColor.domain(.cover).opacity(0.16))
+            .background(.background)
             .accessibilityAddTraits(.isHeader)
         }
     }
