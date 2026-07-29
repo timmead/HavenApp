@@ -4,6 +4,7 @@ import HavenCore
 struct RoomSectionView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
     // Climate tiles render in their own 2-column grid (see body) — a genuine `Grid`/`GridRow`
     // span, not `.gridCellColumns(2)`, which is inert inside a `LazyVGrid`.
@@ -21,18 +22,17 @@ struct RoomSectionView: View {
             // roll-up buttons or the tile grid below, which rely on bare .onTapGesture /
             // .onLongPressGesture (see LightTile etc.) that would otherwise contend with
             // (and likely lose to) an enclosing NavigationLink's own tap recognizer.
-            NavigationLink(value: room.id) {
-                HStack {
-                    // The name yields before the readings do: it truncates, they don't (see
-                    // `RoomEnvironmentChips`). A long room name is still recognisable clipped; a
-                    // temperature is not.
-                    Text(room.name).font(.system(size: 17, weight: .bold)).lineLimit(1)
-                    Spacer(minLength: 8)
-                    RoomEnvironmentChips(sensors: room.headerSensors, spacing: 8)
-                }
-                .contentShape(Rectangle())
+            // The heading is the room's own control in both modes, and the *same* heading in both:
+            // it is extracted rather than duplicated so the two branches cannot drift into looking
+            // like different rooms.
+            if navigation.isConfiguring {
+                Button { navigation.presented = .roomConfig(areaId: room.areaId) } label: { heading }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Configures this room's readings")
+            } else {
+                NavigationLink(value: room.id) { heading }
+                    .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             let rollups = store.rollups(room)
             if !rollups.isEmpty {
@@ -92,7 +92,7 @@ struct RoomSectionView: View {
             if !mediaIds.isEmpty {
                 LazyVGrid(columns: mediaColumns, spacing: 9) {
                     ForEach(mediaIds, id: \.self) { id in
-                        MediaPlayerTile(entityId: id, size: .wide)
+                        MediaPlayerTile(entityId: id, size: .wide).configurable(entityId: id)
                     }
                 }
             }
@@ -108,11 +108,25 @@ struct RoomSectionView: View {
             if !cameraIds.isEmpty {
                 LazyVGrid(columns: cameraColumns, spacing: 9) {
                     ForEach(cameraIds, id: \.self) { id in
-                        CameraTile(entityId: id, size: .square)
+                        CameraTile(entityId: id, size: .square).configurable(entityId: id)
                     }
                 }
             }
         }
+    }
+
+    /// The room's name and its readings. Rendered identically whether it pushes room detail or
+    /// opens the room's configuration — see `body`.
+    private var heading: some View {
+        HStack {
+            // The name yields before the readings do: it truncates, they don't (see
+            // `RoomEnvironmentChips`). A long room name is still recognisable clipped; a
+            // temperature is not.
+            Text(room.name).font(.system(size: 17, weight: .bold)).lineLimit(1)
+            Spacer(minLength: 8)
+            RoomEnvironmentChips(sensors: room.headerSensors, spacing: 8)
+        }
+        .contentShape(Rectangle())
     }
 
     /// A single room-level bulk action, e.g. "3/5 lights on · All Off" or

@@ -16,7 +16,7 @@ struct LightTile: View {
                 // resolve to `.secondary` there regardless — but incidentally, via
                 // `LightState.isOn`'s definition, rather than because anything decided it.
                 TileLabel(symbol: IconMap.symbol(domain: .light, deviceClass: nil),
-                          name: TileName.of(entityId, e),
+                          name: store.displayName(of: entityId),
                           icon: on ? .accent : .secondary,
                           title: on ? .primary : .secondary,
                           accent: accent, unavailable: unavailable)
@@ -41,12 +41,12 @@ struct LightTile: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }
-        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         // One combined element per tile, not five fragments — a VoiceOver user hears
         // "Kitchen light, on, 60% brightness" once, not the icon/name/level bar separately.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(s.map { AccessibilitySummary.light(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityLabel(s.map { AccessibilitySummary.light(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 }

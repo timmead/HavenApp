@@ -34,7 +34,7 @@ struct CameraModal: View {
     var body: some View {
         let e = store.state(entityId)
         let s = e.map(CameraState.init)
-        let name = TileName.of(entityId, e)
+        let name = store.displayName(of: entityId)
         let accent = HavenColor.domain(.camera)
         // No `ScrollView` here — that belongs to `DeviceModalView`, which needs this body's *ideal*
         // height to size the sheet's detent. See `MediaPlayerModal` for the same note.

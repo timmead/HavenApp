@@ -14,7 +14,7 @@ struct SwitchModal: View {
             // former cannot be commanded; see `HomeStore.optimistic`, which the toggle must agree
             // with or it flips and springs back having sent nothing.
             ModalHeader(systemImage: IconMap.symbol(domain: .switchOutlet, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e),
+                        title: store.displayName(of: entityId),
                         subtitle: unavailable ? "Unavailable" : (unknown ? "Unknown" : (on ? "On" : "Off")),
                         accent: HavenColor.domain(.switchOutlet), unavailable: unavailable,
                         toggle: Binding(get: { on }, set: { store.setSwitch(entityId, on: $0) }),

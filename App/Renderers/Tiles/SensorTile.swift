@@ -16,7 +16,7 @@ struct SensorTile: View {
             // The icon is unconditionally `.secondary`: a sensor is a reading, not a state, and
             // has no "active" to tint for.
             TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                      name: TileName.of(entityId, e),
+                      name: store.displayName(of: entityId),
                       accent: .gray, unavailable: unavailable) {
                 // Already unconditionally `.secondary` — a hierarchy choice, not an on/off one —
                 // so it already satisfies "unavailable text is secondary" with no change. For an
@@ -25,9 +25,9 @@ struct SensorTile: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(s.map { AccessibilitySummary.sensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityLabel(s.map { AccessibilitySummary.sensor(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
     }
 }

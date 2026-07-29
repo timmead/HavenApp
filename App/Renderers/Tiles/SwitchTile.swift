@@ -8,7 +8,7 @@ struct SwitchTile: View {
         let e = store.state(entityId)
         let on = (e?.state == "on")
         let accent = HavenColor.domain(.switchOutlet)
-        let name = TileName.of(entityId, e)
+        let name = store.displayName(of: entityId)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
             // Both emphases are stated as what the tile wants *when reachable*; `TileLabel`
@@ -23,10 +23,10 @@ struct SwitchTile: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }
-        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(AccessibilitySummary.switchOutlet(name, isOn: on))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.presentedEntityId = entityId }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
     }
 }

@@ -4,7 +4,11 @@
 /// registry: which sensor is *the* room's temperature is now a Haven configuration decision (see
 /// `RoomEnvironmentResolver`), and this type is the vocabulary that decision is expressed in — on
 /// the wire in the dashboard document, in the resolver, and in the future configuration picker.
-public struct UpliftedSensor: Sendable, Equatable, Identifiable {
+/// `Hashable` as well as `Identifiable`, and the two mean different things here — see `id`, which is
+/// the *role* and is therefore identical for every candidate in a picker's list. A configuration
+/// picker iterates candidates by value (`ForEach(candidates, id: \.self)`), which needs this
+/// conformance; using `id` there would collapse every row into one.
+public struct UpliftedSensor: Sendable, Equatable, Hashable, Identifiable {
     public enum Role: String, Sendable, Hashable, Codable { case temperature, humidity }
 
     /// Where the reading is actually read from.
@@ -13,7 +17,7 @@ public struct UpliftedSensor: Sendable, Equatable, Identifiable {
     /// sensor: a `climate` entity carries the room's temperature in `current_temperature`, not in
     /// its state (which is `heat`/`cool`/`off`). Collapsing both to "an entity id" would either
     /// exclude those rooms or require every reader to re-derive which case it is holding.
-    public enum Source: Sendable, Equatable {
+    public enum Source: Sendable, Equatable, Hashable {
         /// The entity's own state — an ordinary `sensor.*`.
         case state
         /// A named attribute on the entity, e.g. `current_temperature` on a `climate.*`.

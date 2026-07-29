@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third }
+    enum Page { case first, second, third, fourth }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -69,6 +69,17 @@ struct TileGallery: View {
                     section("Generic") { ids("generic", ["idle", "unavailable"]) }
                     section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
                     mediaWide
+                case .fourth:
+                    // The two configuration sheets have no other verification, which is the same
+                    // argument this file makes about the tiles. Rendered side by side rather than
+                    // only next to their own views, so the pair is reviewed as a pair.
+                    section("Room configuration — candidates, and none") {
+                        VStack(alignment: .leading, spacing: 16) {
+                            RoomConfigView(areaId: "lounge")
+                            Divider()
+                            RoomConfigView(areaId: "hall")
+                        }
+                    }
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -173,6 +184,18 @@ struct TileGallery: View {
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23)])
 
+        // For the configuration page: two temperature sources called almost the same thing, which
+        // is what the entity id on every picker row is for, plus a room with nothing to pick.
+        set("sensor.lounge_temp", "21.5", ["friendly_name": .string("Lounge Temperature"),
+                                           "device_class": .string("temperature"),
+                                           "unit_of_measurement": .string("°C")])
+        set("sensor.lounge_temp_window", "20.9", ["friendly_name": .string("Temperature"),
+                                                  "device_class": .string("temperature"),
+                                                  "unit_of_measurement": .string("%")])
+        set("sensor.lounge_hum", "44", ["friendly_name": .string("Lounge Humidity"),
+                                        "device_class": .string("humidity"),
+                                        "unit_of_measurement": .string("%")])
+
         set("scene.idle", "scening", ["friendly_name": .string("Movie")])
         set("scene.unavailable", "unavailable", ["friendly_name": .string("Away")])
 
@@ -199,6 +222,14 @@ struct TileGallery: View {
                                                 "supported_features": .int(4)])
         set("media_player.idle", "idle", ["friendly_name": .string("TV")])
         set("media_player.unavailable", "unavailable", ["friendly_name": .string("Radio")])
+        store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
+            ResolvedArea(id: "lounge", name: "Lounge",
+                         entityIds: ["sensor.lounge_temp", "sensor.lounge_temp_window",
+                                     "sensor.lounge_hum"],
+                         tiers: [:]),
+            ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
+        ])])
+        store.resolveEnvironment()
         return store
     }
 }
@@ -215,5 +246,10 @@ struct TileGallery: View {
 /// else, and every one of them is a distinct colour or state rule.
 #Preview("Tiles 3 — climate") {
     TileGallery(page: .third)
+}
+
+/// The configuration sheets, which have no other verification.
+#Preview("Tiles 4 — configuration") {
+    TileGallery(page: .fourth)
 }
 #endif

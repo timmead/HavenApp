@@ -58,7 +58,7 @@ struct LockModal: View {
             // which the header cannot know about — so they stay this file's, and the header is told
             // the one thing it needs to resolve the rest. The overlap is idempotent: it resolves an
             // already-secondary accent to secondary.
-            ModalHeader(systemImage: symbol, title: TileName.of(entityId, e), subtitle: subtitle,
+            ModalHeader(systemImage: symbol, title: store.displayName(of: entityId), subtitle: subtitle,
                         accent: accent, unavailable: unavailable)
             actionButton(locked: locked, jammed: jammed, unavailable: unavailable, unknown: unknown, accent: accent)
         }

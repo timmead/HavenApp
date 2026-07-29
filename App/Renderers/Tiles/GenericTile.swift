@@ -9,7 +9,7 @@ struct GenericTile: View {
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: false, accent: .gray, unavailable: unavailable) {
             TileLabel(symbol: "square.dashed",
-                      name: TileName.of(entityId, e),
+                      name: store.displayName(of: entityId),
                       accent: .gray, unavailable: unavailable) {
                 // Already unconditionally `.secondary`, and already shows the literal raw state
                 // string — for an unavailable entity that string *is* "unavailable", so this is
@@ -17,9 +17,9 @@ struct GenericTile: View {
                 Text(e?.state ?? "—").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(AccessibilitySummary.generic(TileName.of(entityId, e), rawState: e?.state ?? "unknown"))
+        .accessibilityLabel(AccessibilitySummary.generic(store.displayName(of: entityId), rawState: e?.state ?? "unknown"))
         .accessibilityAddTraits(.isButton)
     }
 }

@@ -12,7 +12,7 @@ struct MediaPlayerModal: View {
     var body: some View {
         let e = store.state(entityId)
         let s = e.map(MediaPlayerState.init)
-        let name = TileName.of(entityId, e)
+        let name = store.displayName(of: entityId)
         let accent = HavenColor.domain(.mediaPlayer)
         // A plain stack with no `ScrollView` and no `Spacer`: scrolling is `DeviceModalView`'s, and
         // this body must be able to report its *ideal* height so the sheet can size a detent to it.

@@ -10,7 +10,7 @@ struct GenericModal: View {
             // named the state only by echoing the raw string. Answering the question explicitly
             // gets it the same "Unavailable" wording as every other header.
             ModalHeader(systemImage: IconMap.symbol(domain: .unknown, deviceClass: e?.deviceClass),
-                        title: TileName.of(entityId, e), subtitle: e?.state ?? "—",
+                        title: store.displayName(of: entityId), subtitle: e?.state ?? "—",
                         accent: .gray, unavailable: e?.isUnavailable ?? false)
             FacetCard(title: "Attributes") {
                 VStack(alignment: .leading, spacing: 4) {

@@ -90,7 +90,7 @@ struct RoomDetailView: View {
                 HStack { Text("Media").font(.system(size: 14, weight: .bold)); Spacer() }
                 VStack(spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        MediaPlayerTile(entityId: id, size: .large)
+                        MediaPlayerTile(entityId: id, size: .large).configurable(entityId: id)
                     }
                 }
             }
@@ -110,7 +110,7 @@ struct RoomDetailView: View {
                 HStack { Text("Cameras").font(.system(size: 14, weight: .bold)); Spacer() }
                 VStack(spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        CameraTile(entityId: id, size: .wide)
+                        CameraTile(entityId: id, size: .wide).configurable(entityId: id)
                     }
                 }
             }

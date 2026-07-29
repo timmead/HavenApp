@@ -87,14 +87,14 @@ import HavenCore
                          }))
     }
 
-    /// The modal sheet binding reads `Navigation.presentedEntityId`, which a tile writes on tap or
+    /// The modal sheet binding reads `Navigation.presented`, which a tile writes on tap or
     /// long-press. If this stops observing, tapping a tile opens nothing at all — and it would
     /// still pass every other test in this repository.
     @Test func theSheetBindingSeesAPresentationRequest() {
         let navigation = Navigation()
 
-        #expect(observes({ _ = navigation.presentedEntityId },
-                         whenMutating: { navigation.presentedEntityId = "light.a" }))
+        #expect(observes({ _ = navigation.presented },
+                         whenMutating: { navigation.presented = .control(entityId: "light.a") }))
     }
 
     /// The history chart reads through `history(_:_:attribute:)`, whose cache is a stored

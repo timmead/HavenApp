@@ -15,13 +15,13 @@ struct BinarySensorTile: View {
             // which `TileLabel` resolves. The name stays `.primary` when reachable: unlike a light
             // or a switch, a *clear* door sensor is not "off", it is simply reporting.
             TileLabel(symbol: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
-                      name: TileName.of(entityId, e),
+                      name: store.displayName(of: entityId),
                       icon: active ? .accent : .secondary,
                       accent: accent, unavailable: unavailable)
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.presentedEntityId = entityId }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(s.map { AccessibilitySummary.binarySensor(TileName.of(entityId, e), $0) } ?? TileName.of(entityId, e))
+        .accessibilityLabel(s.map { AccessibilitySummary.binarySensor(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
     }
 }

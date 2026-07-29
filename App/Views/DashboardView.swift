@@ -55,6 +55,14 @@ struct DashboardView: View {
                 }
                 .scrollTargetLayout()
             }
+            // Says which mode the dashboard is in, and only that — the toolbar's Done is the way
+            // out. It briefly carried a Done of its own as insurance against the toolbar button
+            // failing to appear, which was a real bug at the time; with that fixed, two Dones a
+            // centimetre apart is just two things to read where one would do.
+            //
+            // Inside the stack, attached to the pager, so it sits *below* the navigation bar. Placed
+            // outside the stack it competed with the bar for the top safe area.
+            .safeAreaInset(edge: .top) { editingBanner }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $scrolledFloorId)
             .scrollIndicators(.hidden)
@@ -69,16 +77,37 @@ struct DashboardView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Connection", systemImage: "wifi") {
-                            showingConnectionSettings = true
+                // **The conditional is in the toolbar builder, not inside one item.** An `if` inside
+                // a single `ToolbarItem`'s view builder gives the two states one identity, and
+                // SwiftUI does not reliably swap the rendered control when the condition flips —
+                // which is how configuration mode shipped with no visible way out. Two items with
+                // distinct ids leave nothing to swap.
+                if navigation.isConfiguring {
+                    ToolbarItem(id: "configuration-done", placement: .topBarTrailing) {
+                        Button("Done") { navigation.isConfiguring = false }
+                            .fontWeight(.semibold)
+                    }
+                } else {
+                    ToolbarItem(id: "dashboard-menu", placement: .topBarTrailing) {
+                        Menu {
+                            // Shown only to a confirmed HA admin, with a document we actually read
+                            // and can write — see `HavenConfig.canConfigure`, where each of the four
+                            // denials has its own reason. Omitted rather than disabled, which is
+                            // this app's standing rule for a control that cannot act.
+                            if store.config.canConfigure {
+                                Button("Edit Dashboard", systemImage: "slider.horizontal.3") {
+                                    navigation.isConfiguring = true
+                                }
+                            }
+                            Button("Connection", systemImage: "wifi") {
+                                showingConnectionSettings = true
+                            }
+                            Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                Task { await app.signOut() }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
                         }
-                        Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                            Task { await app.signOut() }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
@@ -87,20 +116,65 @@ struct DashboardView: View {
         // replaces did, and the safe-area inset it claims propagates into the pushed detail so
         // that view's own content clears it too.
         .safeAreaInset(edge: .bottom) { floorBar }
+        // The mode must not outlive its own preconditions: an admin demoted mid-session, a dropped
+        // connection, or a write that came back `not_authorized` (which records `isAdmin = false`)
+        // all land here and close it, rather than leaving a dashboard that looks editable and
+        // refuses every edit.
+        .onChange(of: store.config.canConfigure) { _, canConfigure in
+            if !canConfigure { navigation.isConfiguring = false }
+        }
         // Floors are rebuilt wholesale on every registry reload and the selected one can vanish
         // across one. Keyed on the ids rather than the floors themselves: a reload changes every
         // floor's contents, so comparing the values would fire on every reload regardless.
         .onChange(of: floors.map(\.id)) { _, _ in
             scrolledFloorId = FloorPaging.selection(current: scrolledFloorId, floors: floors)
         }
-        .sheet(isPresented: Binding(get: { navigation.presentedEntityId != nil },
-                                    set: { if !$0 { navigation.presentedEntityId = nil } })) {
-            if let id = navigation.presentedEntityId { DeviceModalView(entityId: id) }
+        .sheet(item: Binding(get: { navigation.presented },
+                             set: { navigation.presented = $0 })) { presentation in
+            // `DeviceModalView` applies `.fittedSheet()` itself; the two configuration sheets are
+            // presented here directly and get it here. Without it they are raw sheet content: no
+            // fitted detent, no padding, no drag indicator — a full-screen takeover with nothing
+            // saying how to leave, which is exactly how they shipped.
+            switch presentation {
+            case .control(let entityId): DeviceModalView(entityId: entityId)
+            case .tileConfig(let entityId): TileConfigView(entityId: entityId).fittedSheet()
+            case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
+            }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as
         // well as the tiles in the pager.
         .environment(navigation)
         .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
+    }
+
+    /// Says which mode the dashboard is in. **A label, not a control** — see the call site.
+    @ViewBuilder
+    private var editingBanner: some View {
+        if navigation.isConfiguring {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .bold))
+                Text("Editing dashboard").font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            // A tinted strip, not a saturated one. `.safeAreaInset(edge: .top)` content sits under
+            // the navigation bar, and iOS tints the bar from whatever is beneath it — a solid accent
+            // bar turned the whole top of the screen blue and left the toolbar's own Done sitting on
+            // it in a mismatched capsule. Tint plus accent text says the same thing without
+            // repainting the chrome.
+            //
+            // **Two layers, and the opaque one is not optional.** A safe-area inset raises the scroll
+            // view's content inset; it does not stop content *passing beneath* the inset as it
+            // scrolls. With only the 16%-alpha tint, a room heading and a camera still slid visibly
+            // through the strip. `.background` (the adaptive system background) goes underneath so
+            // the tint composites onto something solid rather than onto whatever is scrolling past.
+            .foregroundStyle(HavenColor.domain(.cover))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(HavenColor.domain(.cover).opacity(0.16))
+            .background(.background)
+            .accessibilityAddTraits(.isHeader)
+        }
     }
 
     /// One floor's page — the same vertical scroll of rooms as before. Deliberately carries no
