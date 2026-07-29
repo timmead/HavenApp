@@ -89,11 +89,14 @@ and offers a reset.
 
 ### The document's schema version is *not* bumped
 
-`entities` is a purely additive subtree, and `merging` already preserves keys it does not know.
-Bumping `DashboardDocument.schema` to 2 would make every older build in the household compute
-`isWritable == false` and stop writing its own nominations — breaking older phones to record a key
-they can safely ignore. The version is for changes that would make an older build's writes
-*wrong*, not for additions.
+**Haven has not shipped.** There is no older build in anyone's household, no stored document in the
+wild, and therefore no migration to write and no compatibility to preserve. Adding `entities` needs
+no version signal because there is nothing to signal it to.
+
+`DashboardDocument.schema` stays at 1 and `isWritable` stays as it is — both are already
+implemented, cost nothing, and start earning their keep the day there are two builds in one house.
+The rule for when a bump *is* warranted can be settled then, against a real first shipped version,
+rather than guessed at now.
 
 ### One writer per document
 
@@ -233,7 +236,7 @@ add-tile picker needs it.
 | `not_authorized` on write | Explain and leave configuration mode — admin status changed under us. |
 | Document failed to load | Configuration mode unavailable. |
 | Disconnected | Configuration mode unavailable. |
-| Document written by a newer build | Configuration mode unavailable (`isWritable == false`). |
+| Document written by a newer build | Configuration mode unavailable (`isWritable == false`). Unreachable before launch — there is no newer build — but the check already exists and costs nothing to honour. |
 
 ## Testing
 
