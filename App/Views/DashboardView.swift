@@ -55,10 +55,10 @@ struct DashboardView: View {
                 }
                 .scrollTargetLayout()
             }
-            // **The banner is also a way out**, and that is not redundancy for its own sake: the
-            // toolbar button lives in a bar that a scrolled page can collapse, and a mode with one
-            // exit is a mode a user can be stuck in. The strip that announces the mode ending it is
-            // the shortest path from "I want to stop" to stopping.
+            // Says which mode the dashboard is in, and only that — the toolbar's Done is the way
+            // out. It briefly carried a Done of its own as insurance against the toolbar button
+            // failing to appear, which was a real bug at the time; with that fixed, two Dones a
+            // centimetre apart is just two things to read where one would do.
             //
             // Inside the stack, attached to the pager, so it sits *below* the navigation bar. Placed
             // outside the stack it competed with the bar for the top safe area.
@@ -147,31 +147,26 @@ struct DashboardView: View {
         .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
     }
 
-    /// Says which mode the dashboard is in, and ends it.
+    /// Says which mode the dashboard is in. **A label, not a control** — see the call site.
     @ViewBuilder
     private var editingBanner: some View {
         if navigation.isConfiguring {
-            Button { navigation.isConfiguring = false } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .bold))
-                    Text("Editing dashboard").font(.system(size: 12, weight: .semibold))
-                    Spacer(minLength: 8)
-                    Text("Done").font(.system(size: 12, weight: .bold))
-                }
-                // A tinted strip, not a saturated one. `.safeAreaInset(edge: .top)` content sits
-                // under the navigation bar, and iOS tints the bar from whatever is beneath it — a
-                // solid accent bar turned the whole top of the screen blue and left the toolbar's
-                // own Done sitting on it in a mismatched capsule. Tint plus accent text says the
-                // same thing without repainting the chrome.
-                .foregroundStyle(HavenColor.domain(.cover))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity)
-                .background(HavenColor.domain(.cover).opacity(0.16))
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .bold))
+                Text("Editing dashboard").font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Editing dashboard. Done")
+            // A tinted strip, not a saturated one. `.safeAreaInset(edge: .top)` content sits under
+            // the navigation bar, and iOS tints the bar from whatever is beneath it — a solid accent
+            // bar turned the whole top of the screen blue and left the toolbar's own Done sitting on
+            // it in a mismatched capsule. Tint plus accent text says the same thing without
+            // repainting the chrome.
+            .foregroundStyle(HavenColor.domain(.cover))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(HavenColor.domain(.cover).opacity(0.16))
+            .accessibilityAddTraits(.isHeader)
         }
     }
 
