@@ -493,17 +493,27 @@ final class HomeStore {
 
     // MARK: - Room roll-ups + bulk actions
 
-    func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home, environment: environment) }
+    /// The rooms as rendered: Home Assistant's structure, Haven's sensor nominations, and the
+    /// household's per-surface decisions about which devices each surface shows.
+    func rooms() -> [RoomSection] {
+        SectionBuilder.rooms(from: home, environment: environment,
+                             overrides: config.document.surfaceOverrides)
+    }
 
     /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.
-    /// Curated (`overviewRefs`) rather than raw, so "3/5 lights on · All Off" counts and acts
-    /// on exactly the tiles the user can see — a bulk action that silently reaches entities
-    /// curation hid would be worse than no bulk action.
+    ///
+    /// `refs(for: .overview)` rather than raw, so "3/5 lights on · All Off" counts and acts on
+    /// exactly the tiles the user can see — a bulk action that silently reaches entities curation
+    /// hid would be worse than no bulk action.
+    ///
+    /// That now covers the household's own removals as well as curation's, and it follows from the
+    /// same sentence rather than being a new rule: a tile a user took off the dashboard is one they
+    /// cannot see, so it drops out of the count and out of the action.
     /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
     /// anywhere yet, so they're skipped here. Once composites exist, this will need to
     /// expand each one into its constituent input entities instead of dropping it.
     private func deviceEntityIds(_ room: RoomSection) -> [String] {
-        room.overviewRefs.compactMap { ref in
+        room.refs(for: .overview).compactMap { ref in
             if case .entity(let id) = ref { return id }
             return nil
         }

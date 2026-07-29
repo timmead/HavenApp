@@ -17,7 +17,7 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     // No live states, so the only nominations available are the area registry's own — which is
     // what these curation tests already exercised before sourcing moved into the resolver.
     let environment = RoomEnvironmentResolver.resolve(home: home, sources: [:])
-    return SectionBuilder.rooms(from: home, environment: environment).first { $0.areaId == "a" }!
+    return SectionBuilder.rooms(from: home, environment: environment, overrides: [:]).first { $0.areaId == "a" }!
 }
 
 // MARK: - Single-entity classification
@@ -92,8 +92,8 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     let r = room([reg("light.ceiling"), reg("sensor.kitchen_power"), reg("binary_sensor.door"),
                   reg("sensor.hall_motion_battery", device: "d1"),
                   reg("sensor.hall_rssi", category: "diagnostic"), reg("switch.kettle", hiddenBy: "user")])
-    #expect(r.overviewRefs.map(\.id) == ["light.ceiling"])
-    #expect(r.detailRefs.map(\.id).sorted() == ["binary_sensor.door", "light.ceiling", "sensor.kitchen_power"])
+    #expect(r.refs(for: .overview).map(\.id) == ["light.ceiling"])
+    #expect(r.refs(for: .roomDetail).map(\.id).sorted() == ["binary_sensor.door", "light.ceiling", "sensor.kitchen_power"])
     // Companions, diagnostics and user-hidden entities reach neither surface, but the area
     // still knows about them for the configuration sub-project's opt-in overrides.
     #expect(r.deviceRefs.count == 6)
@@ -104,7 +104,7 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     // `disabled_by` is filtered structurally in the resolver (a disabled entity has no state at
     // all), so it is not re-checked in `EntityCuration`. This proves that filter still holds.
     let r = room([reg("light.ceiling"), reg("light.broken", disabledBy: "integration")])
-    #expect(r.overviewRefs.map(\.id) == ["light.ceiling"])
+    #expect(r.refs(for: .overview).map(\.id) == ["light.ceiling"])
     #expect(r.tiers["light.broken"] == nil)
 }
 
@@ -112,7 +112,7 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     let r = room([reg("light.ceiling"), reg("sensor.temp"), reg("sensor.hum")],
                  temperature: "sensor.temp", humidity: "sensor.hum")
     #expect(r.headerSensors.map(\.entityId).sorted() == ["sensor.hum", "sensor.temp"])
-    #expect(r.detailRefs.map(\.id) == ["light.ceiling"])
+    #expect(r.refs(for: .roomDetail).map(\.id) == ["light.ceiling"])
 }
 
 @Test func unknownEntityIdDefaultsToPrimary() {
@@ -125,34 +125,34 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
 @Test func aRoomWhoseControlsAreAllDiagnosticStillShowsThem() {
     let r = room([reg("light.ceiling", category: "diagnostic"), reg("sensor.kitchen_power")])
     // The controllable entity is rescued ahead of the sensor: it is the thing the user came for.
-    #expect(r.overviewRefs.map(\.id) == ["light.ceiling"])
+    #expect(r.refs(for: .overview).map(\.id) == ["light.ceiling"])
     #expect(r.tier(of: "sensor.kitchen_power") == .secondary)
 }
 
 @Test func aSensorOnlyRoomPromotesItsSensors() {
     let r = room([reg("sensor.kitchen_power"), reg("binary_sensor.door")])
-    #expect(r.overviewRefs.map(\.id).sorted() == ["binary_sensor.door", "sensor.kitchen_power"])
+    #expect(r.refs(for: .overview).map(\.id).sorted() == ["binary_sensor.door", "sensor.kitchen_power"])
 }
 
 @Test func aRoomOfNothingButDeviceTelemetryPromotesItsCompanions() {
     let r = room([reg("sensor.hall_motion_battery", device: "d1"), reg("sensor.hall_motion_lqi", device: "d1")])
-    #expect(r.overviewRefs.count == 2)
+    #expect(r.refs(for: .overview).count == 2)
 }
 
 @Test func aRoomOfNothingButDiagnosticsPromotesThem() {
     let r = room([reg("sensor.hall_rssi", category: "diagnostic"), reg("sensor.hall_uptime", category: "diagnostic")])
-    #expect(r.overviewRefs.count == 2)
+    #expect(r.refs(for: .overview).count == 2)
 }
 
 @Test func rescueNeverOverridesWhatTheUserHidInHomeAssistant() {
     let r = room([reg("light.strip", hiddenBy: "user"), reg("sensor.kitchen_power")])
-    #expect(r.overviewRefs.map(\.id) == ["sensor.kitchen_power"])
+    #expect(r.refs(for: .overview).map(\.id) == ["sensor.kitchen_power"])
     #expect(r.tier(of: "light.strip") == .hidden)
 }
 
 @Test func rescueDoesNotFireWhenTheRoomAlreadyHasAControl() {
     let r = room([reg("light.ceiling"), reg("sensor.kitchen_power"), reg("sensor.hall_rssi", category: "diagnostic")])
-    #expect(r.overviewRefs.map(\.id) == ["light.ceiling"])
+    #expect(r.refs(for: .overview).map(\.id) == ["light.ceiling"])
     #expect(r.tier(of: "sensor.kitchen_power") == .secondary)
     #expect(r.tier(of: "sensor.hall_rssi") == .hidden)
 }
@@ -161,13 +161,13 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     // Intentional, and pinned here so it isn't later "fixed" into overriding the user: the
     // never-empty rule exists to undo *our* heuristics, not a choice made in HA.
     let r = room([reg("light.strip", hiddenBy: "user")])
-    #expect(r.overviewRefs.isEmpty)
-    #expect(r.detailRefs.isEmpty)
+    #expect(r.refs(for: .overview).isEmpty)
+    #expect(r.refs(for: .roomDetail).isEmpty)
 }
 
 @Test func anEmptyAreaStaysEmpty() {
     let r = room([])
-    #expect(r.overviewRefs.isEmpty)
+    #expect(r.refs(for: .overview).isEmpty)
     #expect(EntityCuration.tiers(for: []).isEmpty)
 }
 

@@ -31,9 +31,10 @@ struct RoomDetailView: View {
     }
     private var grouped: Grouped {
         var g = Grouped()
-        // `detailRefs` — the overview's controls *plus* the sensors curation demoted off the
-        // grid, which is what makes this view the place demoted entities are reachable.
-        for ref in room.detailRefs {
+        // `refs(for: .roomDetail)` — the overview's controls *plus* the sensors curation demoted
+        // off the grid, which is what makes this view the place demoted entities are reachable. A
+        // device removed from the *dashboard* is still here; removal is per surface.
+        for ref in room.refs(for: .roomDetail) {
             guard case .entity(let id) = ref else { continue }
             switch Domain.of(id) {
             case .climate: g.climate.append(id)
