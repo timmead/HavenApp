@@ -20,18 +20,18 @@ struct DeviceModalView: View {
             case .unknown: GenericModal(entityId: entityId)
             }
         }
-        // A camera *opens* straight to `.large` and is deliberately excluded from fitted sizing:
-        // its content is a picture that will happily report whatever height it is given, so
-        // measuring it says nothing about how big it *wants* to be. Every other modal measures.
+        // **Every modal measures, cameras included.** The camera used to be excluded and opened
+        // straight to `.large`, on the stated grounds that its content is "a picture that will
+        // happily report whatever height it is given", which measuring therefore could not size.
+        // That was simply not true of this view: `CameraModal`'s feed is
+        // `.aspectRatio(16/9, contentMode: .fit)`, so its height is a function of its width, and
+        // the sheet's width is fixed. It measures like anything else — and it turns out to want
+        // roughly half a screen, which is what a full-screen takeover was hiding.
         //
-        // The reason for the camera's initial size stands: every other modal is a set of controls
-        // that fits in half a screen, whereas a camera modal is a picture, and at `.medium` the
-        // live view is roughly the size of the tile the user just tapped to get away from.
-        //
-        // Expressed as a *selection* over a two-detent set rather than as a single detent, so the
-        // camera opens large and still behaves like its siblings: grabber, draggable, dismissible
-        // by swipe. See `FittedSheet` for why a one-detent sheet loses its grabber.
-        .fittedSheet(measuresContent: Domain.of(entityId) != .camera,
-                     initialDetent: Domain.of(entityId) == .camera ? .large : .medium)
+        // What was true is that a `.medium` camera is barely bigger than the tile you tapped to get
+        // away from. Fitted sizing answers that better than `.large` did: the sheet is exactly its
+        // content, so the feed is as large as the feed needs, and `.large` remains in the detent set
+        // for anyone who wants to drag it up.
+        .fittedSheet()
     }
 }
