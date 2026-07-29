@@ -8,11 +8,8 @@ enum TileName {
         return words(obj)
     }
 
-    /// Renders a raw HA-style snake_case token (`"heat_cool"`, `"kitchen_light"`) for
-    /// display: underscores become spaces, then each word is capitalized. Shared by
-    /// entity-id-derived names here and by mode/enum strings shown verbatim from HA
-    /// (e.g. climate hvac/fan modes), so neither renders "Heat_cool".
-    static func words(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "_", with: " ").capitalized
-    }
+    /// Delegates to `DisplayName.words`, which is the same rendering under test in HavenCore.
+    /// Kept as a name here because ~10 call sites render HA mode strings (`heat_cool`, `fan_only`)
+    /// through it and none of them are about a device's *name*.
+    static func words(_ raw: String) -> String { DisplayName.words(raw) }
 }
