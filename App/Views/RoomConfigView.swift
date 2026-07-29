@@ -10,6 +10,7 @@ import HavenCore
 struct RoomConfigView: View {
     let areaId: String
     @Environment(HomeStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     /// Set when a write fails, so a refusal is explained rather than silently doing nothing. The
     /// sheet deliberately stays open on failure — dismissing would leave the user with a room that
     /// did not change and no reason why.
@@ -22,7 +23,8 @@ struct RoomConfigView: View {
             ModalHeader(systemImage: "thermometer.medium",
                         title: room?.name ?? "Room",
                         subtitle: "Readings shown in this room's heading",
-                        accent: HavenColor.domain(.cover), unavailable: false)
+                        accent: HavenColor.domain(.cover), unavailable: false,
+                        accessory: AnyView(ModalDoneButton { dismiss() }))
             if let failure {
                 Text(failure)
                     .font(.system(size: 12))

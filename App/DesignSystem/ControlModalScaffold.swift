@@ -126,6 +126,23 @@ struct ModalHeader: View {
 }
 #endif
 
+/// The explicit way out of a sheet, for the header's accessory slot.
+///
+/// The control modals rely on the drag indicator and a swipe, which is fine for a sheet you opened
+/// to press one button. The configuration sheets are different in kind: you arrive at them from a
+/// mode you had to enter deliberately, you may have typed into them, and "swipe it away" is a poor
+/// answer to "am I finished?". So they say so.
+struct ModalDoneButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button("Done", action: action)
+            .font(.system(size: 15, weight: .semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(HavenColor.domain(.cover))
+    }
+}
+
 /// A body card holding only secondary controls (sliders, segmented controls) and/or sensor+history.
 struct FacetCard<Content: View>: View {
     var title: String? = nil

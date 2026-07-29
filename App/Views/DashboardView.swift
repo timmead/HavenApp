@@ -55,6 +55,14 @@ struct DashboardView: View {
                 }
                 .scrollTargetLayout()
             }
+            // **The banner is also a way out**, and that is not redundancy for its own sake: the
+            // toolbar button lives in a bar that a scrolled page can collapse, and a mode with one
+            // exit is a mode a user can be stuck in. The strip that announces the mode ending it is
+            // the shortest path from "I want to stop" to stopping.
+            //
+            // Inside the stack, attached to the pager, so it sits *below* the navigation bar. Placed
+            // outside the stack it competed with the bar for the top safe area.
+            .safeAreaInset(edge: .top) { editingBanner }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $scrolledFloorId)
             .scrollIndicators(.hidden)
@@ -69,14 +77,18 @@ struct DashboardView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if navigation.isConfiguring {
-                        // The way out has to be at least as findable as the way in, and it replaces
-                        // the menu rather than joining it: while configuring, "done" is the only
-                        // thing anyone wants from this corner.
+                // **The conditional is in the toolbar builder, not inside one item.** An `if` inside
+                // a single `ToolbarItem`'s view builder gives the two states one identity, and
+                // SwiftUI does not reliably swap the rendered control when the condition flips —
+                // which is how configuration mode shipped with no visible way out. Two items with
+                // distinct ids leave nothing to swap.
+                if navigation.isConfiguring {
+                    ToolbarItem(id: "configuration-done", placement: .topBarTrailing) {
                         Button("Done") { navigation.isConfiguring = false }
                             .fontWeight(.semibold)
-                    } else {
+                    }
+                } else {
+                    ToolbarItem(id: "dashboard-menu", placement: .topBarTrailing) {
                         Menu {
                             // Shown only to a confirmed HA admin, with a document we actually read
                             // and can write — see `HavenConfig.canConfigure`, where each of the four
@@ -104,21 +116,6 @@ struct DashboardView: View {
         // replaces did, and the safe-area inset it claims propagates into the pushed detail so
         // that view's own content clears it too.
         .safeAreaInset(edge: .bottom) { floorBar }
-        // Every tap means something different while this is on, so the mode has to be legible
-        // without looking at the toolbar. A strip rather than a tile treatment: dimming or animating
-        // the tiles themselves would collide with the vocabulary this app already uses for
-        // unavailable devices.
-        .safeAreaInset(edge: .top) {
-            if navigation.isConfiguring {
-                Text("Editing dashboard")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background(HavenColor.domain(.cover))
-                    .accessibilityAddTraits(.isHeader)
-            }
-        }
         // The mode must not outlive its own preconditions: an admin demoted mid-session, a dropped
         // connection, or a write that came back `not_authorized` (which records `isAdmin = false`)
         // all land here and close it, rather than leaving a dashboard that looks editable and
@@ -134,16 +131,48 @@ struct DashboardView: View {
         }
         .sheet(item: Binding(get: { navigation.presented },
                              set: { navigation.presented = $0 })) { presentation in
+            // `DeviceModalView` applies `.fittedSheet()` itself; the two configuration sheets are
+            // presented here directly and get it here. Without it they are raw sheet content: no
+            // fitted detent, no padding, no drag indicator — a full-screen takeover with nothing
+            // saying how to leave, which is exactly how they shipped.
             switch presentation {
             case .control(let entityId): DeviceModalView(entityId: entityId)
-            case .tileConfig(let entityId): TileConfigView(entityId: entityId)
-            case .roomConfig(let areaId): RoomConfigView(areaId: areaId)
+            case .tileConfig(let entityId): TileConfigView(entityId: entityId).fittedSheet()
+            case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as
         // well as the tiles in the pager.
         .environment(navigation)
         .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
+    }
+
+    /// Says which mode the dashboard is in, and ends it.
+    @ViewBuilder
+    private var editingBanner: some View {
+        if navigation.isConfiguring {
+            Button { navigation.isConfiguring = false } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .bold))
+                    Text("Editing dashboard").font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 8)
+                    Text("Done").font(.system(size: 12, weight: .bold))
+                }
+                // A tinted strip, not a saturated one. `.safeAreaInset(edge: .top)` content sits
+                // under the navigation bar, and iOS tints the bar from whatever is beneath it — a
+                // solid accent bar turned the whole top of the screen blue and left the toolbar's
+                // own Done sitting on it in a mismatched capsule. Tint plus accent text says the
+                // same thing without repainting the chrome.
+                .foregroundStyle(HavenColor.domain(.cover))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
+                .background(HavenColor.domain(.cover).opacity(0.16))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Editing dashboard. Done")
+        }
     }
 
     /// One floor's page — the same vertical scroll of rooms as before. Deliberately carries no

@@ -28,7 +28,8 @@ struct TileConfigView: View {
                                                     deviceClass: e?.deviceClass),
                         title: store.displayName(of: entityId),
                         subtitle: entityId,
-                        accent: HavenColor.domain(Domain.of(entityId)), unavailable: false)
+                        accent: HavenColor.domain(Domain.of(entityId)), unavailable: false,
+                        accessory: AnyView(ModalDoneButton { dismiss() }))
             FacetCard(title: "Name") {
                 VStack(alignment: .leading, spacing: 9) {
                     TextField("Name", text: $draft)
