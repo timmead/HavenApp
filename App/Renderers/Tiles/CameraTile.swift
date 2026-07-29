@@ -61,7 +61,14 @@ struct CameraTile: View {
             }
         }
         .contentShape(Rectangle())
+        // **Both gestures, deliberately pointed at the same thing.** Everywhere else on the grid a
+        // tap commands the device and a long press opens its sheet; a camera has nothing to command
+        // — see `CameraModal`'s header for why there is no power toggle — so the tap opens the
+        // sheet instead. That leaves the long press with nothing to do, and a gesture the user
+        // learned on the light tile doing nothing on this one reads as a dead tile rather than as a
+        // different rule. So it opens the same sheet: the redundancy is the point.
         .onTapGesture { navigation.presentedEntityId = entityId }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.presentedEntityId = entityId }
         // The whole tile is one element: unlike a media tile it holds no buttons, so combining
         // costs nothing and spares a VoiceOver user two stops for a picture and its caption.
         .accessibilityElement(children: .ignore)
