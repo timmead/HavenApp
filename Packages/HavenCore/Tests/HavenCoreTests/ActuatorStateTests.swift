@@ -82,3 +82,48 @@ private func e(_ id: String, _ st: String, _ a: [String: JSONValue] = [:]) -> En
     #expect(climate("heat", action: "heating").hvacAction == "heating")
     #expect(climate("heat").hvacAction == nil)
 }
+
+/// `function` is what colours a thermostat — heating red, cooling blue, drying purple, fan green —
+/// and it is a reading of two Home Assistant vocabularies that deliberately do not match each
+/// other. Every row here is a string HA actually emits.
+@Test func climateFunctionReadsTheActionFirstAndTheModeSecond() {
+    func climate(_ st: String, action: String? = nil) -> ClimateState {
+        ClimateState(e("climate.h", st, action.map { ["hvac_action": .string($0)] } ?? [:]))
+    }
+
+    // The action wins where it says something.
+    #expect(climate("heat", action: "heating").function == .heat)
+    #expect(climate("cool", action: "cooling").function == .cool)
+    #expect(climate("dry", action: "drying").function == .dry)
+    #expect(climate("fan_only", action: "fan").function == .fan)
+
+    // The mode carries an idle thermostat, so a tile does not lose its colour the moment the room
+    // reaches temperature. `idle` and `off` are absent from the action table for exactly this.
+    #expect(climate("heat", action: "idle").function == .heat)
+    #expect(climate("cool", action: "idle").function == .cool)
+    #expect(climate("heat").function == .heat)
+
+    // The two vocabularies differ, which is why there are two tables: HA's mode for drying is
+    // `dry` and its action is `drying`; its mode for a fan is `fan_only` and its action is `fan`.
+    // A single shared lookup would return nothing for half of these.
+    #expect(climate("dry").function == .dry)
+    #expect(climate("fan_only").function == .fan)
+
+    // A `heat_cool` unit doing nothing has no true colour and says so — but while it is actually
+    // cooling there is exactly one right answer, which is the case the action-first order exists
+    // for.
+    #expect(climate("heat_cool").function == .unspecified)
+    #expect(climate("auto").function == .unspecified)
+    #expect(climate("heat_cool", action: "cooling").function == .cool)
+    #expect(climate("heat_cool", action: "heating").function == .heat)
+
+    // Off and unreachable keep the domain's own colour rather than a claim.
+    #expect(climate("off").function == .unspecified)
+    #expect(climate("unavailable").function == .unspecified)
+    #expect(climate("unknown").function == .unspecified)
+
+    // Actions HA added later (`preheating`, `defrosting`) are not in the table and fall through to
+    // the mode, which for a heating unit is the colour they should have anyway.
+    #expect(climate("heat", action: "preheating").function == .heat)
+    #expect(climate("heat", action: "defrosting").function == .heat)
+}

@@ -18,12 +18,15 @@ import HavenCore
 /// which fetch artwork over the network from a live Home Assistant. A gallery that renders
 /// differently depending on whether a request happened to come back is not a baseline you can
 /// compare against.
-/// Split in two because a preview snapshot captures one screen, not a scroll view's full content —
-/// a single gallery would leave half the tiles unverified below the fold, which is precisely the
-/// "assumed rather than looked at" this exists to end.
+/// Split into pages because a preview snapshot captures one screen, not a scroll view's full
+/// content — a single gallery would leave half the tiles unverified below the fold, which is
+/// precisely the "assumed rather than looked at" this exists to end. It went from two pages to
+/// three when climate grew to eight fixtures at double width and pushed its own `unknown` and
+/// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
+/// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Half { case first, second }
-    let half: Half
+    enum Page { case first, second, third }
+    let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
     /// is the only way to drive them.
@@ -37,7 +40,7 @@ struct TileGallery: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                switch half {
+                switch page {
                 case .first:
                     section("Light") { ids("light", ["on", "off", "unavailable"]) }
                     section("Switch") { ids("switch", ["on", "off", "unavailable"]) }
@@ -58,7 +61,6 @@ struct TileGallery: View {
                     // unknown thermostat is reachable and a tap is what resolves it. Two tiles that
                     // look alike and behave differently is precisely a thing to look at rather than
                     // infer.
-                    section("Climate") { ids("climate", ["heating", "idle", "off", "unknown", "unavailable"]) }
                 case .second:
                     section("Scene") { ids("scene", ["idle", "unavailable"]) }
                     // The tile the original sweep actually missed.
@@ -67,6 +69,14 @@ struct TileGallery: View {
                     section("Generic") { ids("generic", ["idle", "unavailable"]) }
                     section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
                     mediaWide
+                case .third:
+                    // **Two columns, because that is the only width this tile is ever drawn at.**
+                    // Both surfaces hoist climate into a 2-column grid of its own
+                    // (`RoomSectionView`, `RoomDetailView`), so rendering it here through the
+                    // 4-column `ids(...)` was the gallery lying about the one thing it exists to
+                    // show. It cost something real: judgements about what fits beside the target
+                    // temperature were made against half the width the tile actually has.
+                    section("Climate") { climateRow }
                 }
             }
             .padding()
@@ -87,6 +97,15 @@ struct TileGallery: View {
         LazyVGrid(columns: Self.columns, spacing: 10) {
             ForEach(cases, id: \.self) { name in
                 DeviceTileView(entityId: "\(domain).\(name)")
+            }
+        }
+    }
+
+    /// Climate at its real width: 2 of 4 columns, as both surfaces draw it.
+    private var climateRow: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
+            ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
+                DeviceTileView(entityId: "climate.\(name)")
             }
         }
     }
@@ -128,18 +147,28 @@ struct TileGallery: View {
         set("lock.jammed", "jammed", ["friendly_name": .string("Side")])
         set("lock.unavailable", "unavailable", ["friendly_name": .string("Shed")])
 
-        // Same mode, same target, same everything but `hvac_action` — the pair the fill rule is
-        // about. `climate.idle` is a thermostat that is *on* and has reached its target: warm
-        // thermometer, warm number, lit power button, no wash.
+        // One fixture per `hvac_action` the tile colours, plus the three states that have no
+        // action to colour by. Same mode and target where they can be, so the only difference on
+        // screen is the one being checked.
         set("climate.heating", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
                                         "fan_mode": .string("auto"), "hvac_action": .string("heating"),
                                         "hvac_modes": .array([.string("off"), .string("heat")])])
+        set("climate.cooling", "cool", ["friendly_name": .string("Study"), "temperature": .double(19),
+                                        "fan_mode": .string("auto"), "hvac_action": .string("cooling"),
+                                        "hvac_modes": .array([.string("off"), .string("cool")])])
+        set("climate.drying", "dry", ["friendly_name": .string("Cellar"), "temperature": .double(20),
+                                      "hvac_action": .string("drying"),
+                                      "hvac_modes": .array([.string("off"), .string("dry")])])
+        set("climate.fan", "fan_only", ["friendly_name": .string("Porch"), "temperature": .double(22),
+                                        "fan_mode": .string("high"), "hvac_action": .string("fan"),
+                                        "hvac_modes": .array([.string("off"), .string("fan_only")])])
+        // On and at target: the pair with `climate.heating` that the fill rule is about.
         set("climate.idle", "heat", ["friendly_name": .string("Hall"), "temperature": .double(21),
                                      "fan_mode": .string("auto"), "hvac_action": .string("idle"),
                                      "hvac_modes": .array([.string("off"), .string("heat")])])
-        set("climate.off", "off", ["friendly_name": .string("Study"), "temperature": .double(18),
+        set("climate.off", "off", ["friendly_name": .string("Attic"), "temperature": .double(18),
                                    "hvac_modes": .array([.string("off"), .string("heat")])])
-        set("climate.unknown", "unknown", ["friendly_name": .string("Attic"), "temperature": .double(19),
+        set("climate.unknown", "unknown", ["friendly_name": .string("Garage"), "temperature": .double(19),
                                            "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23)])
@@ -174,11 +203,17 @@ struct TileGallery: View {
     }
 }
 
-#Preview("Tiles 1 — light, switch, cover, lock, climate") {
-    TileGallery(half: .first)
+#Preview("Tiles 1 — light, switch, cover, lock") {
+    TileGallery(page: .first)
 }
 
 #Preview("Tiles 2 — scene, sensor, binary, generic, media") {
-    TileGallery(half: .second)
+    TileGallery(page: .second)
+}
+
+/// Climate gets a page to itself: eight fixtures at double width is more than fits beside anything
+/// else, and every one of them is a distinct colour or state rule.
+#Preview("Tiles 3 — climate") {
+    TileGallery(page: .third)
 }
 #endif

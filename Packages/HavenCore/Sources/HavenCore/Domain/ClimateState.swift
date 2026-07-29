@@ -49,6 +49,64 @@ public struct ClimateState: Sendable, Equatable {
     ///
     /// `isOn` leads the expression, so an unreachable thermostat is never conditioning whatever
     /// stale `hvac_action` its last-known attributes still carry.
+    /// What this thermostat is *for* right now — the thing its colour on the grid means.
+    ///
+    /// Separate from `isConditioning`, which says whether the equipment is running. The two answer
+    /// different questions and the tile shows both: the colour says heating or cooling, the fill
+    /// says now or not. An idle heater is therefore a red tile with no wash, which is exactly what
+    /// it is — set up to heat, not currently heating.
+    public enum Function: Sendable, Equatable {
+        case heat, cool, dry, fan
+        /// No single answer. `heat_cool` and `auto` are the honest cases: a thermostat that will do
+        /// either, currently doing neither, has no colour that is true, so it keeps the domain's own
+        /// — as do `off` and anything unreachable.
+        case unspecified
+
+        /// Home Assistant's `hvac_action`: what the equipment is doing.
+        ///
+        /// `idle` and `off` are deliberately absent, and that absence is the mechanism rather than
+        /// an omission — they mean "not doing anything", which is a fact about activity and not
+        /// about purpose, so they fall through to the mode below. Values HA has added since
+        /// (`preheating`, `defrosting`) fall through the same way and land on the mode's colour,
+        /// which for a heat-mode thermostat is the right one.
+        static func action(_ raw: String) -> Function? {
+            switch raw {
+            case "heating": return .heat
+            case "cooling": return .cool
+            case "drying": return .dry
+            case "fan": return .fan
+            default: return nil
+            }
+        }
+
+        /// Home Assistant's `hvac_mode`: what it is set to do.
+        ///
+        /// **Note the vocabulary does not match the action's**, which is the whole reason both
+        /// tables are here and under test: HA's mode for drying is `dry` while its action is
+        /// `drying`, and its mode for a fan is `fan_only` while its action is `fan`. A single
+        /// lookup shared between them would silently colour half of these wrong.
+        static func mode(_ raw: String) -> Function? {
+            switch raw {
+            case "heat": return .heat
+            case "cool": return .cool
+            case "dry": return .dry
+            case "fan_only": return .fan
+            default: return nil
+            }
+        }
+    }
+
+    /// The action's answer where there is one, the mode's otherwise.
+    ///
+    /// In that order because the action is the more specific truth: a `heat_cool` thermostat has no
+    /// colour from its mode at all, and yet while it is actively cooling there is exactly one right
+    /// answer. The mode is what carries a thermostat that is merely idle, so the tile does not lose
+    /// its colour every time the room reaches temperature.
+    public var function: Function {
+        if let hvacAction, let fromAction = Function.action(hvacAction) { return fromAction }
+        return Function.mode(hvacMode) ?? .unspecified
+    }
+
     public var isConditioning: Bool {
         guard isOn else { return false }
         guard let hvacAction else { return true }
