@@ -31,6 +31,7 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let roomsKey = "rooms"
     private static let entitiesKey = "entities"
     private static let nameKey = "name"
+    private static let surfacesKey = "surfaces"
 
     public let raw: JSONValue
 
@@ -139,6 +140,64 @@ public struct DashboardDocument: Sendable, Equatable {
         // An entity record holding nothing at all is removed outright, so clearing the only name a
         // device ever had leaves the document exactly as it started rather than a shell keyed by
         // every entity anyone has ever opened.
+        if entity.isEmpty {
+            entities.removeValue(forKey: entityId)
+        } else {
+            entities[entityId] = .object(entity)
+        }
+        if entities.isEmpty {
+            root.removeValue(forKey: Self.entitiesKey)
+        } else {
+            root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Surface membership
+
+    /// Every user decision about which surfaces show which entity, keyed by entity id.
+    ///
+    /// Unknown surfaces and unknown membership values are dropped rather than defaulted: a build
+    /// that adds a third surface, or a fourth membership state, must leave this one working rather
+    /// than brick it on a value it cannot read.
+    public var surfaceOverrides: [String: [HavenSurface: SurfaceMembership]] {
+        guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
+        return entities.compactMapValues { entity -> [HavenSurface: SurfaceMembership]? in
+            guard let surfaces = entity.asObject?[Self.surfacesKey]?.asObject else { return nil }
+            var out: [HavenSurface: SurfaceMembership] = [:]
+            for (rawSurface, rawMembership) in surfaces {
+                guard let surface = HavenSurface(rawValue: rawSurface),
+                      let value = rawMembership.asString,
+                      let membership = SurfaceMembership(rawValue: value) else { continue }
+                out[surface] = membership
+            }
+            return out.isEmpty ? nil : out
+        }
+    }
+
+    /// This document with one entity's membership of one surface set, or — for `nil` — cleared back
+    /// to following curation.
+    ///
+    /// One entity and one surface at a time, because that is how the feature works: a tap removes a
+    /// tile from the surface it was on. Merging at every level so a rename survives a removal and
+    /// vice versa, and so clearing the last membership leaves no residue — see the tests.
+    public func settingMembership(_ membership: SurfaceMembership?, for entityId: String,
+                                  on surface: HavenSurface) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var entities = root[Self.entitiesKey]?.asObject ?? [:]
+        var entity = entities[entityId]?.asObject ?? [:]
+        var surfaces = entity[Self.surfacesKey]?.asObject ?? [:]
+        if let membership {
+            surfaces[surface.rawValue] = .string(membership.rawValue)
+        } else {
+            surfaces.removeValue(forKey: surface.rawValue)
+        }
+        if surfaces.isEmpty {
+            entity.removeValue(forKey: Self.surfacesKey)
+        } else {
+            entity[Self.surfacesKey] = .object(surfaces)
+        }
         if entity.isEmpty {
             entities.removeValue(forKey: entityId)
         } else {
