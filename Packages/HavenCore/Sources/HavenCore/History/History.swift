@@ -95,6 +95,23 @@ public struct StateChange: Sendable, Equatable {
     public let time: Date
     public let state: String
     public init(time: Date, state: String) { self.time = time; self.state = state }
+
+    /// When a binary sensor last became **active**, or `nil` if it did not within the queried
+    /// window.
+    ///
+    /// This is what the camera modal's event chips read to say "24m ago" instead of "Clear", and it
+    /// is a function rather than an expression at the call site for one reason: it depends on the
+    /// list being newest-first, which is a property of `HistoryParsing.stateChanges` ending in
+    /// `out.reversed()` and of nothing visible from the call site. Stated here, it can be — and is
+    /// — pinned by a test, so a future change to that ordering fails loudly rather than making
+    /// every chip in the app quietly report the *oldest* trigger of the day.
+    ///
+    /// `nil` genuinely means "not in this window", never "never": the query behind it is a rolling
+    /// 24 hours, so a sensor that last fired the previous evening answers `nil` here. Callers must
+    /// render that as not-knowing rather than as not-having-happened.
+    public static func lastActivation(in changes: [StateChange]) -> Date? {
+        changes.first { $0.state == "on" }?.time
+    }
 }
 
 public enum HistoryParsing {
