@@ -48,12 +48,15 @@ struct RoomSectionView: View {
             // `refs(for: .overview)`, not `deviceRefs`: the grid shows curated primary controls only
             // — demoted sensors and device telemetry live in room detail (see `CurationTier`) —
             // minus anything the household removed from this surface (see `SurfaceMembership`).
-            let refs = orderedRefs
+            let refs = room.refs(for: .overview)
             if !refs.isEmpty || navigation.isConfiguring {
                 RoomGrid(columns: 4, spacing: 9) {
                     ForEach(refs) { ref in
                         if case .entity(let id) = ref {
-                            tile(id).tileSpan(TileSpan.default(for: Domain.of(id)))
+                            tile(id)
+                                .tileSpan(TileSpan.default(for: Domain.of(id)))
+                                .modifier(RearrangeableTile(entityId: id, room: room,
+                                                            visibleIds: visibleIds(refs)))
                         }
                     }
                     // A cell like any other, last in the sequence, rather than a special case inside
@@ -63,39 +66,31 @@ struct RoomSectionView: View {
                             navigation.presented = .addTile(areaId: room.areaId, surface: .overview)
                         }
                         .tileSpan(TileSpan(columns: 1, rows: 1))
+                        // The `+` doubles as the drop target for "put it last": it is always the end
+                        // of the sequence, so a tile dropped on it has nowhere else to mean.
+                        .dropDestination(for: String.self) { ids, _ in
+                            guard let dragged = ids.first else { return false }
+                            Task { await move(dragged, before: nil, in: visibleIds(refs)) }
+                            return true
+                        }
                     }
                 }
             }
         }
     }
 
-    /// The room's tiles, in the order they are drawn.
-    ///
-    /// Today's four bands flattened — climate, then everything miscellaneous, then media, then
-    /// cameras — so adopting one grid moves nothing on its own. Climate leads because a room's
-    /// temperature is what a glance is usually for; cameras trail because four feeds at the top of
-    /// every room would make the dashboard a security console.
-    ///
-    /// **This is the sequence sub-project 5b makes draggable**, and the point at which a stored
-    /// order will be read: absent one, it falls back to exactly this, so a household that never
-    /// rearranges anything never sees a change.
-    private var orderedRefs: [DeviceRef] {
-        let refs = room.refs(for: .overview)
-        func matching(_ predicate: (Domain) -> Bool) -> [DeviceRef] {
-            refs.filter { ref in
-                guard case .entity(let id) = ref else { return false }
-                return predicate(Domain.of(id))
-            }
+    private func visibleIds(_ refs: [DeviceRef]) -> [String] {
+        refs.compactMap { ref in
+            guard case .entity(let id) = ref else { return nil }
+            return id
         }
-        let climate = matching { $0 == .climate }
-        let media = matching { $0 == .mediaPlayer }
-        let cameras = matching { $0 == .camera }
-        let rest = refs.filter { ref in
-            guard case .entity(let id) = ref else { return true }
-            let domain = Domain.of(id)
-            return domain != .climate && domain != .mediaPlayer && domain != .camera
-        }
-        return climate + rest + media + cameras
+    }
+
+    /// Applies a drop: the moved order is `TileOrder`'s to compute, and this only writes it.
+    private func move(_ id: String, before target: String?, in ids: [String]) async {
+        let moved = TileOrder.moving(id, before: target, in: ids)
+        guard moved != ids else { return }
+        _ = await store.setOrder(moved, areaId: room.areaId)
     }
 
     /// The renderer for one entity, at the size the grid has given it.

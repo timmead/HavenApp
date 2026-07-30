@@ -32,6 +32,7 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let entitiesKey = "entities"
     private static let nameKey = "name"
     private static let surfacesKey = "surfaces"
+    private static let orderKey = "order"
 
     public let raw: JSONValue
 
@@ -149,6 +150,49 @@ public struct DashboardDocument: Sendable, Equatable {
             root.removeValue(forKey: Self.entitiesKey)
         } else {
             root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Tile order
+
+    /// The order this room's tiles were arranged into, or an empty list when nobody has arranged it.
+    ///
+    /// Stored under the room rather than per entity, because an order is a fact about the *room* —
+    /// the same reason the temperature and humidity nominations live here.
+    public func order(forRoom areaId: String) -> [String] {
+        guard let room = raw.asObject?[Self.roomsKey]?.asObject?[areaId]?.asObject,
+              let ids = room[Self.orderKey]?.asArray else { return [] }
+        return ids.compactMap { $0.asString }
+    }
+
+    /// This document with one room's order set, or — for an empty list — cleared back to the default
+    /// arrangement.
+    ///
+    /// Written whole rather than as a delta. A reorder is not something two people would want merged:
+    /// concurrent rearrangements of one room should end with the last one winning, which is what
+    /// `HavenConfig`'s version-conflict retry already provides.
+    public func settingOrder(_ ids: [String], forRoom areaId: String) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var rooms = root[Self.roomsKey]?.asObject ?? [:]
+        var room = rooms[areaId]?.asObject ?? [:]
+        if ids.isEmpty {
+            room.removeValue(forKey: Self.orderKey)
+        } else {
+            room[Self.orderKey] = .array(ids.map { .string($0) })
+        }
+        // A room record holding nothing is removed, so resetting an arrangement in a room with no
+        // nominations leaves the document exactly as it started.
+        if room.isEmpty {
+            rooms.removeValue(forKey: areaId)
+        } else {
+            rooms[areaId] = .object(room)
+        }
+        if rooms.isEmpty {
+            root.removeValue(forKey: Self.roomsKey)
+        } else {
+            root[Self.roomsKey] = .object(rooms)
         }
         return DashboardDocument(raw: .object(root))
     }

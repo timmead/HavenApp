@@ -16,9 +16,12 @@ private struct RoomGridPreviews: View {
     let rooms: [RoomSection]
     let configuring: Bool
 
-    init(only areaIds: [String], configuring: Bool = false) {
+    init(only areaIds: [String], configuring: Bool = false, arranged: [String: [String]] = [:]) {
         self.configuring = configuring
         let store = RoomGridPreviews.populatedStore()
+        for (areaId, order) in arranged {
+            store.config.seedForTesting(store.config.document.settingOrder(order, forRoom: areaId))
+        }
         _store = State(initialValue: store)
         rooms = store.rooms().filter { areaIds.contains($0.areaId) }
     }
@@ -100,4 +103,13 @@ private struct RoomGridPreviews: View {
 /// Configuration mode: placeholders must occupy exactly the cells their tiles do, and the `+` is a
 /// 1×1 at the end of the sequence rather than a special case in whichever grid used to exist.
 #Preview("Room grid — configuring") { RoomGridPreviews(only: ["gap", "cams"], configuring: true) }
+
+/// **An arranged room.** A drag cannot be exercised by a preview, so what is rendered is its
+/// *result*: a stored order that is plainly not the default — the thermostat pushed to the end,
+/// behind lights it would normally lead. If ordering were being ignored this would look identical to
+/// the preview above it.
+#Preview("Room grid — arranged") {
+    RoomGridPreviews(only: ["gap"],
+                     arranged: ["gap": ["light.b3", "light.b1", "climate.b", "light.b2"]])
+}
 #endif

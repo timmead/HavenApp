@@ -17,7 +17,7 @@ private func room(_ entities: [EntityRegistryEntry], temperature: String? = nil,
     // No live states, so the only nominations available are the area registry's own — which is
     // what these curation tests already exercised before sourcing moved into the resolver.
     let environment = RoomEnvironmentResolver.resolve(home: home, sources: [:])
-    return SectionBuilder.rooms(from: home, environment: environment, overrides: [:]).first { $0.areaId == "a" }!
+    return SectionBuilder.rooms(from: home, environment: environment, overrides: [:], orders: [:]).first { $0.areaId == "a" }!
 }
 
 // MARK: - Single-entity classification

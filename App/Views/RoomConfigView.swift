@@ -33,6 +33,7 @@ struct RoomConfigView: View {
             }
             role(.temperature, title: "Temperature", environment: environment)
             role(.humidity, title: "Humidity", environment: environment)
+            arrangement
         }
     }
 
@@ -63,6 +64,36 @@ struct RoomConfigView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// **Reset arrangement**, shown only when there is an arrangement to reset.
+    ///
+    /// It lives with the room's sensor pickers because it is the same kind of thing — a decision
+    /// about the room rather than about a device — and it exists because the only other way out of
+    /// an arrangement you dislike is to drag your way out of it, which is exactly when dragging is
+    /// least appealing.
+    @ViewBuilder
+    private var arrangement: some View {
+        if !store.config.document.order(forRoom: areaId).isEmpty {
+            FacetCard(title: "Arrangement") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button("Reset arrangement") { Task { await resetArrangement() } }
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(HavenColor.domain(.cover))
+                    Text("Puts this room's tiles back in their default order.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func resetArrangement() async {
+        switch await store.resetOrder(areaId: areaId) {
+        case .written, .unchanged: failure = nil
+        case .notAuthorized: failure = "Only Home Assistant admins can change the household dashboard."
+        case .failed: failure = "Couldn't save that. Check your connection and try again."
         }
     }
 
