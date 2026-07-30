@@ -11,8 +11,9 @@ import HavenCore
 /// 1. **Grouped by device.** Eight detection sensors become one collapsed row saying "36th Street
 ///    Camera · 8". This attacks the cause rather than making a long list nicer to scan.
 /// 2. **Searchable**, matching name and entity id — the reliable escape hatch at any length.
-/// 3. **Filterable by kind**, behind a link rather than seven chips above the list, since the
-///    problem was too much on screen.
+/// 3. **Filterable by kind**, behind a link that expands a section in place rather than seven chips
+///    permanently above the list — the problem was too much on screen, and a filter that is only
+///    there when asked for costs nothing when it is not.
 ///
 /// **No checkmarks on the rows**, unlike the room's sensor picker: nothing here is selected — that
 /// is what makes it addable — so a checkmark column would promise a state that cannot occur.
@@ -23,12 +24,22 @@ struct AddTileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     /// Kinds the user has unticked. Empty — everything shown — every time the sheet opens; see
-    /// `AddTileFilterView` for why this is not persisted.
+    /// `TileKindFilter` for why this is not persisted.
     @State private var excluded: Set<TileCategory> = []
-    @State private var showingFilter = false
+    /// Whether the kinds section is expanded. It was a *sheet*, which made this one dismiss and
+    /// re-present around it — see `TileKindFilter`.
+    @State private var isFilteringByKind: Bool
     /// Which device groups are open. Collapsed by default, which is the entire point of grouping.
     @State private var expanded: Set<String> = []
     @State private var failure: String?
+
+    /// `filteringByKindForPreview` exists so a preview can render the expanded state, which is
+    /// otherwise only reachable by tapping — and an unrendered state is one nobody has looked at.
+    init(areaId: String, surface: HavenSurface, filteringByKindForPreview: Bool = false) {
+        self.areaId = areaId
+        self.surface = surface
+        _isFilteringByKind = State(initialValue: filteringByKindForPreview)
+    }
 
     var body: some View {
         let room = store.rooms().first { $0.areaId == areaId }
@@ -42,6 +53,10 @@ struct AddTileView: View {
                         accent: HavenColor.domain(.cover), unavailable: false,
                         accessory: AnyView(ModalDoneButton { dismiss() }))
             searchAndFilter(candidates: candidates)
+            if isFilteringByKind {
+                TileKindFilter(available: AddTileGrouping.categories(of: candidates),
+                               excluded: $excluded)
+            }
             if let failure {
                 Text(failure)
                     .font(.system(size: 12))
@@ -69,10 +84,6 @@ struct AddTileView: View {
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showingFilter) {
-            AddTileFilterView(available: AddTileGrouping.categories(of: candidates), excluded: $excluded)
-                .fittedSheet()
         }
     }
 
@@ -102,14 +113,17 @@ struct AddTileView: View {
                 .padding(.horizontal, 10).padding(.vertical, 7)
                 .background(Capsule().fill(HavenColor.glassFill))
 
-                Button { showingFilter = true } label: {
+                Button { isFilteringByKind.toggle() } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .font(.system(size: 13, weight: .semibold))
-                        // The count is the only cue that a filter is on at all once the sheet is
-                        // closed; without it an unticked kind is a device that has silently vanished.
+                        // The count is the only cue that a filter is on at all once the section is
+                        // collapsed; without it an unticked kind is a device that silently vanished.
                         Text(excluded.isEmpty ? "Filter" : "Filter (\(excluded.count))")
                             .font(.system(size: 13, weight: .semibold))
+                        // Says which way the tap goes, since tapping again is how it closes.
+                        Image(systemName: isFilteringByKind ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
                     }
                 }
                 .buttonStyle(.plain)
@@ -254,9 +268,12 @@ enum AddTileGrouping {
 private struct AddTilePreviewHost: View {
     @State private var store = AddTilePreviewHost.populatedStore()
     let areaId: String
+    /// Renders with the kinds section already open, which is otherwise only reachable by tapping.
+    var filtering = false
 
     var body: some View {
-        AddTileView(areaId: areaId, surface: .overview).padding(16).environment(store)
+        AddTileView(areaId: areaId, surface: .overview, filteringByKindForPreview: filtering)
+            .padding(16).environment(store)
     }
 
     @MainActor
@@ -299,6 +316,7 @@ private struct AddTilePreviewHost: View {
 }
 
 #Preview("Add tile — grouped by device") { AddTilePreviewHost(areaId: "lounge") }
+#Preview("Add tile — kinds expanded") { AddTilePreviewHost(areaId: "lounge", filtering: true) }
 
 /// Over content, which is the only way to see that the sheet's background is opaque.
 #Preview("Add tile — over content") {
