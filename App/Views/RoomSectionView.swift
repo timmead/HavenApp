@@ -5,6 +5,20 @@ struct RoomSectionView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// What is being dragged in *this* room and where it would land — see `TileDragState`. Owned
+    /// here because a drag is a fact about the room: the lifted tile and the target are different
+    /// tiles that must draw differently at the same moment.
+    ///
+    /// Injectable, and that is not gratuitous: the two states this adds — the hole a lifted tile
+    /// leaves and the caret marking where it would land — exist only *during* a gesture, and a
+    /// gesture is the one thing a preview cannot perform. Seeding it is the only way to look at
+    /// them at all.
+    @State private var drag: TileDragState
+
+    init(room: RoomSection, drag: TileDragState = TileDragState()) {
+        self.room = room
+        _drag = State(initialValue: drag)
+    }
     // The four `[GridItem]` arrays that used to live here — one per tile width — are gone; see
     // `body`. What they encoded, that a camera is two columns and a light is one, is now
     // `TileSpan.default(for:)`, and the grid honours it in one container instead of four.
@@ -56,7 +70,8 @@ struct RoomSectionView: View {
                             tile(id)
                                 .tileSpan(TileSpan.default(for: Domain.of(id)))
                                 .modifier(RearrangeableTile(entityId: id, room: room,
-                                                            visibleIds: visibleIds(refs)))
+                                                            visibleIds: visibleIds(refs),
+                                                            drag: drag))
                         }
                     }
                     // A cell like any other, last in the sequence, rather than a special case inside
@@ -67,12 +82,21 @@ struct RoomSectionView: View {
                         }
                         .tileSpan(TileSpan(columns: 1, rows: 1))
                         // The `+` doubles as the drop target for "put it last": it is always the end
-                        // of the sequence, so a tile dropped on it has nowhere else to mean.
-                        .dropDestination(for: String.self) { ids, _ in
-                            guard let dragged = ids.first else { return false }
-                            Task { await move(dragged, before: nil, in: visibleIds(refs)) }
-                            return true
+                        // of the sequence, so a tile dropped on it has nowhere else to mean. It
+                        // shows the caret on its *trailing* edge, since arriving here means going
+                        // after everything rather than before anything.
+                        .overlay(alignment: .trailing) {
+                            if drag.dragging != nil && drag.targetIsEnd {
+                                Capsule()
+                                    .fill(HavenColor.domain(.cover))
+                                    .frame(width: 3)
+                                    .padding(.vertical, 2)
+                                    .offset(x: 6)
+                            }
                         }
+                        .onDrop(of: [.text], delegate: TileDropDelegate(
+                            target: nil, isEnd: true, room: room, visibleIds: visibleIds(refs),
+                            drag: drag, store: store))
                     }
                 }
             }
@@ -84,13 +108,6 @@ struct RoomSectionView: View {
             guard case .entity(let id) = ref else { return nil }
             return id
         }
-    }
-
-    /// Applies a drop: the moved order is `TileOrder`'s to compute, and this only writes it.
-    private func move(_ id: String, before target: String?, in ids: [String]) async {
-        let moved = TileOrder.moving(id, before: target, in: ids)
-        guard moved != ids else { return }
-        _ = await store.setOrder(moved, areaId: room.areaId)
     }
 
     /// The renderer for one entity, at the size the grid has given it.

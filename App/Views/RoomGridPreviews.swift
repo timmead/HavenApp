@@ -16,7 +16,12 @@ private struct RoomGridPreviews: View {
     let rooms: [RoomSection]
     let configuring: Bool
 
-    init(only areaIds: [String], configuring: Bool = false, arranged: [String: [String]] = [:]) {
+    /// Seeded drag state, so the mid-gesture appearance can be rendered at all.
+    var drag = TileDragState()
+
+    init(only areaIds: [String], configuring: Bool = false, arranged: [String: [String]] = [:],
+         drag: TileDragState = TileDragState()) {
+        self.drag = drag
         self.configuring = configuring
         let store = RoomGridPreviews.populatedStore()
         for (areaId, order) in arranged {
@@ -29,7 +34,7 @@ private struct RoomGridPreviews: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                ForEach(rooms) { room in RoomSectionView(room: room) }
+                ForEach(rooms) { room in RoomSectionView(room: room, drag: drag) }
             }
             .padding()
         }
@@ -103,6 +108,16 @@ private struct RoomGridPreviews: View {
 /// Configuration mode: placeholders must occupy exactly the cells their tiles do, and the `+` is a
 /// 1×1 at the end of the sequence rather than a special case in whichever grid used to exist.
 #Preview("Room grid — configuring") { RoomGridPreviews(only: ["gap", "cams"], configuring: true) }
+
+/// **Mid-drag**, which no gesture in a preview can produce: `light.b1` has been lifted — its slot
+/// left behind as a dashed hole rather than closing up — and the caret on `light.b3`'s leading edge
+/// marks the seam it would drop into.
+#Preview("Room grid — mid-drag") {
+    let drag = TileDragState()
+    drag.dragging = "light.b1"
+    drag.target = "light.b3"
+    return RoomGridPreviews(only: ["gap"], configuring: true, drag: drag)
+}
 
 /// **An arranged room.** A drag cannot be exercised by a preview, so what is rendered is its
 /// *result*: a stored order that is plainly not the default — the thermostat pushed to the end,
