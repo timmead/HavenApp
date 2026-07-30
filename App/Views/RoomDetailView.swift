@@ -8,6 +8,7 @@ import HavenCore
 struct RoomDetailView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     @State private var showingEnvironmentHistory = false
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
     // The Climate group renders in its own 2-column grid — a half-width tile is exactly a
@@ -63,6 +64,16 @@ struct RoomDetailView: View {
                 cameraGroup(g.cameras)
                 group("Scenes & more", g.other)
                 group("Sensors", g.sensors)
+                // One `+` for the whole screen rather than one per group: the groups here are a
+                // presentation of one list, and the picker is not scoped to a domain — an added
+                // device lands in whichever group its domain belongs to.
+                if navigation.isConfiguring {
+                    LazyVGrid(columns: columns, spacing: 9) {
+                        AddTilePlaceholder {
+                            navigation.presented = .addTile(areaId: room.areaId, surface: .roomDetail)
+                        }
+                    }
+                }
             }
             .padding()
         }
@@ -91,7 +102,7 @@ struct RoomDetailView: View {
                 HStack { Text("Media").font(.system(size: 14, weight: .bold)); Spacer() }
                 VStack(spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        MediaPlayerTile(entityId: id, size: .large).configurable(entityId: id)
+                        MediaPlayerTile(entityId: id, size: .large).configurable(entityId: id, on: .roomDetail)
                     }
                 }
             }
@@ -111,7 +122,7 @@ struct RoomDetailView: View {
                 HStack { Text("Cameras").font(.system(size: 14, weight: .bold)); Spacer() }
                 VStack(spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        CameraTile(entityId: id, size: .wide).configurable(entityId: id)
+                        CameraTile(entityId: id, size: .wide).configurable(entityId: id, on: .roomDetail)
                     }
                 }
             }
@@ -160,7 +171,7 @@ struct RoomDetailView: View {
                 }
                 LazyVGrid(columns: columns ?? self.columns, spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        DeviceTileView(entityId: id)
+                        DeviceTileView(entityId: id, surface: .roomDetail)
                     }
                 }
             }

@@ -137,8 +137,11 @@ struct DashboardView: View {
             // saying how to leave, which is exactly how they shipped.
             switch presentation {
             case .control(let entityId): DeviceModalView(entityId: entityId)
-            case .tileConfig(let entityId): TileConfigView(entityId: entityId).fittedSheet()
+            case .tileConfig(let entityId, let surface):
+                TileConfigView(entityId: entityId, surface: surface).fittedSheet()
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
+            case .addTile(let areaId, let surface):
+                AddTileView(areaId: areaId, surface: surface).fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as

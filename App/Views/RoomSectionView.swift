@@ -57,7 +57,7 @@ struct RoomSectionView: View {
             }
             if !climateIds.isEmpty {
                 LazyVGrid(columns: climateColumns, spacing: 9) {
-                    ForEach(climateIds, id: \.self) { id in DeviceTileView(entityId: id) }
+                    ForEach(climateIds, id: \.self) { id in DeviceTileView(entityId: id, surface: .overview) }
                 }
             }
 
@@ -71,11 +71,22 @@ struct RoomSectionView: View {
                 let domain = Domain.of(id)
                 return domain != .climate && domain != .mediaPlayer && domain != .camera
             }
-            if !otherRefs.isEmpty {
+            // **Rendered when empty, if configuring.** The `+` lives at the end of this grid, and a
+            // room whose every device is hoisted into the climate/media/camera grids would otherwise
+            // have nowhere to put it — leaving exactly the rooms with the most devices unable to gain
+            // another one.
+            if !otherRefs.isEmpty || navigation.isConfiguring {
                 LazyVGrid(columns: columns, spacing: 9) {
                     ForEach(otherRefs) { ref in
                         if case .entity(let id) = ref {
-                            DeviceTileView(entityId: id)
+                            DeviceTileView(entityId: id, surface: .overview)
+                        }
+                    }
+                    // One `+` per room per surface, not one per grid: a room is up to four grids and
+                    // they would all open the same picker. This is the grid every room has.
+                    if navigation.isConfiguring {
+                        AddTilePlaceholder {
+                            navigation.presented = .addTile(areaId: room.areaId, surface: .overview)
                         }
                     }
                 }
@@ -93,7 +104,7 @@ struct RoomSectionView: View {
             if !mediaIds.isEmpty {
                 LazyVGrid(columns: mediaColumns, spacing: 9) {
                     ForEach(mediaIds, id: \.self) { id in
-                        MediaPlayerTile(entityId: id, size: .wide).configurable(entityId: id)
+                        MediaPlayerTile(entityId: id, size: .wide).configurable(entityId: id, on: .overview)
                     }
                 }
             }
@@ -109,7 +120,7 @@ struct RoomSectionView: View {
             if !cameraIds.isEmpty {
                 LazyVGrid(columns: cameraColumns, spacing: 9) {
                     ForEach(cameraIds, id: \.self) { id in
-                        CameraTile(entityId: id, size: .square).configurable(entityId: id)
+                        CameraTile(entityId: id, size: .square).configurable(entityId: id, on: .overview)
                     }
                 }
             }
