@@ -268,6 +268,22 @@ private final class LockedBox: @unchecked Sendable {
         #expect(!brokenStore.config.canConfigure)
     }
 
+    /// Removing a tile writes one surface's membership and leaves the other alone — the property the
+    /// whole design rests on, checked through the real write path rather than on the document.
+    @Test func removingFromOneSurfaceLeavesTheOtherFollowingCuration() async throws {
+        let (store, _) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let outcome = await store.setMembership("sensor.lr_temp", on: .overview, to: .hidden)
+        #expect(outcome == .written)
+        #expect(store.config.document.surfaceOverrides["sensor.lr_temp"]?[.overview] == .hidden)
+        #expect(store.config.document.surfaceOverrides["sensor.lr_temp"]?[.roomDetail] == nil)
+    }
+
     /// **A document that could not be read is never written over**, and that has to hold for the
     /// automatic nomination write-back as much as for a user's edit — the write-back does not
     /// consult configuration mode at all, so `canConfigure` cannot be what protects it.
