@@ -58,6 +58,17 @@ struct DashboardView: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $scrolledFloorId)
             .scrollIndicators(.hidden)
+            // **Swiping between floors is off while arranging one.**
+            //
+            // A tile's drag and this pager both start as a horizontal pan on the same pixels, and
+            // the pager wins: a drag meant to move a light across a room turned the page to the next
+            // floor instead. Rearranging is a thing you do to *one* floor at a time, so the pan is
+            // simply not the pager's to claim while the mode is on.
+            //
+            // It disables the *gesture*, not the position: the floor bar writes `scrolledFloorId`
+            // and `.scrollPosition` still honours it, so floors remain reachable deliberately —
+            // which is the only way you would want to change floors mid-arrangement anyway.
+            .scrollDisabled(navigation.isConfiguring)
             .navigationTitle(floors.first { $0.id == selectedFloorId }?.name ?? "")
             // Inline, not the large title each floor used to carry: the navigation bar now sits
             // above a *horizontal* scroll view, so there is no vertical offset for it to collapse
