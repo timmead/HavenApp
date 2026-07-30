@@ -11,6 +11,8 @@ import HavenCore
 /// Sub-project 3 adds removal to this sheet; sub-project 6 adds which entities feed a tile.
 struct TileConfigView: View {
     let entityId: String
+    /// Which surface this was opened from — what "remove" removes it from. See `HavenSurface`.
+    let surface: HavenSurface
     @Environment(HomeStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     /// The field's live text. Seeded once from the current *override* — deliberately not bound
@@ -56,11 +58,61 @@ struct TileConfigView: View {
                     }
                 }
             }
+            FacetCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        Task { await remove() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(removeTitle).font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(HavenColor.destructive))
+                    }
+                    .buttonStyle(.plain)
+                    // The button says what it does; this says what it does *not*. Red is right —
+                    // this is the destructive action on this screen — but the sentence is what stops
+                    // someone believing they have deleted a device out of their home.
+                    Text("The device stays in Home Assistant. Add it back with the + in \(surfaceNoun).")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
         }
         // Seeded from the *override*, not from the resolved name: pre-filling with Home Assistant's
         // name would turn every "let me look at this device" into a rename the moment the user hit
         // Save, and the household would fill up with overrides nobody chose.
         .onAppear { draft = storedOverride ?? "" }
+    }
+
+    /// **"Remove", never "Delete".** It takes a tile off one Haven surface; Haven deletes nothing in
+    /// Home Assistant, and a button labelled delete would promise otherwise.
+    private var removeTitle: String {
+        switch surface {
+        case .overview: return "Remove from dashboard"
+        case .roomDetail: return "Remove from this room"
+        }
+    }
+
+    private var surfaceNoun: String {
+        switch surface {
+        case .overview: return "this room on the dashboard"
+        case .roomDetail: return "this room"
+        }
+    }
+
+    /// No confirmation dialog, deliberately: one tap on the same screen's + puts it back, and a
+    /// confirmation on a reversible action is how people learn to dismiss confirmations unread.
+    private func remove() async {
+        switch await store.setMembership(entityId, on: surface, to: .hidden) {
+        case .written, .unchanged: dismiss()
+        case .notAuthorized: failure = "Only Home Assistant admins can change the household dashboard."
+        case .failed: failure = "Couldn't save that. Check your connection and try again."
+        }
     }
 
     /// Whether Save would change anything. Compared against the stored override rather than against
@@ -84,15 +136,17 @@ struct TileConfigView: View {
 #if DEBUG
 private struct TileConfigPreviewHost: View {
     let entityId: String
+    var surface: HavenSurface = .overview
     @State private var store: HomeStore
 
-    init(entityId: String, overridden: Bool) {
+    init(entityId: String, overridden: Bool, surface: HavenSurface = .overview) {
         self.entityId = entityId
+        self.surface = surface
         _store = State(initialValue: TileConfigPreviewHost.populatedStore(overridden: overridden))
     }
 
     var body: some View {
-        TileConfigView(entityId: entityId).padding(16).environment(store)
+        TileConfigView(entityId: entityId, surface: surface).padding(16).environment(store)
     }
 
     @MainActor
@@ -114,4 +168,8 @@ private struct TileConfigPreviewHost: View {
 /// arrive holding Home Assistant's name, or Save silently converts it into an override.
 #Preview("Tile config — renamed") { TileConfigPreviewHost(entityId: "light.kitchen", overridden: true) }
 #Preview("Tile config — not renamed") { TileConfigPreviewHost(entityId: "light.kitchen", overridden: false) }
+/// The other surface, where both the button and its explanation change wording.
+#Preview("Tile config — room detail") {
+    TileConfigPreviewHost(entityId: "light.kitchen", overridden: false, surface: .roomDetail)
+}
 #endif

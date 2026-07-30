@@ -29,9 +29,23 @@ public struct ResolvedHome: Sendable, Equatable {
     /// only, matching `RegistryResolver`'s existing filter: a disabled entity never reaches the
     /// state machine, so it has no renderer to hand this to in the first place.
     public var registryInfo: [String: EntityRegistryInfo]
-    public init(floors: [ResolvedFloor], registryInfo: [String: EntityRegistryInfo] = [:]) {
+    /// Each device's display name, keyed by `device_id` — Home Assistant's own precedence,
+    /// `name_by_user` before `name`.
+    ///
+    /// Carried so a picker can group a device's entities under the device: a UniFi camera contributes
+    /// eight `binary_sensor.*_detected` entities, and eight top-level rows for one physical camera is
+    /// what made the add-tile list unusable. The resolver already reads the device registry for area
+    /// inheritance and was discarding the names.
+    ///
+    /// Defaulted, unlike `SectionBuilder`'s required parameters: an absent name costs a group its
+    /// heading and nothing else, where an absent membership map would silently revert a household's
+    /// edits.
+    public var deviceNames: [String: String]
+    public init(floors: [ResolvedFloor], registryInfo: [String: EntityRegistryInfo] = [:],
+                deviceNames: [String: String] = [:]) {
         self.floors = floors
         self.registryInfo = registryInfo
+        self.deviceNames = deviceNames
     }
 }
 public struct ResolvedFloor: Sendable, Equatable, Identifiable {

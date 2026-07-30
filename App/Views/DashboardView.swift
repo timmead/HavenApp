@@ -55,14 +55,6 @@ struct DashboardView: View {
                 }
                 .scrollTargetLayout()
             }
-            // Says which mode the dashboard is in, and only that — the toolbar's Done is the way
-            // out. It briefly carried a Done of its own as insurance against the toolbar button
-            // failing to appear, which was a real bug at the time; with that fixed, two Dones a
-            // centimetre apart is just two things to read where one would do.
-            //
-            // Inside the stack, attached to the pager, so it sits *below* the navigation bar. Placed
-            // outside the stack it competed with the bar for the top safe area.
-            .safeAreaInset(edge: .top) { editingBanner }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $scrolledFloorId)
             .scrollIndicators(.hidden)
@@ -77,6 +69,29 @@ struct DashboardView: View {
                 }
             }
             .toolbar {
+                // Which mode the dashboard is in, opposite the way out of it — a pencil and one word
+                // in the bar's leading slot rather than a strip below it.
+                //
+                // It was a full-width banner under the navigation bar, which cost a row of vertical
+                // space on every floor, tinted the bar it sat beneath, and needed an opaque
+                // background of its own or content slid through it while scrolling. None of that is
+                // the price of saying one word.
+                if navigation.isConfiguring {
+                    ToolbarItem(id: "configuration-mode", placement: .topBarLeading) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "pencil").font(.system(size: 12, weight: .bold))
+                            Text("Editing").font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundStyle(HavenColor.domain(.cover))
+                        // **`fixedSize`, or the bar collapses it.** A leading item competes with a
+                        // centred title and the Done opposite; left compressible, iOS folds it into
+                        // an ellipsis capsule and the one word carrying the meaning disappears.
+                        .fixedSize()
+                        // A label, not a control: the Done opposite it is the way out, and a second
+                        // tappable "Editing" would be two exits a centimetre apart.
+                        .accessibilityAddTraits(.isHeader)
+                    }
+                }
                 // **The conditional is in the toolbar builder, not inside one item.** An `if` inside
                 // a single `ToolbarItem`'s view builder gives the two states one identity, and
                 // SwiftUI does not reliably swap the rendered control when the condition flips —
@@ -137,44 +152,17 @@ struct DashboardView: View {
             // saying how to leave, which is exactly how they shipped.
             switch presentation {
             case .control(let entityId): DeviceModalView(entityId: entityId)
-            case .tileConfig(let entityId): TileConfigView(entityId: entityId).fittedSheet()
+            case .tileConfig(let entityId, let surface):
+                TileConfigView(entityId: entityId, surface: surface).fittedSheet()
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
+            case .addTile(let areaId, let surface):
+                AddTileView(areaId: areaId, surface: surface).fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as
         // well as the tiles in the pager.
         .environment(navigation)
         .sheet(isPresented: $showingConnectionSettings) { ConnectionSettingsView() }
-    }
-
-    /// Says which mode the dashboard is in. **A label, not a control** — see the call site.
-    @ViewBuilder
-    private var editingBanner: some View {
-        if navigation.isConfiguring {
-            HStack(spacing: 6) {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .bold))
-                Text("Editing dashboard").font(.system(size: 12, weight: .semibold))
-                Spacer(minLength: 0)
-            }
-            // A tinted strip, not a saturated one. `.safeAreaInset(edge: .top)` content sits under
-            // the navigation bar, and iOS tints the bar from whatever is beneath it — a solid accent
-            // bar turned the whole top of the screen blue and left the toolbar's own Done sitting on
-            // it in a mismatched capsule. Tint plus accent text says the same thing without
-            // repainting the chrome.
-            //
-            // **Two layers, and the opaque one is not optional.** A safe-area inset raises the scroll
-            // view's content inset; it does not stop content *passing beneath* the inset as it
-            // scrolls. With only the 16%-alpha tint, a room heading and a camera still slid visibly
-            // through the strip. `.background` (the adaptive system background) goes underneath so
-            // the tint composites onto something solid rather than onto whatever is scrolling past.
-            .foregroundStyle(HavenColor.domain(.cover))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity)
-            .background(HavenColor.domain(.cover).opacity(0.16))
-            .background(.background)
-            .accessibilityAddTraits(.isHeader)
-        }
     }
 
     /// One floor's page — the same vertical scroll of rooms as before. Deliberately carries no

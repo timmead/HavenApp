@@ -31,6 +31,9 @@ struct CameraTile: View {
     var size: CameraTileSize = .square
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
+    /// configuration mode removes it from.
+    @Environment(\.havenSurface) private var surface
     @Environment(\.scenePhase) private var scenePhase
 
     /// Seconds between snapshots. The cycle itself belongs to `AuthenticatedImage`, which starts
@@ -67,8 +70,8 @@ struct CameraTile: View {
         // sheet instead. That leaves the long press with nothing to do, and a gesture the user
         // learned on the light tile doing nothing on this one reads as a dead tile rather than as a
         // different rule. So it opens the same sheet: the redundancy is the point.
-        .onTapGesture { navigation.open(entityId) }
-        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
+        .onTapGesture { navigation.open(entityId, on: surface) }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         // The whole tile is one element: unlike a media tile it holds no buttons, so combining
         // costs nothing and spares a VoiceOver user two stops for a picture and its caption.
         .accessibilityElement(children: .ignore)
@@ -80,7 +83,7 @@ struct CameraTile: View {
         // `SegmentedControl.swift`'s "a real Button, not `.onTapGesture`" comment — and the result
         // is a tile a VoiceOver user can hear described but not open. `MediaPlayerTile` solves it
         // the same way.
-        .accessibilityAction { navigation.open(entityId) }
+        .accessibilityAction { navigation.open(entityId, on: surface) }
     }
 
     /// **Where the refresh stops.**

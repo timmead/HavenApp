@@ -10,24 +10,28 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// tier. Views render `overviewRefs`/`detailRefs` rather than this — see `CurationTier`.
     public let deviceRefs: [DeviceRef]
     public let tiers: [String: CurationTier]
+    /// The household's decisions about which surfaces show which of these entities, keyed by entity
+    /// id — read from the dashboard document, and absent for nearly everything. See
+    /// `SurfaceMembership`.
+    public let overrides: [String: [HavenSurface: SurfaceMembership]]
 
     public func tier(of entityId: String) -> CurationTier { tiers[entityId] ?? .primary }
 
-    /// What the room's overview grid shows: controls only. Everything else is one tap away in
-    /// room detail, which is the whole point of the tiering — a room section is a summary, not
-    /// an inventory.
-    public var overviewRefs: [DeviceRef] { refs(in: [.primary]) }
-
-    /// What room detail shows: the overview's controls plus the demoted sensors. `.companion`
-    /// telemetry stays out — it belongs behind its parent device, not in the room's sensor grid.
-    public var detailRefs: [DeviceRef] { refs(in: [.primary, .secondary]) }
-
-    private func refs(in allowed: Set<CurationTier>) -> [DeviceRef] {
+    /// What `surface` shows.
+    ///
+    /// **One method taking a surface, rather than the `overviewRefs`/`detailRefs` pair this
+    /// replaces.** That pair had the tier sets hard-coded in two places, and a user's per-surface
+    /// decision has to be applied at both — two places to apply one rule is one place to forget it.
+    /// The rule itself is `SurfaceMembership.shows`, in one function with the whole matrix under
+    /// test.
+    public func refs(for surface: HavenSurface) -> [DeviceRef] {
         deviceRefs.filter { ref in
-            // A composite carries no single entity id, so no tier — nothing constructs them yet
-            // (see `DeviceRef`), and when something does it will be a curated unit by definition.
+            // A composite carries no single entity id, so no tier and no membership — nothing
+            // constructs them yet (see `DeviceRef`), and when something does it will be a curated
+            // unit by definition.
             guard case .entity(let id) = ref else { return true }
-            return allowed.contains(tier(of: id))
+            return SurfaceMembership.shows(tier: tier(of: id), on: surface,
+                                           override: overrides[id]?[surface])
         }
     }
 }
@@ -39,8 +43,12 @@ public enum SectionBuilder {
     ///   id — see `RoomEnvironmentResolver`. Required rather than defaulted: an omitted environment
     ///   means every room silently loses its pills, which is precisely the failure this parameter
     ///   exists to make impossible to introduce by accident.
+    /// - Parameter overrides: each entity's per-surface membership — see `SurfaceMembership`.
+    ///   Required for the same reason, and the failure is worse: an omitted map means every removal
+    ///   the household has ever made silently reverts, and nothing at the call site would say so.
     public static func rooms(from home: ResolvedHome,
-                             environment: [String: RoomEnvironment]) -> [RoomSection] {
+                             environment: [String: RoomEnvironment],
+                             overrides: [String: [HavenSurface: SurfaceMembership]]) -> [RoomSection] {
         home.floors.flatMap(\.areas).map { area in
             let header = environment[area.id]?.headerSensors ?? []
             // An uplifted reading is shown in the heading instead of as a tile — but only when the
@@ -54,7 +62,7 @@ public enum SectionBuilder {
             })
             let devices = area.entityIds.filter { !uplifted.contains($0) }.map { DeviceRef.entity($0) }
             return RoomSection(id: area.id, name: area.name, areaId: area.id, headerSensors: header,
-                               deviceRefs: devices, tiers: area.tiers)
+                               deviceRefs: devices, tiers: area.tiers, overrides: overrides)
         }
     }
 }

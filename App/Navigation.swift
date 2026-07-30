@@ -1,4 +1,5 @@
 import SwiftUI
+import HavenCore
 
 /// What is on screen, as opposed to what Home Assistant said.
 ///
@@ -27,9 +28,14 @@ final class Navigation {
         /// The device's controls — the ordinary tap or long-press outside configuration mode.
         case control(entityId: String)
         /// The device's configuration — what a tap does *in* configuration mode.
-        case tileConfig(entityId: String)
+        ///
+        /// Carries the surface it was opened from, because "remove" means "off *this* surface" and
+        /// this sheet is reached from both the dashboard and room detail.
+        case tileConfig(entityId: String, surface: HavenSurface)
         /// A room's configuration, from its title.
         case roomConfig(areaId: String)
+        /// The picker behind a surface's `+` — what this room has that the surface isn't showing.
+        case addTile(areaId: String, surface: HavenSurface)
     }
 
     var presented: Presentation?
@@ -43,8 +49,10 @@ final class Navigation {
     /// Tiles call this instead of writing `presented` directly, so a tile added later cannot forget
     /// the mode and stay live during configuration — the failure would be a tap that turns a light
     /// on while the user is trying to rename it.
-    func open(_ entityId: String) {
-        presented = isConfiguring ? .tileConfig(entityId: entityId) : .control(entityId: entityId)
+    func open(_ entityId: String, on surface: HavenSurface) {
+        presented = isConfiguring
+            ? .tileConfig(entityId: entityId, surface: surface)
+            : .control(entityId: entityId)
     }
 }
 
@@ -54,8 +62,9 @@ extension Navigation.Presentation: Identifiable {
     var id: String {
         switch self {
         case .control(let entityId): return "control:\(entityId)"
-        case .tileConfig(let entityId): return "tileConfig:\(entityId)"
+        case .tileConfig(let entityId, let surface): return "tileConfig:\(surface.rawValue):\(entityId)"
         case .roomConfig(let areaId): return "roomConfig:\(areaId)"
+        case .addTile(let areaId, let surface): return "addTile:\(surface.rawValue):\(areaId)"
         }
     }
 }

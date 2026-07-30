@@ -7,6 +7,10 @@ public enum RegistryResolver {
     public static func resolve(floors: [FloorRegistryEntry], areas: [AreaRegistryEntry],
                                devices: [DeviceRegistryEntry], entities: [EntityRegistryEntry]) -> ResolvedHome {
         let deviceArea = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.areaId) })
+        // `name_by_user` first: HA's own precedence, and the name the user will recognise.
+        let deviceNames = devices.reduce(into: [String: String]()) { out, device in
+            if let name = device.nameByUser ?? device.name, !name.isEmpty { out[device.id] = name }
+        }
 
         // area_id -> [entity_id], applying entity.areaId ?? device.areaId.
         // Disabled entities (disabled_by != nil) never enter HA's state machine — they're
@@ -67,6 +71,7 @@ public enum RegistryResolver {
             floorModels.insert(ResolvedFloor(id: noFloorId, name: "Home", level: Int.min,
                                              areas: noFloorAreas.sorted { $0.name < $1.name }), at: 0)
         }
-        return ResolvedHome(floors: floorModels, registryInfo: registryInfo)
+        return ResolvedHome(floors: floorModels, registryInfo: registryInfo,
+                            deviceNames: deviceNames)
     }
 }

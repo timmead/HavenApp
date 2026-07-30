@@ -50,6 +50,13 @@ enum HavenColor {
     /// Shared "warning/attention" semantic (jammed lock, active binary-sensor alert, etc.) —
     /// one amber token instead of each call site inventing its own.
     static let warning = Color(red: 0.85, green: 0.40, blue: 0.05)
+    /// Destructive actions — today, removing a tile from a surface.
+    ///
+    /// Its own token rather than `Color.red`, so the app's one destructive control has one colour
+    /// wherever it appears; and deliberately not `warning`, which is amber and already means "this
+    /// needs your attention" on a jammed lock and an active sensor. A colour that meant both would
+    /// mean neither.
+    static let destructive = Color(red: 0.84, green: 0.19, blue: 0.19)
     /// The camera modal's live indicator. Deliberately literal RGB and deliberately the same in
     /// both appearances, on the same footing as the colour-temperature pair below: "this feed is
     /// live right now" is a universally-read red, not a surface tint, and a `.primary`-derived

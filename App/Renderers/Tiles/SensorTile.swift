@@ -4,6 +4,9 @@ struct SensorTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
+    /// configuration mode removes it from.
+    @Environment(\.havenSurface) private var surface
     var body: some View {
         let e = store.state(entityId); let s = e.map(SensorState.init)
         let unavailable = e?.isUnavailable ?? false
@@ -25,7 +28,7 @@ struct SensorTile: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.sensor(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)

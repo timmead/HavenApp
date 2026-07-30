@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth }
+    enum Page { case first, second, third, fourth, fifth }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -70,9 +70,6 @@ struct TileGallery: View {
                     section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
                     mediaWide
                 case .fourth:
-                    // The two configuration sheets have no other verification, which is the same
-                    // argument this file makes about the tiles. Rendered side by side rather than
-                    // only next to their own views, so the pair is reviewed as a pair.
                     section("Room configuration — candidates, and none") {
                         VStack(alignment: .leading, spacing: 16) {
                             RoomConfigView(areaId: "lounge")
@@ -80,6 +77,20 @@ struct TileGallery: View {
                             RoomConfigView(areaId: "hall")
                         }
                     }
+                case .fifth:
+                    section("Add a device") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            LazyVGrid(columns: Self.columns, spacing: 10) {
+                                DeviceTileView(entityId: "light.on", surface: .overview)
+                                AddTilePlaceholder { }
+                            }
+                            Divider()
+                            AddTileView(areaId: "lounge", surface: .overview)
+                        }
+                    }
+                    // The two configuration sheets have no other verification, which is the same
+                    // argument this file makes about the tiles. Rendered side by side rather than
+                    // only next to their own views, so the pair is reviewed as a pair.
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -107,7 +118,7 @@ struct TileGallery: View {
     private func ids(_ domain: String, _ cases: [String]) -> some View {
         LazyVGrid(columns: Self.columns, spacing: 10) {
             ForEach(cases, id: \.self) { name in
-                DeviceTileView(entityId: "\(domain).\(name)")
+                DeviceTileView(entityId: "\(domain).\(name)", surface: .overview)
             }
         }
     }
@@ -116,7 +127,7 @@ struct TileGallery: View {
     private var climateRow: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
             ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
-                DeviceTileView(entityId: "climate.\(name)")
+                DeviceTileView(entityId: "climate.\(name)", surface: .overview)
             }
         }
     }
@@ -195,6 +206,9 @@ struct TileGallery: View {
         set("sensor.lounge_hum", "44", ["friendly_name": .string("Lounge Humidity"),
                                         "device_class": .string("humidity"),
                                         "unit_of_measurement": .string("%")])
+        set("sensor.lounge_hum_2", "46", ["friendly_name": .string("Lounge Humidity (window)"),
+                                          "device_class": .string("humidity"),
+                                          "unit_of_measurement": .string("%")])
 
         set("scene.idle", "scening", ["friendly_name": .string("Movie")])
         set("scene.unavailable", "unavailable", ["friendly_name": .string("Away")])
@@ -223,10 +237,17 @@ struct TileGallery: View {
         set("media_player.idle", "idle", ["friendly_name": .string("TV")])
         set("media_player.unavailable", "unavailable", ["friendly_name": .string("Radio")])
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
+            // Tiers spelled out rather than left to `tier(of:)`'s `.primary` fallback: a sensor is
+            // `.secondary` in a real home (see `EntityCuration`), and with everything `.primary` the
+            // dashboard would already be showing it all — leaving the add-a-device picker with
+            // nothing to offer, which is exactly what the first render of this page showed.
             ResolvedArea(id: "lounge", name: "Lounge",
                          entityIds: ["sensor.lounge_temp", "sensor.lounge_temp_window",
-                                     "sensor.lounge_hum"],
-                         tiers: [:]),
+                                     "sensor.lounge_hum", "sensor.lounge_hum_2"],
+                         tiers: ["sensor.lounge_temp": .secondary,
+                                 "sensor.lounge_temp_window": .secondary,
+                                 "sensor.lounge_hum": .secondary,
+                                 "sensor.lounge_hum_2": .secondary]),
             ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
         ])])
         store.resolveEnvironment()
@@ -251,5 +272,11 @@ struct TileGallery: View {
 /// The configuration sheets, which have no other verification.
 #Preview("Tiles 4 — configuration") {
     TileGallery(page: .fourth)
+}
+
+/// Its own page: page four was already two full sheets, and a page that overflows has stopped being
+/// a baseline — the same reason climate's eight fixtures forced a third.
+#Preview("Tiles 5 — add a device") {
+    TileGallery(page: .fifth)
 }
 #endif

@@ -162,6 +162,34 @@ final class HomeStore {
                             entityId: entityId)
     }
 
+    /// Takes a device off a Haven surface, puts one on it, or clears the decision so curation
+    /// decides again.
+    ///
+    /// Never touches Home Assistant: this is Haven's own layer, and the entity is exactly as it was
+    /// in HA afterwards — see `SurfaceMembership`.
+    func setMembership(_ entityId: String, on surface: HavenSurface,
+                       to membership: SurfaceMembership?) async -> HavenConfig.Outcome {
+        await config.update { $0.settingMembership(membership, for: entityId, on: surface) }
+    }
+
+    /// What the `+` on `surface` offers: every entity in the room that surface is not currently
+    /// showing.
+    ///
+    /// Entities Home Assistant hid are absent, and that is a deliberate ceiling rather than an
+    /// oversight — `SurfaceMembership.shows` refuses to show them at all, so offering one would mean
+    /// offering a tap that does nothing. A user who wants such a device on their dashboard un-hides
+    /// it where they hid it.
+    ///
+    /// Ordered by entity id so the sheet does not reshuffle between openings.
+    func addableEntityIds(in room: RoomSection, on surface: HavenSurface) -> [String] {
+        let showing = Set(room.refs(for: surface).map(\.id))
+        return room.deviceRefs.compactMap { ref -> String? in
+            guard case .entity(let id) = ref, !showing.contains(id),
+                  room.tier(of: id) != .hidden else { return nil }
+            return id
+        }.sorted()
+    }
+
     /// Sets or clears Haven's own name for a device. Never renames the entity in Home Assistant —
     /// HA stays the source of truth for structure, and this is Haven's layer on top.
     func rename(_ entityId: String, to name: String?) async -> HavenConfig.Outcome {
@@ -493,17 +521,27 @@ final class HomeStore {
 
     // MARK: - Room roll-ups + bulk actions
 
-    func rooms() -> [RoomSection] { SectionBuilder.rooms(from: home, environment: environment) }
+    /// The rooms as rendered: Home Assistant's structure, Haven's sensor nominations, and the
+    /// household's per-surface decisions about which devices each surface shows.
+    func rooms() -> [RoomSection] {
+        SectionBuilder.rooms(from: home, environment: environment,
+                             overrides: config.document.surfaceOverrides)
+    }
 
     /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.
-    /// Curated (`overviewRefs`) rather than raw, so "3/5 lights on · All Off" counts and acts
-    /// on exactly the tiles the user can see — a bulk action that silently reaches entities
-    /// curation hid would be worse than no bulk action.
+    ///
+    /// `refs(for: .overview)` rather than raw, so "3/5 lights on · All Off" counts and acts on
+    /// exactly the tiles the user can see — a bulk action that silently reaches entities curation
+    /// hid would be worse than no bulk action.
+    ///
+    /// That now covers the household's own removals as well as curation's, and it follows from the
+    /// same sentence rather than being a new rule: a tile a user took off the dashboard is one they
+    /// cannot see, so it drops out of the count and out of the action.
     /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
     /// anywhere yet, so they're skipped here. Once composites exist, this will need to
     /// expand each one into its constituent input entities instead of dropping it.
     private func deviceEntityIds(_ room: RoomSection) -> [String] {
-        room.overviewRefs.compactMap { ref in
+        room.refs(for: .overview).compactMap { ref in
             if case .entity(let id) = ref { return id }
             return nil
         }

@@ -211,3 +211,70 @@ private func json(_ text: String) -> JSONValue {
     let raw = JSONValue.object(["entities": .string("nonsense")])
     #expect(DashboardDocument(raw: raw).displayNames.isEmpty)
 }
+
+// MARK: - Surface membership
+
+@Test func aMembershipRoundTripsPerSurface() {
+    let doc = DashboardDocument()
+        .settingMembership(.hidden, for: "light.kitchen", on: .overview)
+        .settingMembership(.shown, for: "sensor.hum", on: .overview)
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.overview] == .hidden)
+    #expect(doc.surfaceOverrides["sensor.hum"]?[.overview] == .shown)
+    // Untouched surfaces stay absent, which is what "follow curation" is.
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.roomDetail] == nil)
+}
+
+/// The surfaces are independent, which is the whole decision this feature rests on: removing a
+/// device from the dashboard must say nothing about room detail.
+@Test func writingOneSurfaceLeavesTheOtherAlone() {
+    let doc = DashboardDocument()
+        .settingMembership(.hidden, for: "light.kitchen", on: .overview)
+        .settingMembership(.hidden, for: "light.kitchen", on: .roomDetail)
+        .settingMembership(nil, for: "light.kitchen", on: .overview)
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.overview] == nil)
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.roomDetail] == .hidden)
+}
+
+/// The property this type exists to defend, now across two subtrees of one entity: a name and a
+/// membership are written by different sheets and must not disturb each other, and neither may strip
+/// a key a newer build wrote.
+@Test func membershipAndNameAndUnknownKeysCoexist() {
+    let raw = JSONValue.object([
+        "entities": .object(["light.kitchen": .object([
+            "name": .string("Reading Lamp"),
+            "icon": .string("mdi:lamp"),
+            "surfaces": .object(["room_detail": .string("hidden")]),
+        ])]),
+    ])
+    let doc = DashboardDocument(raw: raw)
+        .settingMembership(.hidden, for: "light.kitchen", on: .overview)
+    #expect(doc.displayNames["light.kitchen"] == "Reading Lamp")
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.overview] == .hidden)
+    #expect(doc.surfaceOverrides["light.kitchen"]?[.roomDetail] == .hidden)
+    let entity = doc.raw.asObject?["entities"]?.asObject?["light.kitchen"]?.asObject
+    #expect(entity?["icon"]?.asString == "mdi:lamp")
+}
+
+/// Clearing the last membership removes `surfaces`, and clearing the last key removes the entity —
+/// so a document that has been edited and un-edited ends where it started rather than carrying a
+/// shell per device anyone ever opened.
+@Test func clearingTheLastMembershipLeavesNoResidue() {
+    let doc = DashboardDocument()
+        .settingMembership(.hidden, for: "light.kitchen", on: .overview)
+        .settingMembership(nil, for: "light.kitchen", on: .overview)
+    #expect(doc.surfaceOverrides.isEmpty)
+    #expect(doc.raw.asObject?["entities"] == nil)
+}
+
+@Test func aMalformedOrUnknownMembershipIsIgnoredNotFatal() {
+    let raw = JSONValue.object([
+        "entities": .object([
+            "light.a": .object(["surfaces": .string("nonsense")]),
+            "light.b": .object(["surfaces": .object(["overview": .string("sideways")])]),
+            "light.c": .object(["surfaces": .object(["kitchen_wall": .string("hidden")])]),
+        ]),
+    ])
+    // An unreadable value, an unknown membership and an unknown surface all drop out rather than
+    // taking the document with them — a build that adds a third surface must not brick this one.
+    #expect(DashboardDocument(raw: raw).surfaceOverrides.isEmpty)
+}

@@ -131,7 +131,7 @@ private func ent(_ id: String, area: String? = nil, device: String? = nil, disab
     let home = RegistryResolver.resolve(floors: [], areas: areas, devices: devices, entities: entities)
     let porch = home.floors.flatMap { $0.areas }.first { $0.id == "porch" }!
 
-    // `.primary` is exactly what the overview grid renders (`RoomSection.overviewRefs`).
+    // `.primary` is exactly what the overview grid renders (`RoomSection.refs(for: .overview)`).
     let onTheGrid = porch.entityIds.filter { porch.tier(of: $0) == .primary }
     #expect(onTheGrid == ["camera.front_doorbell"],
             "the grid should show the doorbell and nothing else, got \(onTheGrid)")
