@@ -102,19 +102,21 @@ struct CameraTile: View {
     // MARK: - 2×2
 
     private func square(_ s: CameraState?, name: String) -> some View {
-        // Two tile rows plus the grid's own row spacing, matching the 4×2 media tile so a camera
-        // and a media player line up when both sit under the same room heading.
-        let height: CGFloat = 141
-        return VStack(spacing: 0) {
+        // **No height of its own.** This used to hard-code 141 — "two tile rows plus the grid's own
+        // row spacing" — which assumed a 66pt row, `GlassTile`'s *floor*. Real 1×1 tiles render
+        // nearer 82, so that number was quietly making a camera shorter than the two rows it claims
+        // to occupy. `RoomGrid` measures the row and hands this tile a 2×2 cell; the still takes
+        // whatever is left after the caption.
+        VStack(spacing: 0) {
             still(s)
                 .frame(maxWidth: .infinity)
-                .frame(height: height - captionHeight)
+                .frame(maxHeight: .infinity)
                 .clipped()
                 .overlay(alignment: .bottomTrailing) { ageStamp(s) }
             caption(name: name)
                 .frame(height: captionHeight)
         }
-        .frame(height: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.regularMaterial)
