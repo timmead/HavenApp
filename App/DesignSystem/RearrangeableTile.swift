@@ -86,7 +86,15 @@ struct RearrangeableTile: ViewModifier {
                     drag.dragging = entityId
                     return NSItemProvider(object: entityId as NSString)
                 } preview: {
-                    TileDragPreview(entityId: entityId)
+                    // **Everything it draws is passed in, and that is not a style choice.** A drag
+                    // preview is hosted by the drag session, *outside* this view hierarchy, so it
+                    // inherits none of the environment — and a missing `@Observable` environment
+                    // object is a `fatalError`, not a nil. Reading the store in here crashed the app
+                    // the instant a tile was lifted.
+                    TileDragPreview(title: store.displayName(of: entityId),
+                                    symbol: IconMap.symbol(domain: Domain.of(entityId),
+                                                           deviceClass: store.state(entityId)?.deviceClass),
+                                    accent: HavenColor.domain(Domain.of(entityId)))
                 }
                 .onDrop(of: [.text], delegate: TileDropDelegate(
                     target: entityId, isEnd: false, room: room, visibleIds: visibleIds,
@@ -148,19 +156,23 @@ struct TileDropDelegate: DropDelegate {
 /// snapshot of the view *and its backing*, which arrives as an opaque square around a rounded tile —
 /// the shape mismatch that made the first version look broken. A view supplied here is drawn as
 /// given, so what lifts is a rounded chip and nothing behind it.
+///
+/// **It takes plain values and reads no environment**, because a preview is hosted by the drag
+/// session rather than by the view that started the drag: it has no ancestors, so it inherits no
+/// environment, and `@Environment(HomeStore.self)` in here is a `fatalError` the moment a tile is
+/// lifted. Anything it needs is resolved by the caller, which does have the environment.
 private struct TileDragPreview: View {
-    let entityId: String
-    @Environment(HomeStore.self) private var store
+    let title: String
+    let symbol: String
+    let accent: Color
 
     var body: some View {
-        let e = store.state(entityId)
-        let accent = HavenColor.domain(Domain.of(entityId))
         HStack(spacing: 7) {
-            Image(systemName: IconMap.symbol(domain: Domain.of(entityId), deviceClass: e?.deviceClass))
+            Image(systemName: symbol)
                 .font(.system(size: 15))
                 .foregroundStyle(accent)
                 .symbolRenderingMode(.hierarchical)
-            Text(store.displayName(of: entityId))
+            Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
         }
@@ -173,4 +185,17 @@ private struct TileDragPreview: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
+}
+
+/// **Deliberately injects no environment.** That is the whole point: this renders `TileDragPreview`
+/// under the same conditions the drag session does — no ancestors, nothing in the environment — so if
+/// an `@Environment` read is ever added back to the chip, this render fails here rather than crashing
+/// the app in somebody's hand the moment they lift a tile. Which is how it was found the first time.
+#Preview("Tile drag preview — no environment") {
+    VStack(spacing: 16) {
+        TileDragPreview(title: "Bedside Lamp", symbol: "lamp.table.fill", accent: HavenColor.domain(.light))
+        TileDragPreview(title: "Hallway", symbol: "thermometer.medium", accent: HavenColor.domain(.climate))
+        TileDragPreview(title: "Front Door Camera", symbol: "video.fill", accent: HavenColor.domain(.camera))
+    }
+    .padding(24)
 }
