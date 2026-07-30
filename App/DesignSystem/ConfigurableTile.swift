@@ -1,4 +1,5 @@
 import SwiftUI
+import HavenCore
 
 /// Makes a tile a **configuration target** while the dashboard is being edited, and inert
 /// underneath.
@@ -19,10 +20,18 @@ import SwiftUI
 /// pretending to be broken.
 struct ConfigurableTile: ViewModifier {
     let entityId: String
+    /// Which surface this tile is on, so its configuration sheet knows what "remove" removes it
+    /// from. **No default**: the two surfaces are the whole point of tile membership, and a default
+    /// would let a new call site silently claim to be the dashboard.
+    let surface: HavenSurface
     @Environment(Navigation.self) private var navigation
 
     func body(content: Content) -> some View {
         content
+            // Published so the tile's *own* gestures — a long press, an accessibility action — can
+            // route to the same surface without eleven renderers each taking a parameter for it.
+            // See `EnvironmentValues.havenSurface`.
+            .environment(\.havenSurface, surface)
             .allowsHitTesting(!navigation.isConfiguring)
             .overlay {
                 if navigation.isConfiguring {
@@ -32,7 +41,7 @@ struct ConfigurableTile: ViewModifier {
                     Rectangle()
                         .fill(.clear)
                         .contentShape(Rectangle())
-                        .onTapGesture { navigation.open(entityId) }
+                        .onTapGesture { navigation.open(entityId, on: surface) }
                         .accessibilityElement()
                         .accessibilityLabel("Configure")
                         .accessibilityAddTraits(.isButton)
@@ -45,7 +54,7 @@ extension View {
     /// See `ConfigurableTile`. Applied where tiles are *constructed* — `DeviceTileView` for the
     /// grid, and the two surfaces that build wide media and camera tiles directly — rather than
     /// inside each renderer, so there is one list of places to keep right.
-    func configurable(entityId: String) -> some View {
-        modifier(ConfigurableTile(entityId: entityId))
+    func configurable(entityId: String, on surface: HavenSurface) -> some View {
+        modifier(ConfigurableTile(entityId: entityId, surface: surface))
     }
 }

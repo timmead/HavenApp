@@ -107,7 +107,7 @@ struct TileGallery: View {
     private func ids(_ domain: String, _ cases: [String]) -> some View {
         LazyVGrid(columns: Self.columns, spacing: 10) {
             ForEach(cases, id: \.self) { name in
-                DeviceTileView(entityId: "\(domain).\(name)")
+                DeviceTileView(entityId: "\(domain).\(name)", surface: .overview)
             }
         }
     }
@@ -116,7 +116,7 @@ struct TileGallery: View {
     private var climateRow: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
             ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
-                DeviceTileView(entityId: "climate.\(name)")
+                DeviceTileView(entityId: "climate.\(name)", surface: .overview)
             }
         }
     }

@@ -22,6 +22,9 @@ struct MediaPlayerTile: View {
     var size: MediaTileSize = .small
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
+    /// configuration mode removes it from.
+    @Environment(\.havenSurface) private var surface
     /// Non-nil only while dragging the volume slider — the preview the drag moves, so no command
     /// goes out until the finger lifts. Exactly `MediaPlayerModal.dragVolume`.
     @State private var dragVolume: Double?
@@ -38,13 +41,13 @@ struct MediaPlayerTile: View {
             case .large: large(s, name: name, deviceClass: e?.deviceClass)
             }
         }
-        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
+        .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         // `.contain`, not `.combine`: these tiles hold real buttons, and combining would fold them
         // into a single label a VoiceOver user could read but not operate. The label below is the
         // container's, spoken on entry, and each button keeps its own.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.mediaPlayer(name, $0) } ?? name)
-        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
     }
 
     // MARK: - 1×1
@@ -92,7 +95,7 @@ struct MediaPlayerTile: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .onTapGesture { navigation.open(entityId) }
+                    .onTapGesture { navigation.open(entityId, on: surface) }
                     playPauseButton(s, size: 22)
                     if s?.features.contains(.nextTrack) ?? false {
                         transportButton("forward.end.fill", label: "Next track", size: 15) {
@@ -141,7 +144,7 @@ struct MediaPlayerTile: View {
                 .clipped()
                 .overlay(alignment: .bottom) { transportScrim(s) }
                 .contentShape(Rectangle())
-                .onTapGesture { navigation.open(entityId) }
+                .onTapGesture { navigation.open(entityId, on: surface) }
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s?.title ?? name)
@@ -157,7 +160,7 @@ struct MediaPlayerTile: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .onTapGesture { navigation.open(entityId) }
+                .onTapGesture { navigation.open(entityId, on: surface) }
                 Spacer(minLength: 0)
                 volumeRow(s)
             }

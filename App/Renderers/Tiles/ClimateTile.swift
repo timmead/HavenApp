@@ -4,6 +4,9 @@ struct ClimateTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
+    /// configuration mode removes it from.
+    @Environment(\.havenSurface) private var surface
     var body: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let on = s?.isOn ?? false
@@ -114,7 +117,7 @@ struct ClimateTile: View {
                 }
             }
         }
-        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
+        .contentShape(Rectangle()).onTapGesture { navigation.open(entityId, on: surface) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         // `.contain`, not `.combine`: this tile now holds a real button, and combining would fold
         // it into a single label a VoiceOver user could read but not operate — the same reason
         // `MediaPlayerTile` uses `.contain`. The label below is the container's, spoken on entry;
@@ -122,7 +125,7 @@ struct ClimateTile: View {
         // so is invisible to VoiceOver either way — becomes a named action.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.climate(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
-        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
     }
 
     /// One degree down or up, without opening the sheet.

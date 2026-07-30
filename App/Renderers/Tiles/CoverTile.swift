@@ -4,6 +4,9 @@ struct CoverTile: View {
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+    /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
+    /// configuration mode removes it from.
+    @Environment(\.havenSurface) private var surface
     var body: some View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
@@ -35,10 +38,10 @@ struct CoverTile: View {
                 }
             }
         }
-        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId) }
+        .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.map { AccessibilitySummary.cover(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open controls") { navigation.open(entityId) }
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
     }
 }
