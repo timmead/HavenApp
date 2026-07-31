@@ -8,7 +8,20 @@ import HavenCore
 /// visible: an override shadows HA permanently, so renaming the entity in Home Assistant afterwards
 /// will not show up here. Hence the line naming what HA calls the device, and the reset beside it.
 ///
-/// Sub-project 3 adds removal to this sheet; sub-project 6 adds which entities feed a tile.
+/// **Nothing here writes until the sheet closes.** Every control edits a draft and `commit()` is the
+/// only write, which is what lets one sheet hold several settings without a Save button per section
+/// — and what keeps a multi-setting edit to a single write, so the shared document's version moves
+/// once rather than once per control.
+///
+/// Two asymmetries follow from that, both deliberate:
+///
+/// - **Done waits and can report a failure; a swipe cannot.** A dismissed sheet has nowhere to put an
+///   error, so a swipe commits fire-and-forget. Discarding a typed name instead was the alternative,
+///   and silent loss with no Cancel on screen to warn of it is the worse of the two.
+/// - **Remove discards pending edits**, because the tile is leaving this surface and a name written
+///   on its way out is work nobody asked for.
+///
+/// Sub-project 6 adds which entities feed a tile.
 struct TileConfigView: View {
     let entityId: String
     /// Which surface this was opened from — what "remove" removes it from. See `HavenSurface`.
@@ -19,6 +32,8 @@ struct TileConfigView: View {
     /// straight through to the store, which would write on every keystroke.
     @State private var draft: String = ""
     @State private var failure: String?
+    /// True once this sheet has written, so a dismissal cannot write a second time.
+    @State private var committed = false
 
     private var storedOverride: String? { store.config.document.displayNames[entityId] }
 
@@ -31,13 +46,15 @@ struct TileConfigView: View {
                         title: store.displayName(of: entityId),
                         subtitle: entityId,
                         accent: HavenColor.domain(Domain.of(entityId)), unavailable: false,
-                        accessory: AnyView(ModalDoneButton { dismiss() }))
+                        accessory: AnyView(ModalDoneButton {
+                            Task { if await commit() { dismiss() } }
+                        }))
             FacetCard(title: "Name") {
                 VStack(alignment: .leading, spacing: 9) {
                     TextField("Name", text: $draft)
                         .textFieldStyle(.roundedBorder)
                         .submitLabel(.done)
-                        .onSubmit { Task { await write(draft) } }
+                        .onSubmit { Task { if await commit() { dismiss() } } }
                     // What Home Assistant calls it, so an override reads as an override rather than
                     // as a mystery — and so the user can see what a reset would give them back.
                     Text(haName.map { "Home Assistant calls this “\($0)”" }
@@ -46,15 +63,13 @@ struct TileConfigView: View {
                     if let failure {
                         Text(failure).font(.system(size: 12)).foregroundStyle(HavenColor.warning)
                     }
-                    HStack {
-                        if storedOverride != nil {
-                            Button("Reset to Home Assistant's name") { Task { await write(nil) } }
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        Spacer(minLength: 8)
-                        Button("Save") { Task { await write(draft) } }
-                            .font(.system(size: 13, weight: .bold))
-                            .disabled(!hasChanges)
+                    // **Reset clears the field rather than writing.** An empty draft *is* "no
+                    // override" — see `DisplayName.override(from:)` — so reset and commit are one
+                    // mechanism instead of two paths to the same outcome, and resetting can be
+                    // reconsidered before Done like every other edit on this sheet.
+                    if storedOverride != nil {
+                        Button("Reset to Home Assistant's name") { draft = "" }
+                            .font(.system(size: 12, weight: .semibold))
                     }
                 }
             }
@@ -87,6 +102,16 @@ struct TileConfigView: View {
         // name would turn every "let me look at this device" into a rename the moment the user hit
         // Save, and the household would fill up with overrides nobody chose.
         .onAppear { draft = storedOverride ?? "" }
+        // **Swiping the sheet away commits too**, because there is no Cancel here and discarding a
+        // typed name without warning is worse than a write the user cannot watch. Fire-and-forget by
+        // necessity: a sheet that has gone has nowhere to put an error. Done is the path that waits
+        // and can tell you.
+        .onDisappear {
+            guard !committed, hasChanges else { return }
+            let name = DisplayName.override(from: draft)
+            committed = true
+            Task { _ = await store.rename(entityId, to: name) }
+        }
     }
 
     /// **"Remove", never "Delete".** It takes a tile off one Haven surface; Haven deletes nothing in
@@ -109,27 +134,44 @@ struct TileConfigView: View {
     /// confirmation on a reversible action is how people learn to dismiss confirmations unread.
     private func remove() async {
         switch await store.setMembership(entityId, on: surface, to: .hidden) {
-        case .written, .unchanged: dismiss()
+        // Removing discards whatever was typed: the tile is leaving this surface, and writing a name
+        // for it on the way out is work nobody asked for.
+        case .written, .unchanged: committed = true; dismiss()
         case .notAuthorized: failure = "Only Home Assistant admins can change the household dashboard."
         case .failed: failure = "Couldn't save that. Check your connection and try again."
         }
     }
 
-    /// Whether Save would change anything. Compared against the stored override rather than against
-    /// the resolved name, and trimmed, so re-typing the same name with a stray space is not an edit.
+    /// Whether committing would change anything. Compared against the stored override rather than
+    /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
+    /// an edit — and so a sheet merely opened and closed writes nothing at all.
     private var hasChanges: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines) != (storedOverride ?? "")
+        DisplayName.override(from: draft) != storedOverride
     }
 
-    private func write(_ name: String?) async {
-        switch await store.rename(entityId, to: name) {
+    /// The one write this sheet performs. Returns whether the sheet may close.
+    ///
+    /// **Exactly once per sheet, whichever way it closes.** Done and a swipe both end in
+    /// `onDisappear`, so without `committed` a tap on Done would write, dismiss, and write again.
+    ///
+    /// Plan 4 widens this to carry the chosen size. It is a single function for that reason: the
+    /// sheet gains a control, not a second write path.
+    private func commit() async -> Bool {
+        guard !committed else { return true }
+        guard hasChanges else { committed = true; return true }
+        committed = true
+        switch await store.rename(entityId, to: DisplayName.override(from: draft)) {
         case .written, .unchanged:
-            dismiss()
+            return true
         case .notAuthorized:
             failure = "Only Home Assistant admins can change the household dashboard."
         case .failed:
             failure = "Couldn't save that. Check your connection and try again."
         }
+        // A failed write leaves the sheet open holding the edit, so the next Done can try again —
+        // and leaves `committed` false so that it actually does.
+        committed = false
+        return false
     }
 }
 
