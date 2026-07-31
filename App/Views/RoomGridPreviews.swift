@@ -112,10 +112,15 @@ private struct RoomGridPreviews: View {
 /// **Mid-drag**, which no gesture in a preview can produce: `light.b1` has been lifted — its slot
 /// left behind as a dashed hole rather than closing up — and the caret on `light.b3`'s leading edge
 /// marks the seam it would drop into.
+///
+/// `entered()` is what a drop delegate calls when the finger arrives over a tile, and seeding it is
+/// not ceremony: the slot and the caret are drawn only while a drag is demonstrably live, so a state
+/// that merely names a dragged tile now — correctly — renders nothing at all.
 #Preview("Room grid — mid-drag") {
     let drag = TileDragState()
     drag.dragging = "light.b1"
     drag.target = "light.b3"
+    drag.entered()
     return RoomGridPreviews(only: ["gap"], configuring: true, drag: drag)
 }
 

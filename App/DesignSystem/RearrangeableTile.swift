@@ -8,39 +8,79 @@ import HavenCore
 /// different tile is the target, and both have to draw differently at the same moment.
 @MainActor @Observable
 final class TileDragState {
-    /// The entity being dragged, or nil. Its own tile draws as an empty slot while this holds.
+    /// The entity being dragged, or nil.
+    ///
+    /// **Not sufficient on its own to say a tile is lifted** — see `isOver`.
     var dragging: String?
     /// The entity the dragged tile would be inserted *before*, or nil for "after everything".
     var target: String?
     /// True once the drag has entered the trailing drop zone rather than a tile.
     var targetIsEnd = false
 
+    /// Whether the finger is demonstrably over a drop target *right now*.
+    ///
+    /// **This is what stops the vacated slot reappearing after a drag finishes.** `dragging` is set
+    /// from `onDrag`'s item-provider closure, and SwiftUI calls that closure more than once and at
+    /// moments of its own choosing — including during the re-render that follows a completed drop,
+    /// which silently re-marked a tile as lifted with no drag in progress at all.
+    ///
+    /// iOS offers no drag-ended callback to correct that with (`onDragSessionUpdated` is macOS-only),
+    /// so the drawing is gated on a signal that can only be true during a real drag: the drop
+    /// delegates, which fire as the finger moves and cannot fire when there is no finger. A stale
+    /// closure call still sets `dragging`, and now nothing is drawn from it.
+    private(set) var isOver = false
+
+    /// Bumped on every entry, so a clear scheduled by one tile can tell it has been superseded.
+    private var generation = 0
+
+    func entered() {
+        generation &+= 1
+        isOver = true
+    }
+
+    /// Ends the drag — but **on the next turn of the main actor**, not immediately.
+    ///
+    /// The gaps between tiles are 9pt, and crossing one means leaving a target before entering the
+    /// next. Clearing synchronously would blink the slot and the caret out on every crossing. A hop
+    /// gives the neighbouring tile's `dropEntered` the chance to land first, and `generation` is how
+    /// this call learns it happened.
+    func endAfterHandoff() {
+        let scheduled = generation
+        Task { @MainActor in
+            guard scheduled == self.generation else { return }
+            self.clear()
+        }
+    }
+
     func clear() {
         dragging = nil
         target = nil
         targetIsEnd = false
+        isOver = false
+        generation &+= 1
     }
 }
 
 /// Makes a tile draggable, and a drop target, while the dashboard is being arranged.
 ///
-/// **System drag and drop, but through `onDrag`/`DropDelegate` rather than
-/// `.draggable`/`.dropDestination`.** The arbitration is what matters and both give it: the dashboard
-/// is a horizontally-paging scroll view containing a vertical scroll, and this codebase has been
-/// bitten twice by hand-rolled pan logic, so letting the system decide whether a pan is a scroll or a
-/// lift is the whole reason not to write a `DragGesture`.
+/// **System drag and drop.** The arbitration is the reason: the dashboard is a horizontally-paging
+/// scroll view containing a vertical scroll, and this codebase has been bitten twice by hand-rolled
+/// pan logic, so letting the system decide whether a pan is a scroll or a lift is the whole reason
+/// not to write a `DragGesture`.
 ///
-/// The higher-level pair could not express three things, and the first version shipped all three
-/// wrong:
+/// It is assembled from three pieces, each of which replaced something that went wrong on a device:
 ///
-/// - **The operation.** `.dropDestination` proposes a *copy*, so the system drew a green plus badge
-///   on a tile that was being moved — alarming on a dashboard, where nothing is being duplicated.
-///   `DropDelegate.dropUpdated` returning `.move` is the only way to say what is really happening.
-/// - **The preview.** `.draggable` lifts the view together with its backing, which arrives as an
-///   opaque square around a rounded tile. `onDrag(preview:)` takes a view, so what lifts can be the
-///   tile's own shape and nothing behind it.
-/// - **Where it would land.** Neither offers a hook mid-drag; a delegate's `dropEntered` does, and
-///   that is what draws the caret.
+/// - **`onDrag` for the source**, because `.draggable` cannot say what the preview's *shape* is, and
+///   a rectangular snapshot of a rounded tile is the "bigger square with a white background" this
+///   started as. `.contentShape(.dragPreview, ...)` is the fix, and the preview itself stays the
+///   default — a rendering of this view — so what lifts is the tile that was in the slot.
+/// - **`TileDropDelegate` for the destination**, whose `dropUpdated` is where a move stops being
+///   advertised as a copy, and whose `dropEntered` is the only hook that fires mid-drag, and so the
+///   only thing that can draw the caret or tell that a drag is still live.
+/// - **`TileDragState.isOver` to decide what is drawn**, because iOS has no drag-ended callback at
+///   all — `onDragSessionUpdated` and `dragConfiguration` are macOS-only, whatever the documentation
+///   implies by not saying so. What a real drag *does* give is a stream of drop-delegate calls, and
+///   that is what the drawing is gated on.
 ///
 /// A lifted tile leaves its slot behind as an empty outline rather than the grid closing the gap.
 /// The grid deliberately does not reflow under the finger — that was the accepted cost of not
@@ -55,7 +95,9 @@ struct RearrangeableTile: ViewModifier {
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
 
-    private var isLifted: Bool { drag.dragging == entityId }
+    // Both halves matter: `dragging` alone can be a leftover from a stale `onDrag` call. See
+    // `TileDragState.isOver`.
+    private var isLifted: Bool { drag.dragging == entityId && drag.isOver }
     private var isTarget: Bool { drag.target == entityId && drag.dragging != entityId }
 
     func body(content: Content) -> some View {
@@ -92,19 +134,16 @@ struct RearrangeableTile: ViewModifier {
                     }
                 }
                 .animation(.easeOut(duration: 0.12), value: isTarget)
+                // **No custom preview: what lifts is this tile.** The default preview is a rendering
+                // of the view itself, and in configuration mode that view is already the placeholder
+                // — so the thing under the finger is the thing that was in the slot, which is the
+                // whole ask. The first attempt supplied a substitute chip, which fixed the wrong
+                // problem: the original complaint was that the dragged item was "a bigger square with
+                // a white background", and that was its *bounds*, not its backing.
+                .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .onDrag {
                     drag.dragging = entityId
                     return NSItemProvider(object: entityId as NSString)
-                } preview: {
-                    // **Everything it draws is passed in, and that is not a style choice.** A drag
-                    // preview is hosted by the drag session, *outside* this view hierarchy, so it
-                    // inherits none of the environment — and a missing `@Observable` environment
-                    // object is a `fatalError`, not a nil. Reading the store in here crashed the app
-                    // the instant a tile was lifted.
-                    TileDragPreview(title: store.displayName(of: entityId),
-                                    symbol: IconMap.symbol(domain: Domain.of(entityId),
-                                                           deviceClass: store.state(entityId)?.deviceClass),
-                                    accent: HavenColor.domain(Domain.of(entityId)))
                 }
                 .onDrop(of: [.text], delegate: TileDropDelegate(
                     target: entityId, isEnd: false, room: room, visibleIds: visibleIds,
@@ -137,15 +176,16 @@ struct TileDropDelegate: DropDelegate {
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
 
     func dropEntered(info: DropInfo) {
+        drag.entered()
         drag.target = isEnd ? nil : target
         drag.targetIsEnd = isEnd
     }
 
+    /// Only the tile the drag is *currently* over may end it — otherwise a handoff between two tiles
+    /// would let the one being left cancel the one being entered.
     func dropExited(info: DropInfo) {
-        if isEnd ? drag.targetIsEnd : drag.target == target {
-            drag.target = nil
-            drag.targetIsEnd = false
-        }
+        guard isEnd ? drag.targetIsEnd : drag.target == target else { return }
+        drag.endAfterHandoff()
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -160,52 +200,6 @@ struct TileDropDelegate: DropDelegate {
     }
 }
 
-/// What the finger carries: the tile's icon and name, on the tile's own shape.
-///
-/// Deliberately small and flat rather than a copy of the tile. `onDrag`'s default preview is a
-/// snapshot of the view *and its backing*, which arrives as an opaque square around a rounded tile —
-/// the shape mismatch that made the first version look broken. A view supplied here is drawn as
-/// given, so what lifts is a rounded chip and nothing behind it.
-///
-/// **It takes plain values and reads no environment**, because a preview is hosted by the drag
-/// session rather than by the view that started the drag: it has no ancestors, so it inherits no
-/// environment, and `@Environment(HomeStore.self)` in here is a `fatalError` the moment a tile is
-/// lifted. Anything it needs is resolved by the caller, which does have the environment.
-private struct TileDragPreview: View {
-    let title: String
-    let symbol: String
-    let accent: Color
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(accent)
-                .symbolRenderingMode(.hierarchical)
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.background))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(accent.opacity(0.5), lineWidth: 1.5)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-/// **Deliberately injects no environment.** That is the whole point: this renders `TileDragPreview`
-/// under the same conditions the drag session does — no ancestors, nothing in the environment — so if
-/// an `@Environment` read is ever added back to the chip, this render fails here rather than crashing
-/// the app in somebody's hand the moment they lift a tile. Which is how it was found the first time.
-#Preview("Tile drag preview — no environment") {
-    VStack(spacing: 16) {
-        TileDragPreview(title: "Bedside Lamp", symbol: "lamp.table.fill", accent: HavenColor.domain(.light))
-        TileDragPreview(title: "Hallway", symbol: "thermometer.medium", accent: HavenColor.domain(.climate))
-        TileDragPreview(title: "Front Door Camera", symbol: "video.fill", accent: HavenColor.domain(.camera))
-    }
-    .padding(24)
-}
+/// The chip that used to be carried by the finger is gone, and so is the preview that guarded it.
+/// A tile now drags as itself — see `.contentShape(.dragPreview, ...)` above — which is both what was
+/// asked for and one fewer view hosted outside the hierarchy with nothing in its environment.
