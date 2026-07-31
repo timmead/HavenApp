@@ -68,6 +68,7 @@ struct TileGallery: View {
                     section("Binary sensor") { ids("binary_sensor", ["active", "clear", "unavailable"]) }
                     section("Generic") { ids("generic", ["idle", "unavailable"]) }
                     section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
+                    sensorWide
                     mediaWide
                 case .fourth:
                     section("Room configuration — candidates, and none") {
@@ -128,6 +129,22 @@ struct TileGallery: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
             ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
                 DeviceTileView(entityId: "climate.\(name)", surface: .overview)
+            }
+        }
+    }
+
+    /// The 2×1 sensor, in the three states that decide whether it draws a line at all.
+    ///
+    /// **The empty and flat cases are the point.** A sparkline with nothing behind it must render as
+    /// a plain reading rather than as an axis-less chart of one point, and that is invisible in the
+    /// happy case — which is exactly the kind of thing this gallery exists to make visible.
+    private var sensorWide: some View {
+        section("Sensor — 2×1") {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
+                SensorTile(entityId: "sensor.value", size: .wide)
+                SensorTile(entityId: "sensor.spiky", size: .wide)
+                SensorTile(entityId: "sensor.nohistory", size: .wide)
+                SensorTile(entityId: "sensor.text", size: .wide)
             }
         }
     }
@@ -213,6 +230,15 @@ struct TileGallery: View {
         set("scene.idle", "scening", ["friendly_name": .string("Movie")])
         set("scene.unavailable", "unavailable", ["friendly_name": .string("Away")])
 
+        set("sensor.spiky", "63", ["friendly_name": .string("Power"),
+                                   "device_class": .string("power"),
+                                   "unit_of_measurement": .string("W")])
+        set("sensor.nohistory", "18.2", ["friendly_name": .string("Shed"),
+                                         "device_class": .string("temperature"),
+                                         "unit_of_measurement": .string("°C")])
+        // A sensor whose state is a word. It is offered the 2×1 like every other sensor — the option
+        // set is a fact about the device type, not about today's reading — and it simply has no line.
+        set("sensor.text", "Away", ["friendly_name": .string("Mode")])
         set("sensor.value", "21.4", ["friendly_name": .string("Temp"),
                                      "device_class": .string("temperature"),
                                      "unit_of_measurement": .string("°C")])
@@ -251,6 +277,19 @@ struct TileGallery: View {
             ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
         ])])
         store.resolveEnvironment()
+        // Seeded history, so the sparkline can be looked at without a server. A gentle curve and a
+        // spiky one, because the two are what the y-domain choice is about: a room that moved half a
+        // degree all day must still show its shape rather than a flat line against a zero baseline.
+        let origin = Date(timeIntervalSince1970: 0)
+        func seed(_ id: String, _ values: [Double]) {
+            let points = values.enumerated().map {
+                HistoryPoint(time: origin.addingTimeInterval(Double($0.offset) * 3600), value: $0.element)
+            }
+            store.historyCache.byKey[HomeStore.historyKey(id, .day, nil)] = (HistorySeries(points: points), origin)
+        }
+        seed("sensor.value", [20.8, 20.9, 21.2, 21.6, 21.4, 21.1, 20.9, 21.0, 21.3, 21.5, 21.4, 21.4])
+        seed("sensor.spiky", [4, 6, 5, 210, 180, 12, 8, 7, 240, 190, 15, 63])
+        // `sensor.nohistory` and `sensor.text` are deliberately left unseeded.
         return store
     }
 }

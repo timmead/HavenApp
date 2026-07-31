@@ -48,7 +48,7 @@ struct DeviceTileView: View {
         case .camera:
             CameraTile(entityId: entityId, size: CameraTileSize(span: span))
         case .scene, .script, .button: SceneTile(entityId: entityId)
-        case .sensor: SensorTile(entityId: entityId)
+        case .sensor: SensorTile(entityId: entityId, size: SensorTileSize(span: span))
         case .binarySensor: BinarySensorTile(entityId: entityId)
         case .unknown: GenericTile(entityId: entityId)
         }
