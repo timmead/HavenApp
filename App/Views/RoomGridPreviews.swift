@@ -83,9 +83,18 @@ private struct RoomGridPreviews: View {
              "hvac_modes": .array([.string("off"), .string("cool")])])
         set("media_player.d1", "playing", "Speaker", ["media_title": .string("A Song")])
         set("media_player.d2", "idle", "TV")
-        area("wide", "All 2-wide", ["climate.d", "media_player.d1", "media_player.d2"])
+        // A temperature and a humidity reading, so the room's environment chips exist — the block
+        // the edit control has to sit to the left of. Without them the toolbar renders one item and
+        // says nothing about ordering, which is the whole question.
+        set("sensor.d_temp", "21.4", "Temperature",
+            ["device_class": .string("temperature"), "unit_of_measurement": .string("°C")])
+        set("sensor.d_hum", "44", "Humidity",
+            ["device_class": .string("humidity"), "unit_of_measurement": .string("%")])
+        area("wide", "All 2-wide", ["climate.d", "media_player.d1", "media_player.d2",
+                                    "sensor.d_temp", "sensor.d_hum"])
 
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: areas)])
+        store.resolveEnvironment()
         return store
     }
 }
@@ -99,6 +108,11 @@ private struct RoomDetailPreviewHost: View {
     @State private var navigation = Navigation()
     @State private var app = AppModel()
     let areaId: String
+    /// Whether this household may configure. **Not incidental to the preview**: the edit control is
+    /// omitted rather than disabled for anyone who cannot write, so a fixture that does not say so
+    /// renders a toolbar with the control missing and looks exactly like the bug of it never having
+    /// been added.
+    var configurable = false
 
     var body: some View {
         NavigationStack {
@@ -109,7 +123,19 @@ private struct RoomDetailPreviewHost: View {
         .environment(store)
         .environment(navigation)
         .environment(app)
+        .onAppear {
+            if configurable {
+                store.config.setForTesting(isAdmin: true, isLoaded: true,
+                                           isWritable: true, isConnected: true)
+            }
+        }
     }
+}
+
+/// **The room-level edit control**, which is how a room gets arranged at all — and the only way to
+/// reach the devices curation keeps off the dashboard, since a demoted sensor lives nowhere else.
+#Preview("Room detail — configurable") {
+    RoomDetailPreviewHost(areaId: "wide", configurable: true)
 }
 
 /// A camera group at full width, with a light beside it in its own group — two spans, one builder.

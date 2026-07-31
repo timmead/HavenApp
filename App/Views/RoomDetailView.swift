@@ -81,7 +81,33 @@ struct RoomDetailView: View {
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            // **Configuration is reachable from a room, not only from the dashboard.** It was
+            // reachable only from the dashboard's menu, which made a room you had opened a screen
+            // you could look at and not arrange — and left the devices that live *only* here, the
+            // demoted sensors curation keeps off the overview, with no way to be configured at all.
+            //
+            // Two items with distinct ids rather than an `if` inside one, for the reason
+            // `DashboardView`'s toolbar records: one item holding both states gives them one
+            // identity, and SwiftUI does not reliably swap the control when the condition flips.
+            if navigation.isConfiguring {
+                ToolbarItem(id: "room-configuration-done", placement: .topBarTrailing) {
+                    Button("Done") { navigation.isConfiguring = false }
+                        .fontWeight(.semibold)
+                }
+            } else if store.config.canConfigure {
+                // Shown only to a confirmed admin with a document Haven can read and write — see
+                // `HavenConfig.canConfigure`. Omitted rather than disabled, this app's standing rule
+                // for a control that cannot act.
+                ToolbarItem(id: "room-configuration-enter", placement: .topBarTrailing) {
+                    Button {
+                        navigation.isConfiguring = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Edit room")
+                }
+            }
+            ToolbarItem(id: "room-environment", placement: .topBarTrailing) {
                 RoomEnvironmentChips(sensors: room.headerSensors) {
                     showingEnvironmentHistory = true
                 }
