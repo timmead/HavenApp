@@ -74,23 +74,11 @@ private struct TilePlaceholder: View {
             .fill(.background)
             .overlay {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .top, spacing: 0) {
-                        Image(systemName: IconMap.symbol(domain: Domain.of(entityId),
-                                                         deviceClass: e?.deviceClass))
-                            .font(.system(size: 20))
-                            .foregroundStyle(accent)
-                            .symbolRenderingMode(.hierarchical)
-                        Spacer(minLength: 0)
-                        // **A grip, because the gesture is not discoverable without one.** A tile is
-                        // dragged by pressing and holding — inside a scroll view `.draggable` cannot
-                        // lift on a quick pan, or every attempt to scroll would pick a tile up. That
-                        // is standard iOS, and it is also invisible: the first report from using this
-                        // was "I tap and drag and nothing happens". The glyph is the only thing on
-                        // the tile saying it can be moved at all.
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                    Image(systemName: IconMap.symbol(domain: Domain.of(entityId),
+                                                     deviceClass: e?.deviceClass))
+                        .font(.system(size: 20))
+                        .foregroundStyle(accent)
+                        .symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 2)
                     Text(store.displayName(of: entityId))
                         .font(.system(size: 10.5, weight: .semibold))
