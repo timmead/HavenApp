@@ -61,13 +61,23 @@ struct RearrangeableTile: ViewModifier {
     func body(content: Content) -> some View {
         if navigation.isConfiguring {
             content
-                // The tile in the air is not also on the grid.
-                .opacity(isLifted ? 0 : 1)
+                // The tile in the air is not also on the grid — but the slot is *covered*, not
+                // emptied with `.opacity(0)`.
+                //
+                // **Because the drag preview is a rendering of this same view.** Hiding the tile to
+                // vacate its slot and snapshotting it for the finger happen at the same moment, and
+                // nothing orders the two, so a lifted tile can be photographed blank. An opaque cover
+                // leaves `content` at full opacity throughout: whatever the system snapshots is the
+                // real tile, and the race stops existing rather than being won.
                 .overlay {
                     if isLifted {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(HavenColor.domain(.cover).opacity(0.35),
-                                          style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                            .fill(.background)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(HavenColor.domain(.cover).opacity(0.35),
+                                                  style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                            }
                     }
                 }
                 // The caret marks the seam the tile would arrive in. On the *leading* edge because a
