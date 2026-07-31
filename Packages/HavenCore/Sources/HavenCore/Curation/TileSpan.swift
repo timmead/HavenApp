@@ -26,31 +26,46 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         TileSpan(columns: Swift.min(self.columns, Swift.max(1, columns)), rows: rows)
     }
 
-    /// The size a domain's tile renders at.
+    /// The size a domain's tile renders at on a surface, before the household chooses otherwise.
     ///
-    /// Exactly what each renderer already draws, so adopting the grid changes where tiles go and
-    /// never how big they are.
+    /// Exactly what each renderer already draws on that surface, so adopting the grid changes where
+    /// tiles go and never how big they are.
     ///
-    /// A function of the domain rather than a stored table because user-chosen sizes — the product
-    /// definition's "default sizes are per-domain and user-overridable" — layer on top of it, the
-    /// way `SurfaceMembership` layers over `CurationTier`: this stays the answer when the user has
-    /// said nothing.
+    /// **The surface is a parameter because the two disagree, and always did.** A media player is
+    /// half a row on the dashboard and full-bleed in room detail; a camera is 2×2 there and 4×2
+    /// here. That was previously encoded by each surface constructing the renderer with a size by
+    /// hand, which is exactly the arrangement that lets the two facts drift apart.
+    ///
+    /// A function rather than a stored table because user-chosen sizes layer on top of it, the way
+    /// `SurfaceMembership` layers over `CurationTier`: this stays the answer when nobody has said
+    /// anything.
     ///
     /// The `switch` is exhaustive with no `default`, so a new `Domain` case fails to compile here
     /// rather than silently rendering as 1×1.
-    public static func `default`(for domain: Domain) -> TileSpan {
+    public static func `default`(for domain: Domain, on surface: HavenSurface) -> TileSpan {
         switch domain {
         case .light, .switchOutlet, .cover, .lock, .scene, .script, .button,
              .sensor, .binarySensor, .unknown:
             return TileSpan(columns: 1, rows: 1)
-        // Half a row: a target temperature and a mode, or a track title and a transport, are more
-        // than a quarter-width tile can say.
-        case .climate, .mediaPlayer:
+        // Half a row: a target temperature and a mode is more than a quarter-width tile can say.
+        case .climate:
             return TileSpan(columns: 2, rows: 1)
+        // **Room detail gives media the whole width.** The dashboard is a glance across a house and
+        // a track title with a transport is enough; a room you have opened is a room you are in, and
+        // there the artwork-and-volume rendering is what the design gives the space to.
+        case .mediaPlayer:
+            switch surface {
+            case .overview: return TileSpan(columns: 2, rows: 1)
+            case .roomDetail: return TileSpan(columns: 4, rows: 2)
+            }
         // A picture too small to recognise a person in is not a camera tile — see `CameraTileSize`,
-        // which refuses to render one below two columns at all.
+        // which refuses to render one below two columns at all. Room detail goes full-bleed for the
+        // same reason media does.
         case .camera:
-            return TileSpan(columns: 2, rows: 2)
+            switch surface {
+            case .overview: return TileSpan(columns: 2, rows: 2)
+            case .roomDetail: return TileSpan(columns: 4, rows: 2)
+            }
         }
     }
 }

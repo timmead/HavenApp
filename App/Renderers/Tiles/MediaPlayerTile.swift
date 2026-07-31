@@ -439,3 +439,15 @@ private struct ScrollingText: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
     }
 }
+
+extension MediaTileSize {
+    /// The rendering a span asks for. See `DeviceTileView.tile` — this is half of the one place
+    /// where a number of cells becomes a drawing.
+    init(span: TileSpan) {
+        switch (span.columns, span.rows) {
+        case (4, 2): self = .large
+        case (2, 1): self = .wide
+        default: self = .small
+        }
+    }
+}

@@ -68,17 +68,30 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
 /// Every domain, so the table cannot quietly lose a case. The sizes are exactly what each tile
 /// renders at today — this sub-project changes where tiles go, never how big they are.
 @Test func everyDomainHasTheSpanItsTileAlreadyRendersAt() {
-    #expect(TileSpan.default(for: .light) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .switchOutlet) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .cover) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .lock) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .scene) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .script) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .button) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .sensor) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .binarySensor) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .unknown) == TileSpan(columns: 1, rows: 1))
-    #expect(TileSpan.default(for: .climate) == TileSpan(columns: 2, rows: 1))
-    #expect(TileSpan.default(for: .mediaPlayer) == TileSpan(columns: 2, rows: 1))
-    #expect(TileSpan.default(for: .camera) == TileSpan(columns: 2, rows: 2))
+    #expect(TileSpan.default(for: .light, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .switchOutlet, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .cover, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .lock, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .scene, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .script, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .button, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .sensor, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .binarySensor, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .unknown, on: .overview) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .climate, on: .overview) == TileSpan(columns: 2, rows: 1))
+    #expect(TileSpan.default(for: .mediaPlayer, on: .overview) == TileSpan(columns: 2, rows: 1))
+    #expect(TileSpan.default(for: .camera, on: .overview) == TileSpan(columns: 2, rows: 2))
+}
+
+/// **The two surfaces disagree, and that is the point of the parameter.** Room detail is a room you
+/// have opened rather than a house you are glancing across, so media and cameras get the whole width
+/// there — which is exactly what both surfaces already drew by constructing renderers by hand.
+@Test func roomDetailGivesMediaAndCamerasTheWholeWidth() {
+    #expect(TileSpan.default(for: .mediaPlayer, on: .roomDetail) == TileSpan(columns: 4, rows: 2))
+    #expect(TileSpan.default(for: .camera, on: .roomDetail) == TileSpan(columns: 4, rows: 2))
+    // Everything else is the same on both, so a tile does not change shape by being looked at from
+    // a different screen without a reason.
+    #expect(TileSpan.default(for: .climate, on: .roomDetail) == TileSpan(columns: 2, rows: 1))
+    #expect(TileSpan.default(for: .light, on: .roomDetail) == TileSpan(columns: 1, rows: 1))
+    #expect(TileSpan.default(for: .sensor, on: .roomDetail) == TileSpan(columns: 1, rows: 1))
 }

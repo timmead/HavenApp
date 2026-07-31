@@ -45,7 +45,7 @@ private struct RoomGridPreviews: View {
     }
 
     @MainActor
-    private static func populatedStore() -> HomeStore {
+    static func populatedStore() -> HomeStore {
         let store = HomeStore()
         var areas: [ResolvedArea] = []
 
@@ -89,6 +89,35 @@ private struct RoomGridPreviews: View {
         return store
     }
 }
+
+/// **Room detail, which is a different set of sizes for the same rooms.** Media and cameras go
+/// full-bleed here where the dashboard gives them half a row, and this is what checks that the one
+/// dispatcher draws both — the groups used to be three hand-built stacks precisely because a
+/// `LazyVGrid` could not express a 4×2.
+private struct RoomDetailPreviewHost: View {
+    @State private var store = RoomGridPreviews.populatedStore()
+    @State private var navigation = Navigation()
+    @State private var app = AppModel()
+    let areaId: String
+
+    var body: some View {
+        NavigationStack {
+            if let room = store.rooms().first(where: { $0.areaId == areaId }) {
+                RoomDetailView(room: room)
+            }
+        }
+        .environment(store)
+        .environment(navigation)
+        .environment(app)
+    }
+}
+
+/// A camera group at full width, with a light beside it in its own group — two spans, one builder.
+#Preview("Room detail — cameras") { RoomDetailPreviewHost(areaId: "cams") }
+
+/// Climate at half a row and two media players at full width, which is the pair that used to need
+/// two different `[GridItem]` arrays and a bespoke stack.
+#Preview("Room detail — climate and media") { RoomDetailPreviewHost(areaId: "wide") }
 
 /// Four across, then a wrap.
 #Preview("Room grid — all 1×1") { RoomGridPreviews(only: ["ones"]) }

@@ -21,7 +21,7 @@ struct RoomSectionView: View {
     }
     // The four `[GridItem]` arrays that used to live here — one per tile width — are gone; see
     // `body`. What they encoded, that a camera is two columns and a light is one, is now
-    // `TileSpan.default(for:)`, and the grid honours it in one container instead of four.
+    // `TileSpan.default(for:on:)`, and the grid honours it in one container instead of four.
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -67,8 +67,9 @@ struct RoomSectionView: View {
                 RoomGrid(columns: 4, spacing: 9) {
                     ForEach(refs) { ref in
                         if case .entity(let id) = ref {
-                            tile(id)
-                                .tileSpan(TileSpan.default(for: Domain.of(id)))
+                            let span = TileSpan.default(for: Domain.of(id), on: .overview)
+                            tile(id, span: span)
+                                .tileSpan(span)
                                 .modifier(RearrangeableTile(entityId: id, room: room,
                                                             visibleIds: visibleIds(refs),
                                                             drag: drag))
@@ -112,19 +113,12 @@ struct RoomSectionView: View {
 
     /// The renderer for one entity, at the size the grid has given it.
     ///
-    /// Media and camera tiles are built directly rather than through `DeviceTileView` because they
-    /// have sizes to choose: `DeviceTileView` is the 1×1 dispatcher and hands a camera its `.square`
-    /// by default, which is right here but is a decision this view should be seen to make.
-    @ViewBuilder
-    private func tile(_ id: String) -> some View {
-        switch Domain.of(id) {
-        case .mediaPlayer:
-            MediaPlayerTile(entityId: id, size: .wide).configurable(entityId: id, on: .overview)
-        case .camera:
-            CameraTile(entityId: id, size: .square).configurable(entityId: id, on: .overview)
-        default:
-            DeviceTileView(entityId: id, surface: .overview)
-        }
+    /// **Every domain goes through the one dispatcher now.** Media and camera tiles used to be built
+    /// here by hand because they have sizes to choose — which meant this view named a rendering while
+    /// `TileSpan.default` separately named a number of cells, and the two agreed only because someone
+    /// kept them agreeing. `DeviceTileView` takes the span and picks the rendering from it.
+    private func tile(_ id: String, span: TileSpan) -> some View {
+        DeviceTileView(entityId: id, surface: .overview, span: span)
     }
 
     /// The room's name and its readings. Rendered identically whether it pushes room detail or
