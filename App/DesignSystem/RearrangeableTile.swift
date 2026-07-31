@@ -38,15 +38,20 @@ final class TileDragState {
         isOver = true
     }
 
-    /// Ends the drag — but **on the next turn of the main actor**, not immediately.
+    /// Ends the drag — but **after long enough for a finger to cross a gap**, not immediately.
     ///
     /// The gaps between tiles are 9pt, and crossing one means leaving a target before entering the
-    /// next. Clearing synchronously would blink the slot and the caret out on every crossing. A hop
-    /// gives the neighbouring tile's `dropEntered` the chance to land first, and `generation` is how
-    /// this call learns it happened.
+    /// next, so a synchronous clear would blink the slot and the caret out on every crossing. The
+    /// delay is sized to the hand rather than to the scheduler: a turn of the main actor is
+    /// microseconds and a finger crossing 9pt is tens of milliseconds, so hopping once would lose
+    /// this race in every case except a same-turn handoff.
+    ///
+    /// It costs nothing that shows. A completed drop clears synchronously in `performDrop`, so only
+    /// a cancelled drag — or one released over nothing — waits this out.
     func endAfterHandoff() {
         let scheduled = generation
         Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
             guard scheduled == self.generation else { return }
             self.clear()
         }
