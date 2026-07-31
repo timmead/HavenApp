@@ -150,6 +150,22 @@ final class HomeStore {
         return outcome
     }
 
+    /// Stores the order a room's tiles were arranged into.
+    ///
+    /// Written whole: a reorder is not a delta anyone would want merged, and two people rearranging
+    /// one room should end with the last one winning — which the conflict retry already gives.
+    func setOrder(_ ids: [String], areaId: String) async -> HavenConfig.Outcome {
+        await config.update { $0.settingOrder(ids, forRoom: areaId) }
+    }
+
+    /// Forgets a room's arrangement, so it falls back to the default order.
+    ///
+    /// The only way out of an arrangement you dislike other than dragging your way out of it, which
+    /// is exactly when dragging is least appealing.
+    func resetOrder(areaId: String) async -> HavenConfig.Outcome {
+        await config.update { $0.settingOrder([], forRoom: areaId) }
+    }
+
     /// What a device is called: Haven's override if the user set one, otherwise Home Assistant's
     /// name, otherwise the entity id as words. The rule is `DisplayName`'s, in HavenCore with tests.
     ///
@@ -525,7 +541,11 @@ final class HomeStore {
     /// household's per-surface decisions about which devices each surface shows.
     func rooms() -> [RoomSection] {
         SectionBuilder.rooms(from: home, environment: environment,
-                             overrides: config.document.surfaceOverrides)
+                             overrides: config.document.surfaceOverrides,
+                             orders: home.floors.flatMap(\.areas).reduce(into: [:]) { out, area in
+                                 let order = config.document.order(forRoom: area.id)
+                                 if !order.isEmpty { out[area.id] = order }
+                             })
     }
 
     /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.

@@ -14,6 +14,8 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// id — read from the dashboard document, and absent for nearly everything. See
     /// `SurfaceMembership`.
     public let overrides: [String: [HavenSurface: SurfaceMembership]]
+    /// The order the household arranged this room into, or empty when nobody has — see `TileOrder`.
+    public let order: [String]
 
     public func tier(of entityId: String) -> CurationTier { tiers[entityId] ?? .primary }
 
@@ -24,7 +26,32 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// decision has to be applied at both — two places to apply one rule is one place to forget it.
     /// The rule itself is `SurfaceMembership.shows`, in one function with the whole matrix under
     /// test.
+    /// What `surface` shows, **in the order it shows it**.
+    ///
+    /// Ordering happens here rather than in a view so a caller cannot forget to apply it — the same
+    /// argument that collapsed `overviewRefs`/`detailRefs` into this one method when the membership
+    /// rule had to reach both.
     public func refs(for surface: HavenSurface) -> [DeviceRef] {
+        let visible = visibleRefs(for: surface)
+        let ids = visible.compactMap { ref -> String? in
+            guard case .entity(let id) = ref else { return nil }
+            return id
+        }
+        let ordered = TileOrder.resolve(stored: order, present: ids)
+        let position = Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($0.element, $0.offset) })
+        // A composite carries no single entity id and so has no position; nothing constructs them
+        // yet, and when something does it will be an ordered unit by definition. Until then they
+        // keep the order they arrived in, after everything that *can* be ordered.
+        return visible.sorted { a, b in
+            switch (a, b) {
+            case let (.entity(x), .entity(y)): return (position[x] ?? 0) < (position[y] ?? 0)
+            case (.entity, _): return true
+            default: return false
+            }
+        }
+    }
+
+    private func visibleRefs(for surface: HavenSurface) -> [DeviceRef] {
         deviceRefs.filter { ref in
             // A composite carries no single entity id, so no tier and no membership — nothing
             // constructs them yet (see `DeviceRef`), and when something does it will be a curated
@@ -43,12 +70,16 @@ public enum SectionBuilder {
     ///   id — see `RoomEnvironmentResolver`. Required rather than defaulted: an omitted environment
     ///   means every room silently loses its pills, which is precisely the failure this parameter
     ///   exists to make impossible to introduce by accident.
+    /// - Parameter orders: each room's arranged tile order, keyed by area id — see `TileOrder`.
+    ///   Required for the same reason as the two below: an omitted map silently discards every
+    ///   arrangement the household has made.
     /// - Parameter overrides: each entity's per-surface membership — see `SurfaceMembership`.
     ///   Required for the same reason, and the failure is worse: an omitted map means every removal
     ///   the household has ever made silently reverts, and nothing at the call site would say so.
     public static func rooms(from home: ResolvedHome,
                              environment: [String: RoomEnvironment],
-                             overrides: [String: [HavenSurface: SurfaceMembership]]) -> [RoomSection] {
+                             overrides: [String: [HavenSurface: SurfaceMembership]],
+                             orders: [String: [String]]) -> [RoomSection] {
         home.floors.flatMap(\.areas).map { area in
             let header = environment[area.id]?.headerSensors ?? []
             // An uplifted reading is shown in the heading instead of as a tile — but only when the
@@ -62,7 +93,8 @@ public enum SectionBuilder {
             })
             let devices = area.entityIds.filter { !uplifted.contains($0) }.map { DeviceRef.entity($0) }
             return RoomSection(id: area.id, name: area.name, areaId: area.id, headerSensors: header,
-                               deviceRefs: devices, tiers: area.tiers, overrides: overrides)
+                               deviceRefs: devices, tiers: area.tiers, overrides: overrides,
+                               order: orders[area.id] ?? [])
         }
     }
 }

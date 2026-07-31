@@ -284,6 +284,26 @@ private final class LockedBox: @unchecked Sendable {
         #expect(store.config.document.surfaceOverrides["sensor.lr_temp"]?[.roomDetail] == nil)
     }
 
+    /// An arrangement round-trips, and resetting it leaves the document exactly as it started rather
+    /// than a room record holding an empty list.
+    @Test func anArrangementIsStoredAndCanBeReset() async throws {
+        let (store, _) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        #expect(await store.setOrder(["light.b", "light.a"], areaId: "living") == .written)
+        #expect(store.config.document.order(forRoom: "living") == ["light.b", "light.a"])
+
+        #expect(await store.resetOrder(areaId: "living") == .written)
+        #expect(store.config.document.order(forRoom: "living").isEmpty)
+        // The room still holds the nomination bootstrap wrote, so the record survives — but nothing
+        // of the arrangement is left behind.
+        #expect(store.config.document.nominations["living"]?.temperature != nil)
+    }
+
     /// **A document that could not be read is never written over**, and that has to hold for the
     /// automatic nomination write-back as much as for a user's edit — the write-back does not
     /// consult configuration mode at all, so `canConfigure` cannot be what protects it.
