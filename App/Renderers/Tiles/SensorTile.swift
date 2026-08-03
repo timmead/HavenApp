@@ -44,18 +44,35 @@ struct SensorTile: View {
         let s = e.map(SensorState.init)
         let unavailable = e?.isUnavailable ?? false
         return GlassTile(active: false, accent: .gray, unavailable: unavailable) {
-            ZStack(alignment: .bottomLeading) {
+            TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
+                      name: store.displayName(of: entityId),
+                      accent: .gray, unavailable: unavailable) {
+                Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+            // Fills the cell so the background behind it does too — a background is sized to what it
+            // is behind, and a label only as wide as its text would carry a sparkline only that
+            // wide. Under an unspecified proposal this still measures as the label's own ideal
+            // height, which is what keeps the row honest.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // **A background, not a `ZStack` member — and the difference is the whole tile.**
+            //
+            // A background is laid out to fit whatever it is behind and never contributes to the
+            // parent's ideal size; a `ZStack` member does. `Chart` reports a large ideal height, and
+            // `RoomGrid` measures its row from the tallest *single-row* tile — which a 2×1 sensor is.
+            // So as a stack member this chart silently made every row in the room half again as
+            // tall, and only once its history had loaded, which is why it looked briefly correct
+            // and then grew.
+            //
+            // The rule this tile now obeys: **what a tile measures must be what a tile draws.** The
+            // camera tile learned the same thing from `aspectRatio(contentMode: .fill)` reporting an
+            // oversized frame to its parent.
+            .background(alignment: .bottomLeading) {
                 SensorSparkline(series: store.history(entityId, Self.range),
                                 accent: HavenColor.domain(.sensor))
                     .padding(.top, 18)
                     .padding(.horizontal, -2)
-                TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                          name: store.displayName(of: entityId),
-                          accent: .gray, unavailable: unavailable) {
-                    Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                }
             }
         }
         .task { await store.loadHistory(entityId, range: Self.range) }

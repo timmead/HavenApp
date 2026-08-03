@@ -56,6 +56,14 @@ struct RoomGrid: Layout {
     /// Only *single-row* tiles are measured. A tall tile's ideal height is a function of the row
     /// height, so letting it vote would be circular — and a room with one camera and a room with a
     /// camera and a light would end up with different row heights for the same camera.
+    ///
+    /// **Every tile therefore has to measure as what it draws, and this is where a tile that does
+    /// not shows up.** One single-row tile reporting an inflated ideal height makes *every* row in
+    /// the room that tall. `SensorTile`'s sparkline did exactly that: a `Chart` has a large ideal
+    /// height, and as a `ZStack` member it handed that to its parent — so putting one sensor on a
+    /// dashboard grew every tile beside it, and only once its history had loaded. A background
+    /// rather than a stack member was the fix, and the same hazard applies to anything with an
+    /// opinion about its own size: charts, images with an aspect ratio, maps.
     private func rowHeight(subviews: Subviews, placements: [GridPlacement]) -> CGFloat {
         let singleRow = zip(subviews, placements)
             .filter { $0.1.span.rows == 1 }
