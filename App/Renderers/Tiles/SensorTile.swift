@@ -44,17 +44,38 @@ struct SensorTile: View {
         let s = e.map(SensorState.init)
         let unavailable = e?.isUnavailable ?? false
         return GlassTile(active: false, accent: .gray, unavailable: unavailable) {
-            TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
-                      name: store.displayName(of: entityId),
-                      accent: .gray, unavailable: unavailable) {
-                Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
+            // **Its own layout rather than `TileLabel`.** That stack puts the name and the reading
+            // together under the icon, which is right for a quarter-width tile with nothing else in
+            // it. Half a row is a different shape: the reading goes to the top corner opposite the
+            // icon where nothing crowds it, and the name runs along the bottom under the line.
+            //
+            // The emphases still go through `Emphasis.color(unavailable:accent:)` — see `TileLabel`,
+            // whose whole reason for existing is that no tile hand-writes the unreachable guard, and
+            // whose comment records the one tile that forgot it. This one.
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass))
+                        .font(.system(size: 20))
+                        .foregroundStyle(Emphasis.secondary.color(unavailable: unavailable,
+                                                                  accent: .gray))
+                        .symbolRenderingMode(.hierarchical)
+                    Spacer(minLength: 0)
+                    Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
+                        .font(.system(size: 19, weight: .semibold))
+                        // A long reading shrinks rather than wrapping or truncating: "1,240 W" is
+                        // the number somebody came to read, and half of it is worse than a smaller
+                        // whole one.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                accent: .gray))
+                }
+                Spacer(minLength: 2)
+                Text(store.displayName(of: entityId))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: .gray))
             }
-            // Fills the cell so the background behind it does too — a background is sized to what it
-            // is behind, and a label only as wide as its text would carry a sparkline only that
-            // wide. Under an unspecified proposal this still measures as the label's own ideal
-            // height, which is what keeps the row honest.
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // **A background, not a `ZStack` member — and the difference is the whole tile.**
             //
@@ -68,10 +89,11 @@ struct SensorTile: View {
             // The rule this tile now obeys: **what a tile measures must be what a tile draws.** The
             // camera tile learned the same thing from `aspectRatio(contentMode: .fill)` reporting an
             // oversized frame to its parent.
-            .background(alignment: .bottomLeading) {
+            .background(alignment: .bottom) {
                 SensorSparkline(series: store.history(entityId, Self.range),
                                 accent: HavenColor.domain(.sensor))
-                    .padding(.top, 18)
+                    .padding(.top, 22)
+                    .padding(.bottom, 13)
                     .padding(.horizontal, -2)
             }
         }
