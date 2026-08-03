@@ -67,7 +67,9 @@ struct RoomSectionView: View {
                 RoomGrid(columns: 4, spacing: 9) {
                     ForEach(refs) { ref in
                         if case .entity(let id) = ref {
-                            let span = TileSpan.default(for: Domain.of(id), on: .overview)
+                            // The household's choice where there is one, the surface's default
+                            // otherwise — see `HomeStore.span(of:on:)`.
+                            let span = store.span(of: id, on: .overview)
                             tile(id, span: span)
                                 .tileSpan(span)
                                 .modifier(RearrangeableTile(entityId: id, room: room,

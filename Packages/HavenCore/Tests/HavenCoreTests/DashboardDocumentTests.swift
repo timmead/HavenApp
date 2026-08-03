@@ -278,3 +278,43 @@ private func json(_ text: String) -> JSONValue {
     // taking the document with them — a build that adds a third surface must not brick this one.
     #expect(DashboardDocument(raw: raw).surfaceOverrides.isEmpty)
 }
+
+// MARK: - Tile sizes
+
+@Test func aSizeIsStoredPerSurface() {
+    let doc = DashboardDocument()
+        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
+    #expect(doc.tileSizes["sensor.hall"]?[.overview] == TileSpan(columns: 2, rows: 1))
+    // Saying something about the dashboard says nothing about room detail.
+    #expect(doc.tileSizes["sensor.hall"]?[.roomDetail] == nil)
+}
+
+/// A size and a name are different decisions about the same device, and neither may erase the other.
+@Test func aSizeSurvivesARenameAndViceVersa() {
+    let doc = DashboardDocument()
+        .settingDisplayName("Hallway", for: "sensor.hall")
+        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
+        .settingMembership(.shown, for: "sensor.hall", on: .overview)
+    #expect(doc.displayNames["sensor.hall"] == "Hallway")
+    #expect(doc.tileSizes["sensor.hall"]?[.overview] == TileSpan(columns: 2, rows: 1))
+    #expect(doc.surfaceOverrides["sensor.hall"]?[.overview] == .shown)
+}
+
+/// Clearing the last size leaves no shell behind, or the document fills up with empty records of
+/// decisions nobody is making any more.
+@Test func clearingTheLastSizeRemovesTheRecord() {
+    let doc = DashboardDocument()
+        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
+        .settingSize(nil, for: "sensor.hall", on: .overview)
+    #expect(doc.tileSizes["sensor.hall"] == nil)
+    #expect(doc.raw.asObject?["entities"] == nil)
+}
+
+/// **A size written by a build that knows shapes this one does not is dropped, not guessed at.**
+@Test func anUnreadableStoredSizeIsIgnoredRatherThanDefaulted() {
+    let doc = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "entities": .object(["sensor.hall": .object([
+            "sizes": .object(["overview": .string("enormous")])])])]))
+    #expect(doc.tileSizes["sensor.hall"] == nil)
+}

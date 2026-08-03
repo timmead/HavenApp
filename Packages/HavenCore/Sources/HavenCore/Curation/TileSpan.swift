@@ -17,6 +17,27 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         self.rows = max(1, rows)
     }
 
+    /// The canonical stored form, `"<columns>x<rows>"`.
+    ///
+    /// A shape written down rather than a name. Small/medium/large was considered and rejected: a
+    /// span is already unique within every domain that has more than one rendering, so a vocabulary
+    /// would be a synonym table to keep in step — and "medium" would mean a different shape for a
+    /// camera than for a light.
+    public var stored: String { "\(columns)x\(rows)" }
+
+    /// A stored form back into a span, or nil if it is not one.
+    ///
+    /// **Nil rather than a default**, so a value written by a build that knows a size this one does
+    /// not is dropped and the domain's default applies — the discipline `surfaceOverrides` already
+    /// documents. Defaulting a value we cannot read would silently claim the household chose it.
+    public init?(stored: String) {
+        let parts = stored.split(separator: "x")
+        guard parts.count == 2,
+              let columns = Int(parts[0]), let rows = Int(parts[1]),
+              columns > 0, rows > 0 else { return nil }
+        self.init(columns: columns, rows: rows)
+    }
+
     /// This span narrowed to fit a grid `columns` wide.
     ///
     /// Clamped rather than refused. A renderer asking for six columns of a four-column grid is a
@@ -67,6 +88,55 @@ public struct TileSpan: Sendable, Equatable, Hashable {
             case .roomDetail: return TileSpan(columns: 4, rows: 2)
             }
         }
+    }
+
+    /// Every size a domain can be drawn at, smallest first, or a single entry when it has one.
+    ///
+    /// **A function of the device type and nothing else.** Not the device class, not the reading,
+    /// not whether history happens to have loaded. The size of a tile is a decision the household
+    /// made about a device, and a decision must not depend on a value that changes every thirty
+    /// seconds — a sensor going unavailable taking away its own 2×1 would invalidate a layout
+    /// somebody chose, to save them from a layout they can undo in two taps.
+    ///
+    /// **Nothing is listed that cannot be drawn.** Each entry corresponds to a real rendering; when
+    /// one is added, it is added here. Climate has a 4×2 design and not yet a 4×2 rendering, so it
+    /// is absent until it exists rather than offered and blank.
+    public static func available(for domain: Domain) -> [TileSpan] {
+        switch domain {
+        case .light, .switchOutlet, .cover, .lock, .scene, .script, .button, .binarySensor, .unknown:
+            return [TileSpan(columns: 1, rows: 1)]
+        // A reading, or a reading over a day of itself — see `SensorSparkline`.
+        case .sensor:
+            return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1)]
+        case .climate:
+            return [TileSpan(columns: 2, rows: 1)]
+        case .mediaPlayer:
+            return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1),
+                    TileSpan(columns: 4, rows: 2)]
+        // No 1-column camera, deliberately: below two columns a feed is a thumbnail of a thumbnail.
+        case .camera:
+            return [TileSpan(columns: 2, rows: 2), TileSpan(columns: 4, rows: 2)]
+        }
+    }
+
+    /// Whether a domain is worth showing a size control for at all.
+    ///
+    /// One option is not a choice, and a picker holding a single selected chip is a control that
+    /// cannot act — which this app omits rather than disables.
+    public static func isResizable(_ domain: Domain) -> Bool { available(for: domain).count > 1 }
+
+    /// A stored size reconciled against what the domain can actually draw.
+    ///
+    /// Falls back to the surface's default when the stored span is not among the available ones —
+    /// the same shape as `TileOrder.resolve` and `SurfaceMembership`: what the household said,
+    /// reconciled against what is possible now, never trusted blindly. A build that withdraws a
+    /// rendering must leave every dashboard that chose it working.
+    public static func resolve(stored: TileSpan?, for domain: Domain,
+                               on surface: HavenSurface) -> TileSpan {
+        guard let stored, available(for: domain).contains(stored) else {
+            return `default`(for: domain, on: surface)
+        }
+        return stored
     }
 }
 

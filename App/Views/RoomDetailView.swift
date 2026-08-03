@@ -167,7 +167,7 @@ struct RoomDetailView: View {
                 }
                 RoomGrid(columns: 4, spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        let span = TileSpan.default(for: Domain.of(id), on: .roomDetail)
+                        let span = store.span(of: id, on: .roomDetail)
                         DeviceTileView(entityId: id, surface: .roomDetail, span: span)
                             .tileSpan(span)
                     }

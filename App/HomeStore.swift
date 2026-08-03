@@ -212,6 +212,38 @@ final class HomeStore {
         await config.update { $0.settingDisplayName(name, for: entityId) }
     }
 
+    /// How big a tile is drawn, after the household's choice and what the domain can draw.
+    ///
+    /// **Read from the document directly rather than threaded through `SectionBuilder`.** Membership
+    /// and order go that way because they change what a *room* contains and in what sequence — facts
+    /// about a section. A size is a fact about one entity on one surface, and both are already in
+    /// the caller's hand, so a fourth map through the builder would buy nothing but a longer
+    /// signature.
+    func span(of entityId: String, on surface: HavenSurface) -> TileSpan {
+        TileSpan.resolve(stored: config.document.tileSizes[entityId]?[surface],
+                         for: Domain.of(entityId), on: surface)
+    }
+
+    /// Commits everything one configuration sheet holds, in a **single** write.
+    ///
+    /// Not a convenience over `rename` and a size setter called in turn: each write bumps the shared
+    /// record's version, so two writes are two conflict windows and two chances for another phone in
+    /// the household to read a half-applied edit. One closure, one version, one retry.
+    ///
+    /// `size` is `.some(nil)` to clear a chosen size back to the surface's default, and `nil` to
+    /// leave whatever is stored alone — the distinction matters for a sheet that shows no size
+    /// control at all for a domain with one rendering.
+    func applyTileConfig(_ entityId: String, name: String?, size: TileSpan??,
+                         on surface: HavenSurface) async -> HavenConfig.Outcome {
+        await config.update { document in
+            var next = document.settingDisplayName(name, for: entityId)
+            if let size {
+                next = next.settingSize(size, for: entityId, on: surface)
+            }
+            return next
+        }
+    }
+
     /// Re-resolves every room's nomination against the current registry and states.
     func resolveEnvironment() {
         environmentCoordinator.resolve(home: home, states: states, document: config.document)

@@ -230,3 +230,61 @@ private func decode(_ text: String) -> [String: Any]? {
         #expect(await socket.frameTexts(ofType: "havenapp/config/set").isEmpty)
     }
 }
+
+// MARK: - The configuration sheet's single write
+
+extension DashboardConfigWriteBackTests {
+
+    /// **A sheet holding a name and a size commits once, not twice.**
+    ///
+    /// This is the whole reason `applyTileConfig` exists rather than `rename` followed by a size
+    /// setter. Every write bumps the shared record's version, so two writes are two conflict windows
+    /// and two chances for another phone in the household to read a half-applied edit — a device
+    /// renamed but not resized, or the reverse. Counting the frames is the only way to hold it: both
+    /// spellings produce an identical final document, so no assertion about the *result* can tell
+    /// them apart.
+    @Test func aNameAndASizeCommitInOneWrite() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        // Bootstrap writes the auto-picked nominations; the sheet's write is the one after it.
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applyTileConfig("sensor.lr_temp", name: "Lounge",
+                                                  size: .some(TileSpan(columns: 2, rows: 1)),
+                                                  on: .overview)
+        #expect(outcome == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+
+        let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
+        let entity = entities?["sensor.lr_temp"] as? [String: Any]
+        #expect(entity?["name"] as? String == "Lounge")
+        #expect((entity?["sizes"] as? [String: Any])?["overview"] as? String == "2x1")
+    }
+
+    /// Choosing the size a tile already had is not an edit, and must not write. The sheet decides
+    /// this — see `TileConfigView.sizeEdit` — but the store must not write for a nil size either,
+    /// or every Done on an unresized tile would churn the household's document.
+    @Test func aSheetThatChangedNothingButTheNameLeavesTheSizeAlone() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        _ = await store.applyTileConfig("sensor.lr_temp", name: "Lounge", size: nil, on: .overview)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
+        let entity = entities?["sensor.lr_temp"] as? [String: Any]
+        #expect(entity?["name"] as? String == "Lounge")
+        #expect(entity?["sizes"] == nil)
+    }
+}

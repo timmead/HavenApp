@@ -34,6 +34,9 @@ struct TileConfigView: View {
     @State private var failure: String?
     /// True once this sheet has written, so a dismissal cannot write a second time.
     @State private var committed = false
+    /// The chosen size, seeded from what is stored or the surface's default. A draft like the name:
+    /// nothing is written until the sheet closes.
+    @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
 
     private var storedOverride: String? { store.config.document.displayNames[entityId] }
 
@@ -73,6 +76,21 @@ struct TileConfigView: View {
                     }
                 }
             }
+            // Only where there is a choice — a domain with one rendering shows no card at all. See
+            // `TileSpan.isResizable`.
+            if TileSpan.isResizable(Domain.of(entityId)) {
+                FacetCard(title: "Size") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        TileSizePicker(options: TileSpan.available(for: Domain.of(entityId)),
+                                       selection: $span)
+                        // Named because the sheet is reachable from both surfaces and the choice is
+                        // stored for the one it was opened from — a household that widens a tile on
+                        // the dashboard has said nothing about the room.
+                        Text(sizeScopeNote)
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
             FacetCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
@@ -101,7 +119,10 @@ struct TileConfigView: View {
         // Seeded from the *override*, not from the resolved name: pre-filling with Home Assistant's
         // name would turn every "let me look at this device" into a rename the moment the user hit
         // Save, and the household would fill up with overrides nobody chose.
-        .onAppear { draft = storedOverride ?? "" }
+        .onAppear {
+            draft = storedOverride ?? ""
+            span = store.span(of: entityId, on: surface)
+        }
         // **Swiping the sheet away commits too**, because there is no Cancel here and discarding a
         // typed name without warning is worse than a write the user cannot watch. Fire-and-forget by
         // necessity: a sheet that has gone has nowhere to put an error. Done is the path that waits
@@ -109,8 +130,10 @@ struct TileConfigView: View {
         .onDisappear {
             guard !committed, hasChanges else { return }
             let name = DisplayName.override(from: draft)
+            let size = sizeEdit
+            let surface = surface
             committed = true
-            Task { _ = await store.rename(entityId, to: name) }
+            Task { _ = await store.applyTileConfig(entityId, name: name, size: size, on: surface) }
         }
     }
 
@@ -130,6 +153,27 @@ struct TileConfigView: View {
         }
     }
 
+    private var sizeScopeNote: String {
+        switch surface {
+        case .overview: return "On the dashboard. This device's size in the room is separate."
+        case .roomDetail: return "In this room. This device's size on the dashboard is separate."
+        }
+    }
+
+    /// Whether the size differs from what is stored — or, when nothing is stored, from the default.
+    ///
+    /// `.some(nil)` clears a stored choice back to the default rather than storing the default as
+    /// though it were chosen: a household that widens a tile and puts it back has made no decision,
+    /// and the document should not carry one.
+    private var sizeEdit: TileSpan?? {
+        guard TileSpan.isResizable(Domain.of(entityId)) else { return nil }
+        let stored = store.config.document.tileSizes[entityId]?[surface]
+        guard span != stored else { return nil }
+        return span == TileSpan.default(for: Domain.of(entityId), on: surface)
+            ? .some(nil)
+            : .some(span)
+    }
+
     /// No confirmation dialog, deliberately: one tap on the same screen's + puts it back, and a
     /// confirmation on a reversible action is how people learn to dismiss confirmations unread.
     private func remove() async {
@@ -146,7 +190,7 @@ struct TileConfigView: View {
     /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
     /// an edit — and so a sheet merely opened and closed writes nothing at all.
     private var hasChanges: Bool {
-        DisplayName.override(from: draft) != storedOverride
+        DisplayName.override(from: draft) != storedOverride || sizeEdit != nil
     }
 
     /// The one write this sheet performs. Returns whether the sheet may close.
@@ -160,7 +204,8 @@ struct TileConfigView: View {
         guard !committed else { return true }
         guard hasChanges else { committed = true; return true }
         committed = true
-        switch await store.rename(entityId, to: DisplayName.override(from: draft)) {
+        switch await store.applyTileConfig(entityId, name: DisplayName.override(from: draft),
+                                           size: sizeEdit, on: surface) {
         case .written, .unchanged:
             return true
         case .notAuthorized:
@@ -198,6 +243,12 @@ private struct TileConfigPreviewHost: View {
             entityId: "light.kitchen", state: "on",
             attributes: ["friendly_name": .string("Kitchen Light")],
             lastUpdated: Date(timeIntervalSince1970: 0))
+        store.states["sensor.hall_temp"] = EntityState(
+            entityId: "sensor.hall_temp", state: "21.4",
+            attributes: ["friendly_name": .string("Hall Temperature"),
+                         "device_class": .string("temperature"),
+                         "unit_of_measurement": .string("°C")],
+            lastUpdated: Date(timeIntervalSince1970: 0))
         if overridden {
             store.config.seedForTesting(
                 DashboardDocument().settingDisplayName("Reading Lamp", for: "light.kitchen"))
@@ -210,6 +261,12 @@ private struct TileConfigPreviewHost: View {
 /// arrive holding Home Assistant's name, or Save silently converts it into an override.
 #Preview("Tile config — renamed") { TileConfigPreviewHost(entityId: "light.kitchen", overridden: true) }
 #Preview("Tile config — not renamed") { TileConfigPreviewHost(entityId: "light.kitchen", overridden: false) }
+/// **A device that can be more than one size**, which a light cannot — so the size card is absent
+/// from every preview above and its presence here is the only thing that shows it exists at all.
+#Preview("Tile config — resizable") {
+    TileConfigPreviewHost(entityId: "sensor.hall_temp", overridden: false)
+}
+
 /// The other surface, where both the button and its explanation change wording.
 #Preview("Tile config — room detail") {
     TileConfigPreviewHost(entityId: "light.kitchen", overridden: false, surface: .roomDetail)
