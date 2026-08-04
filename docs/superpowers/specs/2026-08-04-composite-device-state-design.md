@@ -106,6 +106,33 @@ A companion Haven cannot reach reads `TileState.unavailable.word`. Dropping it w
 unreachable door sensor and an absent one look identical, and the whole point of the feature is
 telling the user what the device actually knows.
 
+## `CameraEvents` is the specialisation, and must not be rendered twice
+
+A camera already joins its own motion, person and doorbell sensors — `CameraEvents.related`, on the
+same `device_id`, with a curated `Kind` vocabulary and its own most-alarming-first ordering — and
+`CameraModal` renders them as chips. Those sensors are `.companion` entities of the camera's device,
+so a generic section would list every one of them a second time.
+
+**The caller supplies what the parent already renders**, and `resolve` skips it:
+
+```swift
+public static func resolve(primary: String, deviceId: String?,
+                           registry: [String: EntityRegistryInfo],
+                           tiers: [String: CurationTier],
+                           states: [String: EntityState],
+                           excluding: Set<String> = []) -> DeviceState
+```
+
+`HomeStore` passes a camera's event-sensor ids, which it already computes for the chips. The
+exclusion lives at the call site rather than inside the resolver because the resolver has no business
+knowing which modal draws what — and because the same entity is a chip on one screen and a reading on
+another, which is a rendering fact, not a fact about the device.
+
+**`CameraEvents` is not being replaced.** Its chips say more than a generic reading can: a curated
+kind, a symbol, and an ordering that puts a doorbell press ahead of a tamper flag. Folding it into
+this would trade a good specialisation for a uniform one. What this adds is a home for the
+companions it deliberately ignores — a doorbell's battery, its chime, its firmware flag.
+
 ## Rendering, 6a
 
 `DeviceModalView` gains one section beneath the domain modal — **there, not inside each of the eleven
