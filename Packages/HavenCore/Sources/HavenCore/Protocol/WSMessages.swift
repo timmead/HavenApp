@@ -250,8 +250,21 @@ public enum WSCommand {
     ///   would then plot identically.
     public static func historyDuringPeriod(id: Int, entityId: String, startISO: String,
                                            endISO: String, includeAttributes: Bool = false) -> Data {
+        historyDuringPeriod(id: id, entityIds: [entityId], startISO: startISO, endISO: endISO,
+                            includeAttributes: includeAttributes)
+    }
+
+    /// The same command for several entities at once.
+    ///
+    /// **`entity_ids` was always a list** — the single-entity form above wrapped one id in an array
+    /// and has been rewritten to call this, so there is one place that spells the command. A
+    /// dashboard of sparklines is the reason: six tiles each asking for a day of their own history
+    /// is six round trips for one glance, and the reply is keyed by entity id, so one request
+    /// answers all six with no change to how any of it is parsed.
+    public static func historyDuringPeriod(id: Int, entityIds: [String], startISO: String,
+                                           endISO: String, includeAttributes: Bool = false) -> Data {
         data(["id": id, "type": "history/history_during_period", "start_time": startISO,
-              "end_time": endISO, "entity_ids": [entityId],
+              "end_time": endISO, "entity_ids": entityIds,
               "minimal_response": !includeAttributes, "no_attributes": !includeAttributes])
     }
     public static func statisticsDuringPeriod(id: Int, statisticId: String, startISO: String, endISO: String, period: String) -> Data {

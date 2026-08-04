@@ -125,3 +125,80 @@ private func connectedHistoryHome(result: String) async throws
     }
     #expect(await conn.sentTexts().allSatisfy { !$0.contains("statistics_during_period") })
 }
+
+// MARK: - Several entities in one request
+
+/// **One frame, one series per entity.** Six sparklines on a dashboard was six round trips for one
+/// glance; `entity_ids` was always a list and the reply was always keyed by entity id.
+@Test func severalEntitiesTravelInOneRequest() async throws {
+    let conn = FakeWebSocketConnection(); let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#); await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await respondOnly(conn, to: "history/history_during_period",
+                      with: #"{"sensor.a":[{"s":"1","lu":1751328000.0}],"sensor.b":[{"s":"2","lu":1751328000.0},{"s":"3","lu":1751331600.0}]}"#)
+
+    let home = HomeConnection(client: client)
+    let out = try await home.histories(entityIds: ["sensor.a", "sensor.b"], range: .day,
+                                       now: Date(timeIntervalSince1970: 1751414400))
+
+    #expect(out["sensor.a"]?.points.map(\.value) == [1])
+    #expect(out["sensor.b"]?.points.map(\.value) == [2, 3])
+
+    let frames = await conn.sentTexts().map { obj(Data($0.utf8)) }
+        .filter { $0["type"] as? String == "history/history_during_period" }
+    #expect(frames.count == 1)
+    #expect(frames.first?["entity_ids"] as? [String] == ["sensor.a", "sensor.b"])
+}
+
+/// **An entity the recorder has nothing for comes back empty, not missing.**
+///
+/// A caller that asked for three and got two keys back cannot tell "no data" from "the request lost
+/// it", so it would keep asking forever. An empty series is an answer; an absent key is a question.
+@Test func anEntityWithNoRowsComesBackEmptyRatherThanAbsent() async throws {
+    let conn = FakeWebSocketConnection(); let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#); await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await respondOnly(conn, to: "history/history_during_period",
+                      with: #"{"sensor.a":[{"s":"1","lu":1751328000.0}]}"#)
+
+    let home = HomeConnection(client: client)
+    let out = try await home.histories(entityIds: ["sensor.a", "sensor.excluded"], range: .day,
+                                       now: Date(timeIntervalSince1970: 1751414400))
+
+    #expect(out.count == 2)
+    #expect(out["sensor.excluded"]?.points.isEmpty == true)
+}
+
+/// Asking for nothing sends nothing — a screen with no sparklines must not produce an empty frame.
+@Test func anEmptyBatchMakesNoRequest() async throws {
+    let conn = FakeWebSocketConnection(); let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#); await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+
+    let home = HomeConnection(client: client)
+    let out = try await home.histories(entityIds: [], range: .day, now: Date())
+
+    #expect(out.isEmpty)
+    let frames = await conn.sentTexts().map { obj(Data($0.utf8)) }
+        .filter { $0["type"] as? String == "history/history_during_period" }
+    #expect(frames.isEmpty)
+}
+
+/// **A statistics range must not be answered with a history command.** Both return a series, so the
+/// mistake is invisible in the result — it shows up only as a wrong window, which is worse than an
+/// error. `.week` is served one entity at a time, correctly, rather than quickly.
+@Test func aStatisticsRangeIsNotSentAsAHistoryCommand() async throws {
+    let conn = FakeWebSocketConnection(); let client = HAWebSocketClient(connection: conn)
+    await conn.enqueueIncoming(#"{"type":"auth_required"}"#); await conn.enqueueIncoming(#"{"type":"auth_ok"}"#)
+    try await client.authenticate(token: "t")
+    await respondOnly(conn, to: "recorder/statistics_during_period",
+                      with: #"{"sensor.a":[{"start":1751328000000,"mean":5.0}]}"#)
+
+    let home = HomeConnection(client: client)
+    _ = try await home.histories(entityIds: ["sensor.a"], range: .week,
+                                 now: Date(timeIntervalSince1970: 1751414400))
+
+    let types = await conn.sentTexts().map { obj(Data($0.utf8))["type"] as? String }
+    #expect(types.contains("recorder/statistics_during_period"))
+    #expect(!types.contains("history/history_during_period"))
+}

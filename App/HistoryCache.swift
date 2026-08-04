@@ -30,6 +30,19 @@ final class HistoryCache {
     /// request's result lands in `byKey` for both to read.
     private var inFlight: Set<String> = []
 
+    /// What a single request can express: one `start_time`, one `end_time`, one `no_attributes`.
+    /// Two `.day` reads with no attribute travel together; a modal's `.week` does not join them.
+    private struct BatchKey: Hashable {
+        let range: HistoryRange
+        let attribute: String?
+    }
+
+    /// Entity ids waiting to go out, per group.
+    private var pending: [BatchKey: Set<String>] = [:]
+    /// The scheduled flush per group, so the second request of a turn joins the first rather than
+    /// starting its own.
+    private var flushes: [BatchKey: Task<Void, Never>] = [:]
+
     /// Recent state changes per entity, with the moment each was fetched — see
     /// `HistoryRange.day.cacheLifetime`, the same lifetime `byKey` uses. Keyed by entity id alone —
     /// unlike `byKey` there is one range (Day) and no attribute variant to disambiguate.
@@ -60,6 +73,11 @@ final class HistoryCache {
         connection = nil
         byKey = [:]
         inFlight = []
+        pending = [:]
+        // Cancelling rather than dropping: a flush awaiting a reply that will never come would hold
+        // its callers forever.
+        for (_, task) in flushes { task.cancel() }
+        flushes = [:]
         stateChangesByEntity = [:]
         stateChangesFailed = []
     }
@@ -84,22 +102,72 @@ final class HistoryCache {
     /// while the entry is still within `range.cacheLifetime` (a range or attribute switch always
     /// misses, since the key changes); never caches a failure, so a transient error doesn't
     /// permanently block a later retry.
+    /// Fetches and caches a history series for `entityId`/`range`/`attribute`. Reuses the cache
+    /// while the entry is still within `range.cacheLifetime` (a range or attribute switch always
+    /// misses, since the key changes); never caches a failure, so a transient error doesn't
+    /// permanently block a later retry.
+    ///
+    /// **Requests made on the same turn of the main actor go out as one command.** A dashboard of
+    /// wide sensors was six round trips for one glance — see `flush(_:)`. The signature and the
+    /// behaviour a caller sees are unchanged: this is deliberately inside the cache rather than
+    /// something each screen has to remember to do, because a view that forgot would render a
+    /// sparkline-shaped blank.
     func load(_ entityId: String, range: HistoryRange, attribute: String? = nil) async {
         let key = Self.key(entityId, range, attribute)
-        let now = Date()
-        if let cached = byKey[key], now.timeIntervalSince(cached.fetched) < range.cacheLifetime {
+        if let cached = byKey[key], Date().timeIntervalSince(cached.fetched) < range.cacheLifetime {
             return
         }
-        guard !inFlight.contains(key), let connection else { return }
+        guard !inFlight.contains(key), connection != nil else { return }
         inFlight.insert(key)
-        defer { inFlight.remove(key) }
+        let batch = BatchKey(range: range, attribute: attribute)
+        pending[batch, default: []].insert(entityId)
+        let task = flushes[batch] ?? {
+            let scheduled = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.flush(batch)
+            }
+            flushes[batch] = scheduled
+            return scheduled
+        }()
+        await task.value
+    }
+
+    /// Sends one request for everything that asked this turn.
+    ///
+    /// **The `yield` is the whole mechanism.** Each tile's `.task` is its own job on the main actor,
+    /// so the first one to miss the cache schedules this and the rest are still queued behind it.
+    /// Yielding once lets every one of them run, add itself to `pending`, and find this flush
+    /// already scheduled — so a room's sparklines leave as a single command.
+    ///
+    /// A timer would catch more: tiles appearing a frame apart still form separate batches. That was
+    /// weighed and declined — a debounce would add its delay to *every* sparkline's first paint, and
+    /// the cost of missing here is one extra request rather than a wrong picture.
+    private func flush(_ batch: BatchKey) async {
+        await Task.yield()
+        let ids = pending.removeValue(forKey: batch) ?? []
+        flushes[batch] = nil
+        guard !ids.isEmpty, let connection else {
+            for id in ids { inFlight.remove(Self.key(id, batch.range, batch.attribute)) }
+            return
+        }
+        let now = Date()
+        defer {
+            for id in ids { inFlight.remove(Self.key(id, batch.range, batch.attribute)) }
+        }
         do {
-            let series = try await connection.history(entityId: entityId, attribute: attribute,
-                                                      range: range, now: now)
-            byKey[key] = (series, now)
+            let series = try await connection.histories(entityIds: Array(ids).sorted(),
+                                                        attribute: batch.attribute,
+                                                        range: batch.range, now: now)
+            for (id, one) in series {
+                byKey[Self.key(id, batch.range, batch.attribute)] = (one, now)
+            }
         } catch {
             // Leave the cache untouched so a later attempt can retry — and note that a *stale*
             // entry deliberately survives a failed refresh. An old chart beats a blank one.
+            //
+            // One request failing fails everything in it, where separate requests could have failed
+            // independently. In practice the failure is the connection, which would have failed all
+            // of them anyway.
         }
     }
 
