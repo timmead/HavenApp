@@ -39,6 +39,8 @@ struct TileConfigView: View {
     @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
     /// Whether this device's tile shows its state as a glyph or a word. A draft, like the rest.
     @State private var stateStyle: TileStateStyle = .icon
+    /// Which companion plays which role. Drafts, like the rest — nothing writes until Done.
+    @State private var bindings: [DeviceRole: String] = [:]
 
     private var storedOverride: String? { store.config.document.displayNames[entityId] }
 
@@ -111,6 +113,35 @@ struct TileConfigView: View {
                     }
                 }
             }
+            // Only for the domains with a role worth binding — see `DeviceRole.roles(for:)`. A
+            // garage's two limit sensors describe a state the cover entity cannot: partly open.
+            let roles = DeviceRole.roles(for: Domain.of(entityId))
+            if !roles.isEmpty {
+                FacetCard(title: "Sensors") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(roles, id: \.self) { role in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(role.label)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Picker(role.label, selection: Binding(
+                                    get: { bindings[role] ?? "" },
+                                    set: { bindings[role] = $0.isEmpty ? nil : $0 })) {
+                                        Text("None").tag("")
+                                        ForEach(candidates, id: \.self) { id in
+                                            Text(store.displayName(of: id)).tag(id)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .labelsHidden()
+                            }
+                        }
+                        Text(candidates.isEmpty
+                             ? "This device has no other entities in Home Assistant to bind."
+                             : "Bind both to tell a door standing part-way open from one that is shut.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
             FacetCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
@@ -143,6 +174,7 @@ struct TileConfigView: View {
             draft = storedOverride ?? ""
             span = store.span(of: entityId, on: surface)
             stateStyle = store.stateStyle(of: entityId)
+            bindings = store.bindings(of: entityId)
         }
         // **Swiping the sheet away commits too**, because there is no Cancel here and discarding a
         // typed name without warning is worse than a write the user cannot watch. Fire-and-forget by
@@ -153,11 +185,12 @@ struct TileConfigView: View {
             let name = DisplayName.override(from: draft)
             let size = sizeEdit
             let style = stateStyleEdit
+            let bound = bindingEdits
             let surface = surface
             committed = true
             Task {
                 _ = await store.applyTileConfig(entityId, name: name, size: size,
-                                                stateStyle: style, on: surface)
+                                                stateStyle: style, bindings: bound, on: surface)
             }
         }
     }
@@ -176,6 +209,20 @@ struct TileConfigView: View {
         case .overview: return "this room on the dashboard"
         case .roomDetail: return "this room"
         }
+    }
+
+    /// The device's other entities, which is what a role can be bound to.
+    private var candidates: [String] { store.bindableEntityIds(for: entityId) }
+
+    /// Roles whose binding differs from what is stored. `nil` for a role clears it.
+    private var bindingEdits: [DeviceRole: String?]? {
+        let stored = store.bindings(of: entityId)
+        var out: [DeviceRole: String?] = [:]
+        for role in DeviceRole.roles(for: Domain.of(entityId)) {
+            let now = bindings[role]
+            if now != stored[role] { out[role] = now }
+        }
+        return out.isEmpty ? nil : out
     }
 
     private var sizeScopeNote: String {
@@ -225,7 +272,7 @@ struct TileConfigView: View {
 
     private var hasChanges: Bool {
         DisplayName.override(from: draft) != storedOverride
-            || sizeEdit != nil || stateStyleEdit != nil
+            || sizeEdit != nil || stateStyleEdit != nil || bindingEdits != nil
     }
 
     /// The one write this sheet performs. Returns whether the sheet may close.
@@ -241,7 +288,7 @@ struct TileConfigView: View {
         committed = true
         switch await store.applyTileConfig(entityId, name: DisplayName.override(from: draft),
                                            size: sizeEdit, stateStyle: stateStyleEdit,
-                                           on: surface) {
+                                           bindings: bindingEdits, on: surface) {
         case .written, .unchanged:
             return true
         case .notAuthorized:

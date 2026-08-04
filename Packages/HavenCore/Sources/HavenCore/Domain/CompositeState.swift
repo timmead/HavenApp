@@ -13,11 +13,21 @@ import Foundation
 public struct DeviceState: Sendable, Equatable {
     /// The entity a surface is rendering — the one with the controls.
     public let primary: String
+    /// The device's state once its bound roles are read.
+    ///
+    /// **`nil` when nothing refines it**, which is the common case: a surface falls back to the
+    /// primary entity's own state, so a device with no bindings renders exactly as it did before
+    /// any of this existed.
+    public let face: TileState?
     /// Supporting readings, most contextually important first. See `CompositeState.rank`.
+    ///
+    /// An entity consumed by `face` is **not** also listed here. "Partly open" over "Fully Open —
+    /// Off, Fully Closed — Off" is one fact three times, and the third is the one people read.
     public let readings: [DeviceReading]
 
-    public init(primary: String, readings: [DeviceReading]) {
+    public init(primary: String, face: TileState? = nil, readings: [DeviceReading]) {
         self.primary = primary
+        self.face = face
         self.readings = readings
     }
 }
@@ -64,17 +74,23 @@ public enum CompositeState {
     ///   sensors are chips in `CameraModal`; listing them again as readings is one fact twice. This
     ///   is a parameter rather than a rule in here because which view draws what is a *rendering*
     ///   fact, not a fact about the device.
+    /// - Parameter bindings: which companion plays which role — see `DeviceRole`. A bound entity is
+    ///   read into `face` and drops out of `readings`.
     public static func resolve(primary: String, deviceId: String?,
                                registry: [String: EntityRegistryInfo],
                                tiers: [String: CurationTier],
                                states: [String: EntityState],
+                               bindings: [DeviceRole: String] = [:],
                                excluding: Set<String> = []) -> DeviceState {
+        let face = derivedFace(primary: primary, bindings: bindings, states: states)
+        let bound = Set(bindings.values)
         guard let deviceId, !deviceId.isEmpty else {
-            return DeviceState(primary: primary, readings: [])
+            return DeviceState(primary: primary, face: face, readings: [])
         }
         let companions = registry.keys.filter { id in
             id != primary
                 && !excluding.contains(id)
+                && !bound.contains(id)
                 && registry[id]?.deviceId == deviceId
                 && tiers[id] == .companion
         }
@@ -84,8 +100,55 @@ public enum CompositeState {
                 let l = rank(lhs.entityId), r = rank(rhs.entityId)
                 return l == r ? lhs.entityId < rhs.entityId : l < r
             }
-        return DeviceState(primary: primary, readings: readings)
+        return DeviceState(primary: primary, face: face, readings: readings)
     }
+
+    /// The device's own state, derived from its bound roles — or `nil` when they cannot say.
+    ///
+    /// **A cover's two limits express a state the cover entity cannot.** `cover.garage` reports open
+    /// or closed; a door stopped half way is *neither*, and only the pair of limit sensors both
+    /// reading off can tell you so. That case is the entire reason this exists.
+    ///
+    /// **Either limit unreachable yields `nil`, not a guess.** A door whose closed sensor is offline
+    /// is a door Haven does not know about, and "Partly open" asserted from one working sensor is
+    /// precisely the confident wrong answer `TileState.unavailable` exists to avoid.
+    ///
+    /// Both limits on is contradictory hardware, and resolves to **Closed** — a garage reported shut
+    /// by its own closed sensor is the reading you act on.
+    static func derivedFace(primary: String, bindings: [DeviceRole: String],
+                            states: [String: EntityState]) -> TileState? {
+        guard Domain.of(primary) == .cover else { return nil }
+        guard let openId = bindings[.openLimit], let closedId = bindings[.closedLimit],
+              let open = states[openId], let closed = states[closedId],
+              !open.isUnavailable, !closed.isUnavailable else { return nil }
+        let deviceClass = states[primary]?.deviceClass
+        if closed.state == "on" {
+            return TileState.cover(deviceClass: deviceClass, isOpen: false)
+        }
+        if open.state == "on" {
+            return TileState.cover(deviceClass: deviceClass, isOpen: true)
+        }
+        // Neither limit reached: the state the cover entity has no word for.
+        return TileState(symbol: partlyOpenSymbol, word: "Partly open")
+    }
+
+    /// The glyph for a cover between its limits — one shape for every cover kind.
+    ///
+    /// **It has to differ from the open glyph, and the first version did not.** "The word carries the
+    /// distinction" was the reasoning, which forgot that a tile set to the icon style shows no word:
+    /// a garage standing half open and one standing fully open rendered identically, which is the
+    /// one comparison this whole feature exists to make.
+    ///
+    /// `rectangle.tophalf.filled` — a shape half filled, which is what a door stopped part-way
+    /// actually is, and which belongs to no cover family so it reads the same for a garage, a blind
+    /// or a curtain.
+    ///
+    /// **Checked against the SDK rather than assumed.** The first attempt used
+    /// `door.garage.double.1closed`, which does not exist on this SDK: `Image(systemName:)` renders
+    /// *nothing* for a name it cannot resolve, so a garage standing half open drew an empty tile —
+    /// a worse failure than the ambiguity it was fixing, and one no test would catch because the
+    /// string is valid Swift either way.
+    private static let partlyOpenSymbol = "rectangle.tophalf.filled"
 
     /// **The ordering contract, and it is a contract rather than a rendering choice.**
     ///

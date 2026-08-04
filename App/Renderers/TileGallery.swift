@@ -164,6 +164,17 @@ struct TileGallery: View {
     ///
     /// The label row is these same ids with a suffix, so the two rows cannot drift apart: a case
     /// added to one is added to both.
+    /// The three derived-state garages. **A named type rather than an array of tuples**, because as
+    /// a literal inside the fixture builder this defeated the *preview* compiler — "unable to
+    /// type-check this expression in reasonable time" — while compiling fine in a normal build. The
+    /// same trap `twoStateCases` records below.
+    struct GarageFixture { let id: String; let name: String; let closed: String; let open: String }
+    private static let garages: [GarageFixture] = [
+        GarageFixture(id: "cover.limit_closed", name: "Garage A", closed: "on", open: "off"),
+        GarageFixture(id: "cover.partly", name: "Garage B", closed: "off", open: "off"),
+        GarageFixture(id: "cover.limit_open", name: "Garage C", closed: "off", open: "on"),
+    ]
+
     private static let twoStateCases: [String] = [
         "light.on", "light.off",
         "binary_sensor.active", "binary_sensor.clear",
@@ -190,6 +201,17 @@ struct TileGallery: View {
             }
             section("Several, including one unreachable") {
                 DeviceContextCard(entityId: "cover.open")
+            }
+            // **The state a cover entity has no word for.** `cover.partly` reports "open" like any
+            // other; its two bound limit sensors both reading off is the only way to know the door
+            // is stopped half way.
+            section("Derived from bound limits — closed, partly open, open") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2),
+                          spacing: 9) {
+                    ForEach(["cover.limit_closed", "cover.partly", "cover.limit_open"], id: \.self) { id in
+                        DeviceTileView(entityId: id, surface: .overview)
+                    }
+                }
             }
         }
     }
@@ -369,6 +391,16 @@ struct TileGallery: View {
                                                                "device_class": .string("door")])
         set("sensor.garage_signal", "-61", ["friendly_name": .string("Signal"),
                                             "unit_of_measurement": .string("dBm")])
+        // Three garages, all reporting "open" from the cover entity itself — the limits are what
+        // tell them apart, which is the point.
+        for garage in Self.garages {
+            let (id, name, closed, open) = (garage.id, garage.name, garage.closed, garage.open)
+            set(id, "open", ["friendly_name": .string(name), "device_class": .string("garage")])
+            set("binary_sensor.\(id.split(separator: ".")[1])_closed", closed,
+                ["friendly_name": .string("Fully Closed"), "device_class": .string("door")])
+            set("binary_sensor.\(id.split(separator: ".")[1])_open", open,
+                ["friendly_name": .string("Fully Open"), "device_class": .string("door")])
+        }
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
             // Tiers spelled out rather than left to `tier(of:)`'s `.primary` fallback: a sensor is
             // `.secondary` in a real home (see `EntityCuration`), and with everything `.primary` the
@@ -436,6 +468,14 @@ struct TileGallery: View {
             store.states[id] = EntityState(entityId: id, state: state, attributes: attrs,
                                            lastUpdated: Date(timeIntervalSince1970: 0))
             document = document.settingStateStyle(.label, for: id)
+        }
+        // The bindings that make the three garages above mean anything.
+        for garage in Self.garages {
+            let stem = String(garage.id.split(separator: ".")[1])
+            let id = garage.id
+            document = document
+                .settingBinding("binary_sensor.\(stem)_closed", role: .closedLimit, for: id)
+                .settingBinding("binary_sensor.\(stem)_open", role: .openLimit, for: id)
         }
         store.config.seedForTesting(document)
 

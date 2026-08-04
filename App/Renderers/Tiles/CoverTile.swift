@@ -15,8 +15,13 @@ struct CoverTile: View {
             // Centred on the tile rather than on what the slider leaves of it — see `LightTile`,
             // which has the same arrangement and the same reason: a cover with a reported position
             // and one without must not put their glyphs in different places.
-            StateFace(state: TileState.cover(deviceClass: e?.deviceClass, isOpen: open,
-                                             unavailable: unavailable),
+            // **The device's own state where it has one.** A garage with both limits bound can say
+            // "Partly open", which `cover.garage` itself has no word for — see `CompositeState`.
+            // The tile reads that value and does not compute it, which is what 6a's resolver was
+            // shaped for: hoisting the composite here cost this one expression.
+            StateFace(state: store.deviceState(of: entityId).face
+                      ?? TileState.cover(deviceClass: e?.deviceClass, isOpen: open,
+                                         unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
                       accent: accent, active: open, unavailable: unavailable)

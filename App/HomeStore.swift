@@ -240,6 +240,7 @@ final class HomeStore {
     /// control at all for a domain with one rendering.
     func applyTileConfig(_ entityId: String, name: String?, size: TileSpan??,
                          stateStyle: TileStateStyle?? = nil,
+                         bindings: [DeviceRole: String?]? = nil,
                          on surface: HavenSurface) async -> HavenConfig.Outcome {
         await config.update { document in
             var next = document.settingDisplayName(name, for: entityId)
@@ -249,8 +250,30 @@ final class HomeStore {
             if let stateStyle {
                 next = next.settingStateStyle(stateStyle, for: entityId)
             }
+            for (role, target) in bindings ?? [:] {
+                next = next.settingBinding(target, role: role, for: entityId)
+            }
             return next
         }
+    }
+
+    /// Which companion plays which role for this device.
+    func bindings(of entityId: String) -> [DeviceRole: String] {
+        config.document.tileBindings[entityId] ?? [:]
+    }
+
+    /// The companions a role could be bound to: this device's own entities, minus the primary.
+    ///
+    /// Ordered by entity id so the picker does not reshuffle between openings — the same rule
+    /// `addableEntityIds` follows.
+    func bindableEntityIds(for entityId: String) -> [String] {
+        guard let deviceId = home.registryInfo[entityId]?.deviceId, !deviceId.isEmpty else {
+            return []
+        }
+        return home.registryInfo
+            .filter { $0.key != entityId && $0.value.deviceId == deviceId }
+            .keys
+            .sorted()
     }
 
     /// Re-resolves every room's nomination against the current registry and states.
@@ -587,6 +610,7 @@ final class HomeStore {
                                       registry: home.registryInfo,
                                       tiers: tiers,
                                       states: states,
+                                      bindings: config.document.tileBindings[entityId] ?? [:],
                                       excluding: excluded)
     }
 

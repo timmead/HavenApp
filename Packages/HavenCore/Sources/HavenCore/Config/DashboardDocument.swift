@@ -34,6 +34,7 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let surfacesKey = "surfaces"
     private static let sizesKey = "sizes"
     private static let stateStyleKey = "state_style"
+    private static let bindingsKey = "bindings"
     private static let orderKey = "order"
 
     public let raw: JSONValue
@@ -284,6 +285,57 @@ public struct DashboardDocument: Sendable, Equatable {
             entity[Self.stateStyleKey] = .string(style.rawValue)
         } else {
             entity.removeValue(forKey: Self.stateStyleKey)
+        }
+        if entity.isEmpty {
+            entities.removeValue(forKey: entityId)
+        } else {
+            entities[entityId] = .object(entity)
+        }
+        if entities.isEmpty {
+            root.removeValue(forKey: Self.entitiesKey)
+        } else {
+            root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Which entity plays which role
+
+    /// Every bound role, keyed by the entity the role belongs *to*.
+    ///
+    /// Per entity rather than per surface: which sensor is a garage's closed limit is a fact about
+    /// the device, not about the screen it is drawn on.
+    public var tileBindings: [String: [DeviceRole: String]] {
+        guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
+        return entities.compactMapValues { entity -> [DeviceRole: String]? in
+            guard let bindings = entity.asObject?[Self.bindingsKey]?.asObject else { return nil }
+            var out: [DeviceRole: String] = [:]
+            for (rawRole, rawTarget) in bindings {
+                guard let role = DeviceRole(rawValue: rawRole),
+                      let target = rawTarget.asString, !target.isEmpty else { continue }
+                out[role] = target
+            }
+            return out.isEmpty ? nil : out
+        }
+    }
+
+    /// This document with one role bound, or — for `nil` — cleared.
+    public func settingBinding(_ target: String?, role: DeviceRole,
+                               for entityId: String) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var entities = root[Self.entitiesKey]?.asObject ?? [:]
+        var entity = entities[entityId]?.asObject ?? [:]
+        var bindings = entity[Self.bindingsKey]?.asObject ?? [:]
+        if let target, !target.isEmpty {
+            bindings[role.rawValue] = .string(target)
+        } else {
+            bindings.removeValue(forKey: role.rawValue)
+        }
+        if bindings.isEmpty {
+            entity.removeValue(forKey: Self.bindingsKey)
+        } else {
+            entity[Self.bindingsKey] = .object(bindings)
         }
         if entity.isEmpty {
             entities.removeValue(forKey: entityId)
