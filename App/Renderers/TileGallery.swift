@@ -128,35 +128,45 @@ struct TileGallery: View {
 
     /// **The two ways a two-state tile can show itself**, side by side, because the choice between
     /// them is a household setting and neither is obviously right. The glyphs differ between states
-    /// — an open door against a closed one — which is what makes the icon style worth having; the
-    /// label style exists for the device classes where a picture is a guess.
+    /// — an open door against a closed one, a filled power symbol against a hollow one — which is
+    /// what makes the icon style worth having; the label style exists for the device classes where a
+    /// picture is a guess.
     ///
     /// The unreachable cases are here deliberately. Both styles must say "Unavailable" rather than
     /// asserting a state, and the lock is the one where getting that wrong is a security claim.
     private var stateStyles: some View {
         VStack(alignment: .leading, spacing: 14) {
-            section("Icon — binary sensor, lock, cover") {
+            section("Icon — binary sensor, lock, cover, switch") {
                 LazyVGrid(columns: Self.columns, spacing: 10) {
-                    ForEach(["binary_sensor.active", "binary_sensor.clear",
-                             "lock.locked", "lock.unlocked", "lock.jammed",
-                             "cover.open", "cover.closed",
-                             "binary_sensor.unavailable", "lock.unavailable"], id: \.self) { id in
+                    ForEach(Self.twoStateCases, id: \.self) { id in
                         DeviceTileView(entityId: id, surface: .overview)
                     }
                 }
             }
             section("Label — the same devices, same states") {
                 LazyVGrid(columns: Self.columns, spacing: 10) {
-                    ForEach(["binary_sensor.active_l", "binary_sensor.clear_l",
-                             "lock.locked_l", "lock.unlocked_l", "lock.jammed_l",
-                             "cover.open_l", "cover.closed_l",
-                             "binary_sensor.unavailable_l", "lock.unavailable_l"], id: \.self) { id in
+                    ForEach(Self.twoStateCases.map { $0 + "_l" }, id: \.self) { id in
                         DeviceTileView(entityId: id, surface: .overview)
                     }
                 }
             }
         }
     }
+
+    /// **Typed and hoisted out of the view builder deliberately.** As inline literals inside
+    /// `ForEach` these two lists compiled fine in a normal build and defeated the *preview*
+    /// compiler — "unable to type-check this expression in reasonable time" — which would have made
+    /// the one page that verifies this feature the one page nobody could look at.
+    ///
+    /// The label row is these same ids with a suffix, so the two rows cannot drift apart: a case
+    /// added to one is added to both.
+    private static let twoStateCases: [String] = [
+        "binary_sensor.active", "binary_sensor.clear",
+        "lock.locked", "lock.unlocked", "lock.jammed",
+        "cover.open", "cover.closed",
+        "switch.on", "switch.off",
+        "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
+    ]
 
     /// Climate at its real width: 2 of 4 columns, as both surfaces draw it.
     private var climateRow: some View {
@@ -324,6 +334,10 @@ struct TileGallery: View {
             ("lock.unavailable_l", "unavailable", "Shed", nil),
             ("cover.open_l", "open", "Blinds", nil),
             ("cover.closed_l", "closed", "Garage", "garage"),
+            ("switch.on_l", "on", "Fan", nil),
+            ("switch.off_l", "off", "Heater", "outlet"),
+            ("switch.unavailable_l", "unavailable", "Pump", nil),
+            ("cover.unavailable_l", "unavailable", "Awning", nil),
         ] as [(String, String, String, String?)] {
             var attrs: [String: JSONValue] = ["friendly_name": .string(name)]
             if let dc { attrs["device_class"] = .string(dc) }

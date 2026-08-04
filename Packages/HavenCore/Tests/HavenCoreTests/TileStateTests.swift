@@ -85,3 +85,32 @@ import Testing
     #expect(!TileState.isTwoState(.camera))
     #expect(!TileState.isTwoState(.climate))
 }
+
+// MARK: - Switches
+
+/// The glyph fills when on and hollows when off, doubling the distinction the tint already makes —
+/// which is the point, since tint alone is what made every two-state tile look alike.
+@Test func aSwitchFillsWhenItIsOn() {
+    let on = TileState.switchOutlet(deviceClass: nil, isOn: true)
+    let off = TileState.switchOutlet(deviceClass: nil, isOn: false)
+    #expect(on.word == "On")
+    #expect(off.word == "Off")
+    #expect(on.symbol != off.symbol)
+}
+
+/// An outlet looks like an outlet rather than like a generic power symbol.
+@Test func anOutletKeepsItsOwnPicture() {
+    #expect(TileState.switchOutlet(deviceClass: "outlet", isOn: true).symbol
+            == "poweroutlet.type.b.fill")
+}
+
+@Test func anUnreachableSwitchAssertsNothing() {
+    #expect(TileState.switchOutlet(deviceClass: nil, isOn: false, unavailable: true) == .unavailable)
+}
+
+/// A light is deliberately **not** two-state here: its tile carries a brightness slider, and a
+/// centred glyph would have to sit around the more useful control.
+@Test func aSwitchIsTwoStateButALightIsNot() {
+    #expect(TileState.isTwoState(.switchOutlet))
+    #expect(!TileState.isTwoState(.light))
+}

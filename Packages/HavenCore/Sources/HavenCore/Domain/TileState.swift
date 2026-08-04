@@ -17,8 +17,8 @@ public enum TileStateStyle: String, Sendable, Equatable, CaseIterable {
 ///
 /// In HavenCore rather than in the tiles because it is a table with rules in it — Home Assistant's
 /// device classes name a *kind* of thing, and what "on" means differs completely between them: a
-/// door is open, a smoke detector has detected something, a moisture sensor is wet. Three tiles were
-/// otherwise going to grow three copies of that judgement.
+/// door is open, a smoke detector has detected something, a moisture sensor is wet. Four tiles were
+/// otherwise going to grow four copies of that judgement.
 public struct TileState: Sendable, Equatable {
     public let symbol: String
     public let word: String
@@ -104,6 +104,24 @@ public struct TileState: Sendable, Equatable {
         }
     }
 
+    /// A switch or an outlet's state.
+    ///
+    /// The glyph fills when on and hollows when off, which is the same distinction the tint already
+    /// makes — and the point of doubling it is that tint alone is what made every two-state tile look
+    /// alike from across a room.
+    public static func switchOutlet(deviceClass: String?, isOn: Bool,
+                                    unavailable: Bool = false) -> TileState {
+        guard !unavailable else { return .unavailable }
+        switch deviceClass {
+        case "outlet":
+            return isOn ? TileState(symbol: "poweroutlet.type.b.fill", word: "On")
+                        : TileState(symbol: "poweroutlet.type.b", word: "Off")
+        default:
+            return isOn ? TileState(symbol: "power.circle.fill", word: "On")
+                        : TileState(symbol: "power.circle", word: "Off")
+        }
+    }
+
     /// A lock's state — the one with three of them.
     ///
     /// Jammed is not a third shade of locked: it is a door that tried and failed, and it gets its own
@@ -121,8 +139,10 @@ public struct TileState: Sendable, Equatable {
     /// choice of how to show it.
     public static func isTwoState(_ domain: Domain) -> Bool {
         switch domain {
-        case .binarySensor, .lock, .cover: return true
-        case .light, .switchOutlet, .climate, .mediaPlayer, .camera, .scene, .script, .button,
+        case .binarySensor, .lock, .cover, .switchOutlet: return true
+        // A light is deliberately absent: its tile carries a brightness slider, and a glyph in the
+        // middle would have to sit around a control that is the more useful thing on it.
+        case .light, .climate, .mediaPlayer, .camera, .scene, .script, .button,
              .sensor, .unknown: return false
         }
     }
