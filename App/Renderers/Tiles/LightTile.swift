@@ -1,14 +1,6 @@
 import SwiftUI
 import HavenCore
 struct LightTile: View {
-    /// Trailing room for the slider, so the name beneath the state clears it.
-    ///
-    /// The slider's *drawn* track is 4pt — its touch target is far wider but `PipSlider` pins its
-    /// layout width to the track, deliberately, so that nothing around it moves. So this only has to
-    /// clear 4pt and a gap. It was 22 and cost the name real characters: "Kitchen" arrived as
-    /// "Kitch…" on a tile with room to spare.
-    private static let sliderClearance: CGFloat = 12
-
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
@@ -29,8 +21,7 @@ struct LightTile: View {
             StateFace(state: TileState.light(isOn: on, unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: on, unavailable: unavailable,
-                      trailingInset: (on && s?.brightnessPercent != nil) ? Self.sliderClearance : 0)
+                      accent: accent, active: on, unavailable: unavailable)
                 .overlay(alignment: .trailing) {
                     // Shown only while the light is on, unchanged: an off light has no brightness,
                     // and `LightModal` makes the same call ("don't show a stale percentage"). So the
@@ -46,7 +37,11 @@ struct LightTile: View {
                                   label: "Brightness",
                                   onCommit: { store.setBrightness(entityId, percent: $0) },
                                   onTap: { store.toggle(entityId) })
-                            .padding(.vertical, 2)
+                            .padding(.top, 2)
+                            // Stops above the name rather than running the full height of the
+                            // tile, so the label is exactly as wide with a slider as without one —
+                            // see `StateFace.nameHeight`.
+                            .padding(.bottom, StateFace.nameHeight)
                     }
                 }
         }

@@ -1,11 +1,6 @@
 import SwiftUI
 import HavenCore
 struct CoverTile: View {
-    /// Trailing room for the position slider, so the name beneath the state clears it. See
-    /// `LightTile.sliderClearance` — the slider's layout width is its 4pt track, not its touch
-    /// target, so this needs to be small or it eats the name for nothing.
-    private static let sliderClearance: CGFloat = 12
-
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
@@ -24,8 +19,7 @@ struct CoverTile: View {
                                              unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: open, unavailable: unavailable,
-                      trailingInset: s?.positionPercent != nil ? Self.sliderClearance : 0)
+                      accent: accent, active: open, unavailable: unavailable)
                 .overlay(alignment: .trailing) {
                     // Unlike the light, this is shown at every position including 0 — a closed shade
                     // has a real, meaningful position — so a drag up from the bottom genuinely opens
@@ -38,7 +32,11 @@ struct CoverTile: View {
                                   label: "Position",
                                   onCommit: { store.setCoverPosition(entityId, percent: $0) },
                                   onTap: { store.openCloseCover(entityId) })
-                            .padding(.vertical, 2)
+                            .padding(.top, 2)
+                            // Stops above the name rather than running the full height of the
+                            // tile, so the label is exactly as wide with a slider as without one —
+                            // see `StateFace.nameHeight`.
+                            .padding(.bottom, StateFace.nameHeight)
                     }
                 }
         }
