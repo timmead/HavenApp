@@ -313,18 +313,33 @@ final class HomeStore {
 
     /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
     ///
-    /// Returns the new device's id, or nil when the write failed. **The id is generated and never
-    /// derived from the inputs** — deriving it would orphan the device's own name and size the
-    /// moment somebody added a follower.
+    /// **Its id is the primary's entity id**, which is the same rule a one-entity device follows —
+    /// so there is exactly one id space in the app and it is entity ids. Every surface already
+    /// renders a ref by its primary, and every stored name, size, style, membership and order is
+    /// keyed that way, so a device that changes type keeps all of it.
+    ///
+    /// A generated id was the first attempt and was wrong in a way nothing caught: the room rendered
+    /// the tile under the *primary's* id while the record lived under `haven:…`, so a garage door
+    /// came back as a switch on the next launch and removing it wrote membership for an id the
+    /// device was not stored under. The gallery's fixtures had keyed devices by entity id all along,
+    /// which is why they rendered correctly and a real one did not.
+    ///
+    /// What this gives up is changing which entity is the primary — that would move the id and
+    /// orphan the settings. Changing a device's primary is a different device, and nothing offers
+    /// it.
     func createDevice(type: DeviceType, primary: String,
                       areaId: String) async -> String? {
-        let id = "haven:\(type.id):\(UUID().uuidString.prefix(8).lowercased())"
         let device = DashboardDocument.StoredDevice(
-            id: id, type: type.id, areaId: areaId, inputs: [.primary: [primary]])
-        switch await config.update({ $0.settingDevice(device, id: id) }) {
-        case .written, .unchanged: return id
+            id: primary, type: type.id, areaId: areaId, inputs: [.primary: [primary]])
+        switch await config.update({ $0.settingDevice(device, id: primary) }) {
+        case .written, .unchanged: return primary
         case .notAuthorized, .failed: return nil
         }
+    }
+
+    /// Drops a composite back to the plain entity it was built around.
+    func removeDevice(_ id: String) async -> HavenConfig.Outcome {
+        await config.update { $0.settingDevice(nil, id: id) }
     }
 
     /// Sets or clears one role on a composite, leaving its other inputs alone.

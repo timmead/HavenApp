@@ -103,9 +103,19 @@ Every role holds a list, including the `.one` roles, so that reading the documen
 on cardinality — the *type* says how many are meaningful and a second entry in a `.one` role is
 ignored rather than crashing something.
 
-`deviceId` is generated once and never derived from the inputs. **Deriving it would orphan the
-device's own name and size the moment somebody added a shade to the group** — the id would change and
-every record keyed on it would point at nothing.
+`deviceId` **is the primary's entity id**, which is the same rule a one-entity device follows — so
+the app has exactly one id space and it is entity ids.
+
+The first attempt generated `haven:…` ids, on the reasoning that deriving an id from the inputs would
+orphan the device's name and size the moment somebody added a shade. That reasoning was right about
+*inputs* and wrong about the *primary*: followers change, a primary does not. And the generated id
+broke the thing it was protecting — every surface renders a ref by its primary, so a device stored
+under any other key was looked up and never found. A garage door came back as a switch on the next
+launch, and removing it wrote membership against an id the device was not stored under.
+
+What this gives up is changing which entity is the primary. That would move the id and orphan the
+settings — and a device with a different primary is a different device, which is why nothing offers
+it.
 
 Simple devices are absent from the document entirely.
 

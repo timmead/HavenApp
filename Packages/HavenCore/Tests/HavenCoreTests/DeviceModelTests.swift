@@ -49,13 +49,13 @@ import Testing
 
 /// A composite's state is read from its primary — a shade group's master.
 @Test func aCompositeReadsItsStateFromItsPrimary() {
-    let ref = DeviceRef.composite(id: "haven:1", type: "shade_group",
+    let ref = DeviceRef.composite(id: "cover.a", type: "shade_group",
                                   inputs: [.primary: ["cover.a"], .follower: ["cover.b", "cover.c"]])
     #expect(ref.primaryEntityId == "cover.a")
     #expect(Set(ref.entityIds) == ["cover.a", "cover.b", "cover.c"])
-    // And its id is its own, not derived from those inputs — adding a follower must not orphan the
-    // group's name and size.
-    #expect(ref.id == "haven:1")
+    // Its id is the master's, so adding or removing a *follower* never moves it — the group keeps
+    // its name, size and place in the room.
+    #expect(ref.id == "cover.a")
 }
 
 // MARK: - Storage
@@ -66,9 +66,9 @@ private func doc(_ device: DashboardDocument.StoredDevice) -> DashboardDocument 
 
 @Test func aCompositeRoundTripsThroughTheDocument() {
     let stored = DashboardDocument.StoredDevice(
-        id: "haven:1", type: "shade_group", areaId: "living",
+        id: "cover.a", type: "shade_group", areaId: "living",
         inputs: [.primary: ["cover.a"], .follower: ["cover.b"]])
-    let back = doc(stored).devices["haven:1"]
+    let back = doc(stored).devices["cover.a"]
     #expect(back?.type == "shade_group")
     #expect(back?.areaId == "living")
     #expect(back?.inputs[.primary] == ["cover.a"])
@@ -87,9 +87,9 @@ private func doc(_ device: DashboardDocument.StoredDevice) -> DashboardDocument 
 }
 
 @Test func removingACompositeLeavesNoResidue() {
-    let stored = DashboardDocument.StoredDevice(id: "haven:1", type: "shade_group", areaId: "living",
+    let stored = DashboardDocument.StoredDevice(id: "cover.a", type: "shade_group", areaId: "living",
                                                 inputs: [.primary: ["cover.a"]])
-    let after = doc(stored).settingDevice(nil, id: "haven:1")
+    let after = doc(stored).settingDevice(nil, id: "cover.a")
     #expect(after.devices.isEmpty)
     #expect(after.raw.asObject?["devices"] == nil)
 }
@@ -108,51 +108,88 @@ private func home(_ entityIds: [String]) -> ResolvedHome {
 /// **A shade group and its members are one tile, not four.**
 @Test func aCompositeConsumesItsMembersTiles() {
     let group = DashboardDocument.StoredDevice(
-        id: "haven:1", type: "shade_group", areaId: "living",
+        id: "cover.a", type: "shade_group", areaId: "living",
         inputs: [.primary: ["cover.a"], .follower: ["cover.b", "cover.c"]])
     let rooms = SectionBuilder.rooms(from: home(["cover.a", "cover.b", "cover.c", "light.x"]),
-                                     environment: [:], devices: ["haven:1": group],
+                                     environment: [:], devices: ["cover.a": group],
                                      overrides: [:], orders: [:])
     let living = rooms.first { $0.areaId == "living" }!
     let ids = living.refs(for: .overview).map(\.id)
-    #expect(ids.contains("haven:1"))
-    #expect(!ids.contains("cover.a"))
+    // The group *is* cover.a — one id space, so its followers vanish and it keeps the master's id.
+    #expect(ids.contains("cover.a"))
     #expect(!ids.contains("cover.b"))
+    #expect(!ids.contains("cover.c"))
     #expect(ids.contains("light.x"))
+    #expect(ids.count == 2)
 }
 
 /// Scoped to the room the composite is in. A shade moved to another area in Home Assistant still
 /// gets a tile there — HA's configuration outranking Haven's grouping, as everywhere else.
 @Test func aMemberInAnotherRoomStillGetsItsOwnTile() {
     let group = DashboardDocument.StoredDevice(
-        id: "haven:1", type: "shade_group", areaId: "living",
+        id: "cover.a", type: "shade_group", areaId: "living",
         inputs: [.primary: ["cover.a"], .follower: ["cover.hall"]])
     let rooms = SectionBuilder.rooms(from: home(["cover.a"]), environment: [:],
-                                     devices: ["haven:1": group], overrides: [:], orders: [:])
+                                     devices: ["cover.a": group], overrides: [:], orders: [:])
     let hall = rooms.first { $0.areaId == "hall" }!
     #expect(hall.refs(for: .overview).map(\.id) == ["cover.hall"])
 }
 
 /// A composite is ordered like anything else — it has an id, so it drags.
 @Test func aCompositeTakesItsPlaceInTheRoomsOrder() {
-    let group = DashboardDocument.StoredDevice(id: "haven:1", type: "shade_group", areaId: "living",
+    let group = DashboardDocument.StoredDevice(id: "cover.a", type: "shade_group", areaId: "living",
                                                inputs: [.primary: ["cover.a"]])
     let rooms = SectionBuilder.rooms(from: home(["cover.a", "light.x"]), environment: [:],
-                                     devices: ["haven:1": group], overrides: [:],
-                                     orders: ["living": ["light.x", "haven:1"]])
+                                     devices: ["cover.a": group], overrides: [:],
+                                     orders: ["living": ["light.x", "cover.a"]])
     let living = rooms.first { $0.areaId == "living" }!
-    #expect(living.refs(for: .overview).map(\.id) == ["light.x", "haven:1"])
+    #expect(living.refs(for: .overview).map(\.id) == ["light.x", "cover.a"])
 }
 
 /// A composite has no curation tier — curation ranks Home Assistant's entities and a composite is
 /// Haven's — so it shows unless the household removed it.
 @Test func aCompositeIsShownUnlessItWasRemoved() {
-    let group = DashboardDocument.StoredDevice(id: "haven:1", type: "shade_group", areaId: "living",
+    let group = DashboardDocument.StoredDevice(id: "cover.a", type: "shade_group", areaId: "living",
                                                inputs: [.primary: ["cover.a"]])
     let rooms = SectionBuilder.rooms(from: home(["cover.a"]), environment: [:],
-                                     devices: ["haven:1": group],
-                                     overrides: ["haven:1": [.overview: .hidden]], orders: [:])
+                                     devices: ["cover.a": group],
+                                     overrides: ["cover.a": [.overview: .hidden]], orders: [:])
     let living = rooms.first { $0.areaId == "living" }!
+    // **Removing it works**, which it did not when the device and the tile disagreed about its id.
     #expect(living.refs(for: .overview).isEmpty)
-    #expect(living.refs(for: .roomDetail).map(\.id) == ["haven:1"])
+    #expect(living.refs(for: .roomDetail).map(\.id) == ["cover.a"])
+}
+
+// MARK: - One id space
+
+/// **A composite's id is its primary's entity id.** The room renders a ref by its primary, so a
+/// device stored under any other key is looked up and never found — which is exactly what happened:
+/// a garage door came back as a switch on the next launch, and removing it wrote membership against
+/// an id the device was not stored under.
+@Test func aDeviceStoredUnderAGeneratedIdIsStillFoundByItsPrimary() {
+    let raw = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "devices": .object(["haven:garage_door:abc123": .object([
+            "type": .string("garage_door"), "area": .string("garage"),
+            "inputs": .object(["primary": .array([.string("switch.opener")])])])])]))
+    #expect(raw.devices["switch.opener"]?.type == "garage_door")
+    #expect(raw.devices["switch.opener"]?.id == "switch.opener")
+    #expect(raw.devices["haven:garage_door:abc123"] == nil)
+}
+
+/// Two records claiming one primary resolve deterministically — the correctly keyed one wins,
+/// rather than whichever the dictionary happened to yield first.
+@Test func aCorrectlyKeyedDeviceBeatsAStraggler() {
+    let raw = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "devices": .object([
+            "haven:old:1": .object([
+                "type": .string("shade_group"), "area": .string("a"),
+                "inputs": .object(["primary": .array([.string("cover.x")])])]),
+            "cover.x": .object([
+                "type": .string("garage_door"), "area": .string("b"),
+                "inputs": .object(["primary": .array([.string("cover.x")])])]),
+        ])]))
+    #expect(raw.devices["cover.x"]?.type == "garage_door")
+    #expect(raw.devices.count == 1)
 }

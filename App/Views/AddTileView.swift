@@ -276,6 +276,10 @@ struct AddTileView: View {
     /// change it always was.
     private func add(_ entityId: String, as type: DeviceType) async {
         guard type.roles.count > 1 else {
+            // Choosing a one-entity type for something that is currently a composite converts it
+            // back — otherwise the stored device would keep rendering and the choice would appear
+            // to do nothing.
+            _ = await store.removeDevice(entityId)
             await add(entityId)
             return
         }

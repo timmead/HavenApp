@@ -323,10 +323,21 @@ public struct DashboardDocument: Sendable, Equatable {
     /// A record missing a type, an area or a primary is dropped rather than half-built: a device
     /// with no primary has no state to read, and rendering one would be a tile that cannot say
     /// anything.
+    /// **Keyed by the device's primary entity, whatever key it was written under.**
+    ///
+    /// A device's id is its primary's entity id — the one rule that gives the app a single id space
+    /// and lets a device change type without losing its name, size or place. An earlier build
+    /// generated `haven:…` ids instead, and those records would otherwise be invisible for good:
+    /// the room renders a ref by its primary, so a device stored under any other key is looked up
+    /// and never found.
+    ///
+    /// Re-keying on read repairs them without a migration write. Where two records claim the same
+    /// primary, the one already stored under the right key wins, so this is deterministic rather
+    /// than dependent on dictionary order.
     public var devices: [String: StoredDevice] {
         guard let stored = raw.asObject?[Self.devicesKey]?.asObject else { return [:] }
         var out: [String: StoredDevice] = [:]
-        for (id, value) in stored {
+        for (id, value) in stored.sorted(by: { $0.key < $1.key }) {
             guard let o = value.asObject,
                   let type = o["type"]?.asString, !type.isEmpty,
                   let areaId = o["area"]?.asString, !areaId.isEmpty,
@@ -337,8 +348,10 @@ public struct DashboardDocument: Sendable, Equatable {
                 let ids = (rawIds.asArray ?? []).compactMap { $0.asString }.filter { !$0.isEmpty }
                 if !ids.isEmpty { inputs[role] = ids }
             }
-            guard inputs[.primary]?.isEmpty == false else { continue }
-            out[id] = StoredDevice(id: id, type: type, areaId: areaId, inputs: inputs)
+            guard let primary = inputs[.primary]?.first else { continue }
+            // Already correctly keyed always wins over a re-keyed straggler.
+            if out[primary] != nil, out[primary]?.id == primary { continue }
+            out[primary] = StoredDevice(id: primary, type: type, areaId: areaId, inputs: inputs)
         }
         return out
     }
