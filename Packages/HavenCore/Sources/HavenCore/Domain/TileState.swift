@@ -122,6 +122,16 @@ public struct TileState: Sendable, Equatable {
         }
     }
 
+    /// A light's state.
+    ///
+    /// A lit bulb against an unlit one — the same fill/hollow distinction a switch makes, in the
+    /// glyph the domain already uses.
+    public static func light(isOn: Bool, unavailable: Bool = false) -> TileState {
+        guard !unavailable else { return .unavailable }
+        return isOn ? TileState(symbol: "lightbulb.fill", word: "On")
+                    : TileState(symbol: "lightbulb", word: "Off")
+    }
+
     /// A lock's state — the one with three of them.
     ///
     /// Jammed is not a third shade of locked: it is a door that tried and failed, and it gets its own
@@ -139,10 +149,10 @@ public struct TileState: Sendable, Equatable {
     /// choice of how to show it.
     public static func isTwoState(_ domain: Domain) -> Bool {
         switch domain {
-        case .binarySensor, .lock, .cover, .switchOutlet: return true
-        // A light is deliberately absent: its tile carries a brightness slider, and a glyph in the
-        // middle would have to sit around a control that is the more useful thing on it.
-        case .light, .climate, .mediaPlayer, .camera, .scene, .script, .button,
+        case .binarySensor, .lock, .cover, .switchOutlet, .light: return true
+        // The rest have something better to show than two states: a reading, a picture, a
+        // temperature and a mode, or an action with no state at all.
+        case .climate, .mediaPlayer, .camera, .scene, .script, .button,
              .sensor, .unknown: return false
         }
     }

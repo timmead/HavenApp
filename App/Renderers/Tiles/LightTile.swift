@@ -14,15 +14,17 @@ struct LightTile: View {
         let accent = HavenColor.domain(.light)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
-            HStack(alignment: .top, spacing: 0) {
-                // `on` already reads `false` for an `unavailable` state string, so these would
-                // resolve to `.secondary` there regardless — but incidentally, via
-                // `LightState.isOn`'s definition, rather than because anything decided it.
-                TileLabel(symbol: IconMap.symbol(domain: .light, deviceClass: nil),
+            HStack(alignment: .center, spacing: 0) {
+                // The state, large, in what the brightness slider leaves of the tile — the same
+                // arrangement `CoverTile` uses, which is what settled the question of whether a
+                // tile with a control could carry a centred glyph at all.
+                //
+                // `unavailable` is decided by `TileState` rather than incidentally by
+                // `LightState.isOn` reading false for an unreachable light.
+                StateFace(state: TileState.light(isOn: on, unavailable: unavailable),
+                          style: store.stateStyle(of: entityId),
                           name: store.displayName(of: entityId),
-                          icon: on ? .accent : .secondary,
-                          title: on ? .primary : .secondary,
-                          accent: accent, unavailable: unavailable)
+                          accent: accent, active: on, unavailable: unavailable)
                 // Shown only while the light is on, unchanged: an off light has no brightness, and
                 // `LightModal` makes the same call ("don't show a stale percentage"). So the
                 // volume tiles' turn-it-on-when-you-drag case cannot arise here — there is nothing

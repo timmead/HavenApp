@@ -108,9 +108,18 @@ import Testing
     #expect(TileState.switchOutlet(deviceClass: nil, isOn: false, unavailable: true) == .unavailable)
 }
 
-/// A light is deliberately **not** two-state here: its tile carries a brightness slider, and a
-/// centred glyph would have to sit around the more useful control.
-@Test func aSwitchIsTwoStateButALightIsNot() {
+/// **A light is two-state as well, brightness slider and all.** It was left out at first on the
+/// grounds that a centred glyph would have to sit around the slider — but a cover's tile carries one
+/// too and shares the space without trouble, so the exception was not earned.
+///
+/// What stays out are the domains with something better to show than two states: a reading, a
+/// picture, a temperature and a mode, or an action with no state at all.
+@Test func aLightIsTwoStateButAThermostatIsNot() {
     #expect(TileState.isTwoState(.switchOutlet))
-    #expect(!TileState.isTwoState(.light))
+    #expect(TileState.isTwoState(.light))
+    #expect(TileState.light(isOn: true).symbol == "lightbulb.fill")
+    #expect(TileState.light(isOn: false).symbol == "lightbulb")
+    #expect(TileState.light(isOn: true, unavailable: true) == .unavailable)
+    #expect(!TileState.isTwoState(.climate))
+    #expect(!TileState.isTwoState(.mediaPlayer))
 }

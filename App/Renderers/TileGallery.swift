@@ -138,7 +138,7 @@ struct TileGallery: View {
     /// asserting a state, and the lock is the one where getting that wrong is a security claim.
     private var stateStyles: some View {
         VStack(alignment: .leading, spacing: 14) {
-            section("Icon — binary sensor, lock, cover, switch") {
+            section("Icon — light, binary sensor, lock, cover, switch") {
                 LazyVGrid(columns: Self.columns, spacing: 10) {
                     ForEach(Self.twoStateCases, id: \.self) { id in
                         DeviceTileView(entityId: id, surface: .overview)
@@ -163,12 +163,13 @@ struct TileGallery: View {
     /// The label row is these same ids with a suffix, so the two rows cannot drift apart: a case
     /// added to one is added to both.
     private static let twoStateCases: [String] = [
+        "light.on", "light.off",
         "binary_sensor.active", "binary_sensor.clear",
         "lock.locked", "lock.unlocked", "lock.jammed",
         "cover.open", "cover.closed",
         "switch.on", "switch.off",
         "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
-        "cover.unavailable",
+        "cover.unavailable", "light.unavailable",
     ]
 
     /// **The 4×2 climate tile, at the height a room actually gives it.**
@@ -364,6 +365,9 @@ struct TileGallery: View {
             ("switch.off_l", "off", "Heater", "outlet"),
             ("switch.unavailable_l", "unavailable", "Pump", nil),
             ("cover.unavailable_l", "unavailable", "Awning", nil),
+            ("light.on_l", "on", "Kitchen", nil),
+            ("light.off_l", "off", "Hallway", nil),
+            ("light.unavailable_l", "unavailable", "Porch", nil),
         ] as [(String, String, String, String?)] {
             var attrs: [String: JSONValue] = ["friendly_name": .string(name)]
             if let dc { attrs["device_class"] = .string(dc) }
