@@ -20,6 +20,14 @@ struct StateFace: View {
     let accent: Color
     let active: Bool
     let unavailable: Bool
+    /// Room to leave on the trailing edge for a control drawn *over* this face — a brightness or
+    /// position slider.
+    ///
+    /// **Only the name is inset, never the state.** The state is centred on the whole tile, which is
+    /// the point of it: a bulb that sits left of centre whenever a light happens to be dimmable, and
+    /// centred when it does not, reads as a layout that cannot make up its mind. The name is the
+    /// one thing that would actually collide, so the name is the one thing that moves.
+    var trailingInset: CGFloat = 0
 
     /// The state's own emphasis: accented when active, secondary otherwise — and resolved through
     /// `Emphasis` so the unreachable rule is applied rather than remembered. See `TileLabel`.
@@ -51,6 +59,7 @@ struct StateFace: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .lineLimit(1)
                 .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: accent))
+                .padding(.trailing, trailingInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

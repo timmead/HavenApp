@@ -1,6 +1,14 @@
 import SwiftUI
 import HavenCore
 struct LightTile: View {
+    /// Trailing room for the slider, so the name beneath the state clears it.
+    ///
+    /// The slider's *drawn* track is 4pt — its touch target is far wider but `PipSlider` pins its
+    /// layout width to the track, deliberately, so that nothing around it moves. So this only has to
+    /// clear 4pt and a gap. It was 22 and cost the name real characters: "Kitchen" arrived as
+    /// "Kitch…" on a tile with room to spare.
+    private static let sliderClearance: CGFloat = 12
+
     let entityId: String
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
@@ -14,35 +22,33 @@ struct LightTile: View {
         let accent = HavenColor.domain(.light)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
-            HStack(alignment: .center, spacing: 0) {
-                // The state, large, in what the brightness slider leaves of the tile — the same
-                // arrangement `CoverTile` uses, which is what settled the question of whether a
-                // tile with a control could carry a centred glyph at all.
-                //
-                // `unavailable` is decided by `TileState` rather than incidentally by
-                // `LightState.isOn` reading false for an unreachable light.
-                StateFace(state: TileState.light(isOn: on, unavailable: unavailable),
-                          style: store.stateStyle(of: entityId),
-                          name: store.displayName(of: entityId),
-                          accent: accent, active: on, unavailable: unavailable)
-                // Shown only while the light is on, unchanged: an off light has no brightness, and
-                // `LightModal` makes the same call ("don't show a stale percentage"). So the
-                // volume tiles' turn-it-on-when-you-drag case cannot arise here — there is nothing
-                // to drag until the light is already on.
-                //
-                // The mirror-image hazard is the real one, and `minimum: 1` is what prevents it:
-                // dragging to 0 would ask Home Assistant to turn the light off, and the control
-                // would vanish from under the finger mid-gesture. Turning a light off is the tap
-                // this tile already has, an inch away.
-                if on, let pct = s?.brightnessPercent {
-                    Spacer(minLength: 6)
-                    PipSlider(percent: pct, accent: accent, minimum: 1,
-                              label: "Brightness",
-                              onCommit: { store.setBrightness(entityId, percent: $0) },
-                              onTap: { store.toggle(entityId) })
-                        .padding(.vertical, 2)
+            // **The bulb is centred on the tile, not on what the slider leaves of it.** Laid out
+            // side by side, a dimmable light's glyph sat left of centre and a non-dimmable one's sat
+            // in the middle — the same tile appearing to change its mind about where its icon goes.
+            // The slider is drawn *over* the face instead, and only the name is inset to clear it.
+            StateFace(state: TileState.light(isOn: on, unavailable: unavailable),
+                      style: store.stateStyle(of: entityId),
+                      name: store.displayName(of: entityId),
+                      accent: accent, active: on, unavailable: unavailable,
+                      trailingInset: (on && s?.brightnessPercent != nil) ? Self.sliderClearance : 0)
+                .overlay(alignment: .trailing) {
+                    // Shown only while the light is on, unchanged: an off light has no brightness,
+                    // and `LightModal` makes the same call ("don't show a stale percentage"). So the
+                    // volume tiles' turn-it-on-when-you-drag case cannot arise here — there is
+                    // nothing to drag until the light is already on.
+                    //
+                    // The mirror-image hazard is the real one, and `minimum: 1` is what prevents it:
+                    // dragging to 0 would ask Home Assistant to turn the light off, and the control
+                    // would vanish from under the finger mid-gesture. Turning a light off is the tap
+                    // this tile already has, an inch away.
+                    if on, let pct = s?.brightnessPercent {
+                        PipSlider(percent: pct, accent: accent, minimum: 1,
+                                  label: "Brightness",
+                                  onCommit: { store.setBrightness(entityId, percent: $0) },
+                                  onTap: { store.toggle(entityId) })
+                            .padding(.vertical, 2)
+                    }
                 }
-            }
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }
