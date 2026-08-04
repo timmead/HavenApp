@@ -77,6 +77,9 @@ struct RoomDetailView: View {
                 }
             }
             .padding()
+            // The floor bar floats over this view rather than insetting it, so the last row of
+            // tiles would otherwise sit behind it — see `DashboardView.clearance`.
+            .padding(.bottom, DashboardView.clearance)
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.large)
