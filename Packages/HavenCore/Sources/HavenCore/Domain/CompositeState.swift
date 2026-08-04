@@ -19,15 +19,23 @@ public struct DeviceState: Sendable, Equatable {
     /// primary entity's own state, so a device with no bindings renders exactly as it did before
     /// any of this existed.
     public let face: TileState?
+    /// Whether the derived state is the notable one, for tint — nil when nothing is derived.
+    ///
+    /// **It travels with the face because the two must agree.** A relay opener is a `switch`, and a
+    /// tile that took its tint from the switch showed a part-open door greyed out as though it were
+    /// off: the relay's own state says a contact closed, not where the door is.
+    public let isActive: Bool?
     /// Supporting readings, most contextually important first. See `CompositeState.rank`.
     ///
     /// An entity consumed by `face` is **not** also listed here. "Partly open" over "Fully Open —
     /// Off, Fully Closed — Off" is one fact three times, and the third is the one people read.
     public let readings: [DeviceReading]
 
-    public init(primary: String, face: TileState? = nil, readings: [DeviceReading]) {
+    public init(primary: String, face: TileState? = nil, isActive: Bool? = nil,
+                readings: [DeviceReading]) {
         self.primary = primary
         self.face = face
+        self.isActive = isActive
         self.readings = readings
     }
 }
@@ -76,16 +84,23 @@ public enum CompositeState {
     ///   fact, not a fact about the device.
     /// - Parameter bindings: which companion plays which role — see `DeviceRole`. A bound entity is
     ///   read into `face` and drops out of `readings`.
+    /// - Parameter type: what kind of device this is. **What derives a face is the type, not the
+    ///   primary's domain** — a garage door opener is a `switch` as often as it is a `cover`, and
+    ///   keying on the domain silently refused to derive anything for the switch case.
     public static func resolve(primary: String, deviceId: String?,
                                registry: [String: EntityRegistryInfo],
                                tiers: [String: CurationTier],
                                states: [String: EntityState],
+                               type: DeviceType? = nil,
                                bindings: [DeviceRole: String] = [:],
                                excluding: Set<String> = []) -> DeviceState {
-        let face = derivedFace(primary: primary, bindings: bindings, states: states)
+        let face = derivedFace(primary: primary, type: type, bindings: bindings, states: states)
+        // Anything but shut is worth lighting: a door standing open, or standing part-way, is the
+        // state you want to notice from across a room.
+        let isActive = face.map { $0.word != "Closed" }
         let bound = Set(bindings.values)
         guard let deviceId, !deviceId.isEmpty else {
-            return DeviceState(primary: primary, face: face, readings: [])
+            return DeviceState(primary: primary, face: face, isActive: isActive, readings: [])
         }
         let companions = registry.keys.filter { id in
             id != primary
@@ -100,7 +115,7 @@ public enum CompositeState {
                 let l = rank(lhs.entityId), r = rank(rhs.entityId)
                 return l == r ? lhs.entityId < rhs.entityId : l < r
             }
-        return DeviceState(primary: primary, face: face, readings: readings)
+        return DeviceState(primary: primary, face: face, isActive: isActive, readings: readings)
     }
 
     /// The device's own state, derived from its bound roles — or `nil` when they cannot say.
@@ -115,13 +130,17 @@ public enum CompositeState {
     ///
     /// Both limits on is contradictory hardware, and resolves to **Closed** — a garage reported shut
     /// by its own closed sensor is the reading you act on.
-    static func derivedFace(primary: String, bindings: [DeviceRole: String],
+    static func derivedFace(primary: String, type: DeviceType?,
+                            bindings: [DeviceRole: String],
                             states: [String: EntityState]) -> TileState? {
-        guard Domain.of(primary) == .cover else { return nil }
+        guard type?.id == "garage_door" else { return nil }
         guard let openId = bindings[.openLimit], let closedId = bindings[.closedLimit],
               let open = states[openId], let closed = states[closedId],
               !open.isUnavailable, !closed.isUnavailable else { return nil }
-        let deviceClass = states[primary]?.deviceClass
+        // A garage's glyphs, whatever the opener happens to be. A switch-primary opener has no
+        // cover device class of its own, and rendering it as blinds would be a picture of the wrong
+        // object.
+        let deviceClass = "garage"
         if closed.state == "on" {
             return TileState.cover(deviceClass: deviceClass, isOpen: false)
         }

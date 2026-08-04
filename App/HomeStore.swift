@@ -684,6 +684,7 @@ final class HomeStore {
                                       registry: home.registryInfo,
                                       tiers: tiers,
                                       states: states,
+                                      type: deviceType(of: entityId),
                                       bindings: bindings(of: entityId),
                                       excluding: excluded)
     }

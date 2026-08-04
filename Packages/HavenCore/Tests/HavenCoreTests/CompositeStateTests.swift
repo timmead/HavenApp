@@ -184,6 +184,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         states: ["cover.garage": state("cover.garage", "open", "garage"),
                  "binary_sensor.closed": state("binary_sensor.closed", "off"),
                  "binary_sensor.open": state("binary_sensor.open", "off")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face?.word == "Partly open")
 }
@@ -196,6 +197,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         states: ["cover.garage": state("cover.garage", "open", "garage"),
                  "binary_sensor.closed": state("binary_sensor.closed", "on"),
                  "binary_sensor.open": state("binary_sensor.open", "off")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face?.word == "Closed")
     // And it outranks the cover entity's own "open", which is the point of deriving at all.
@@ -210,6 +212,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         states: ["cover.garage": state("cover.garage", "closed", "garage"),
                  "binary_sensor.closed": state("binary_sensor.closed", "off"),
                  "binary_sensor.open": state("binary_sensor.open", "on")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face?.word == "Open")
 }
@@ -223,6 +226,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         tiers: ["cover.garage": .primary],
         states: ["binary_sensor.closed": state("binary_sensor.closed", "on"),
                  "binary_sensor.open": state("binary_sensor.open", "on")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face?.word == "Closed")
 }
@@ -237,6 +241,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         tiers: ["cover.garage": .primary],
         states: ["binary_sensor.closed": state("binary_sensor.closed", "unavailable"),
                  "binary_sensor.open": state("binary_sensor.open", "off")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face == nil)
 }
@@ -249,6 +254,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         registry: ["cover.garage": info("d1")],
         tiers: ["cover.garage": .primary],
         states: ["binary_sensor.closed": state("binary_sensor.closed", "off")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: [.closedLimit: "binary_sensor.closed"])
     #expect(out.face == nil)
 }
@@ -263,17 +269,46 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
     #expect(out.face == nil)
 }
 
-/// Only covers derive a face today. A lock with bindings would otherwise fall through the cover
-/// rule and read "Partly open", which is not a thing a lock is.
-@Test func onlyACoverDerivesAFace() {
-    let out = CompositeState.resolve(
-        primary: "lock.front", deviceId: "d1",
-        registry: ["lock.front": info("d1")],
-        tiers: ["lock.front": .primary],
-        states: ["binary_sensor.closed": state("binary_sensor.closed", "off"),
-                 "binary_sensor.open": state("binary_sensor.open", "off")],
-        bindings: garage("binary_sensor.closed", "binary_sensor.open"))
-    #expect(out.face == nil)
+/// **The type derives a face, not the domain.** A plain shade is a cover and derives nothing; a
+/// garage door opener is very often a switch and must. Keying this on the domain silently refused
+/// to derive anything for the switch case, which is how a household whose opener is a relay got a
+/// tile that could not say where the door was.
+@Test func theTypeDerivesTheFaceRatherThanTheDomain() {
+    let states = ["binary_sensor.closed": state("binary_sensor.closed", "off"),
+                  "binary_sensor.open": state("binary_sensor.open", "off")]
+    let bindings = garage("binary_sensor.closed", "binary_sensor.open")
+
+    // A switch-primary opener derives, because its *type* says garage door.
+    let asSwitch = CompositeState.derivedFace(primary: "switch.opener",
+                                              type: DeviceTypes.type(id: "garage_door"),
+                                              bindings: bindings, states: states)
+    #expect(asSwitch?.word == "Partly open")
+
+    // The same cover as a plain shade derives nothing — a shade has no limits and no third state.
+    let asShade = CompositeState.derivedFace(primary: "cover.blinds",
+                                             type: DeviceTypes.type(id: "cover"),
+                                             bindings: bindings, states: states)
+    #expect(asShade == nil)
+}
+
+/// A switch-primary opener still gets a garage's picture. It has no cover device class of its own,
+/// and drawing it as blinds would be a picture of the wrong object.
+@Test func aSwitchPrimaryOpenerStillLooksLikeAGarage() {
+    let closed = CompositeState.derivedFace(
+        primary: "switch.opener", type: DeviceTypes.type(id: "garage_door"),
+        bindings: garage("binary_sensor.closed", "binary_sensor.open"),
+        states: ["binary_sensor.closed": state("binary_sensor.closed", "on"),
+                 "binary_sensor.open": state("binary_sensor.open", "off")])
+    #expect(closed?.symbol == "door.garage.closed")
+}
+
+/// A relay opener is offered the type at all — the case that was missing.
+@Test func aSwitchCanBeAGarageDoor() {
+    let ids = DeviceTypes.candidates(for: "switch.opener").map(\.id)
+    #expect(ids.first == "switch")
+    #expect(ids.contains("garage_door"))
+    // A light is still a light: only openers gained a second option, not everything switchable.
+    #expect(DeviceTypes.candidates(for: "light.kitchen").map(\.id) == ["light"])
 }
 
 /// A bound entity is read into the face and drops out of the readings — the same fact three times
@@ -290,6 +325,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
         states: ["binary_sensor.closed": state("binary_sensor.closed", "off"),
                  "binary_sensor.open": state("binary_sensor.open", "off"),
                  "sensor.signal": state("sensor.signal", "-61")],
+        type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"))
     #expect(out.face?.word == "Partly open")
     #expect(out.readings.map(\.entityId) == ["sensor.signal"])
@@ -314,7 +350,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
 /// identically — the one comparison this feature exists to make.
 @Test func partlyOpenDoesNotLookLikeOpen() {
     let partly = CompositeState.derivedFace(
-        primary: "cover.garage",
+        primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"),
         states: ["cover.garage": state("cover.garage", "open", "garage"),
                  "binary_sensor.closed": state("binary_sensor.closed", "off"),
@@ -323,4 +359,24 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
     let closed = TileState.cover(deviceClass: "garage", isOpen: false)
     #expect(partly?.symbol != open.symbol)
     #expect(partly?.symbol != closed.symbol)
+}
+
+/// **The tint travels with the face.** A relay opener is a switch, and taking the tint from the
+/// switch showed a part-open door greyed out as though it were off — the relay's own state says a
+/// contact closed, not where the door is.
+@Test func theDerivedStateCarriesItsOwnTint() {
+    func face(_ closed: String, _ open: String) -> DeviceState {
+        CompositeState.resolve(
+            primary: "switch.opener", deviceId: nil, registry: [:], tiers: [:],
+            states: ["binary_sensor.closed": state("binary_sensor.closed", closed),
+                     "binary_sensor.open": state("binary_sensor.open", open)],
+            type: DeviceTypes.type(id: "garage_door"),
+            bindings: garage("binary_sensor.closed", "binary_sensor.open"))
+    }
+    #expect(face("on", "off").isActive == false)   // shut is the quiet state
+    #expect(face("off", "off").isActive == true)   // part-way is worth noticing
+    #expect(face("off", "on").isActive == true)
+    // Nothing derived means nothing to say about tint, so the tile keeps its own.
+    #expect(CompositeState.resolve(primary: "switch.x", deviceId: nil, registry: [:], tiers: [:],
+                                   states: [:]).isActive == nil)
 }

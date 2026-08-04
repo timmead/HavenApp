@@ -210,10 +210,11 @@ struct TileGallery: View {
             // **The state a cover entity has no word for.** `cover.partly` reports "open" like any
             // other; its two bound limit sensors both reading off is the only way to know the door
             // is stopped half way.
-            section("Derived from bound limits — closed, partly open, open") {
+            section("Derived from bound limits — closed, partly, open, and a relay opener") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2),
                           spacing: 9) {
-                    ForEach(["cover.limit_closed", "cover.partly", "cover.limit_open"], id: \.self) { id in
+                    ForEach(["cover.limit_closed", "cover.partly", "cover.limit_open",
+                             "switch.opener"], id: \.self) { id in
                         DeviceTileView(entityId: id, surface: .overview)
                     }
                 }
@@ -396,6 +397,13 @@ struct TileGallery: View {
                                                                "device_class": .string("door")])
         set("sensor.garage_signal", "-61", ["friendly_name": .string("Signal"),
                                             "unit_of_measurement": .string("dBm")])
+        // A relay opener: a *switch* in Home Assistant whose own state says a contact closed, not
+        // where the door is. Its limits are the only thing that knows.
+        set("switch.opener", "off", ["friendly_name": .string("Garage D")])
+        set("binary_sensor.opener_closed", "off", ["friendly_name": .string("Fully Closed"),
+                                                   "device_class": .string("door")])
+        set("binary_sensor.opener_open", "off", ["friendly_name": .string("Fully Open"),
+                                                 "device_class": .string("door")])
         // Three garages, all reporting "open" from the cover entity itself — the limits are what
         // tell them apart, which is the point.
         for garage in Self.garages {
@@ -486,6 +494,13 @@ struct TileGallery: View {
                              .openLimit: ["binary_sensor.\(stem)_open"]]),
                 id: garage.id)
         }
+        document = document.settingDevice(
+            DashboardDocument.StoredDevice(
+                id: "switch.opener", type: "garage_door", areaId: "lounge",
+                inputs: [.primary: ["switch.opener"],
+                         .closedLimit: ["binary_sensor.opener_closed"],
+                         .openLimit: ["binary_sensor.opener_open"]]),
+            id: "switch.opener")
         store.config.seedForTesting(document)
 
         // Seeded history, so the sparkline can be looked at without a server. A gentle curve and a

@@ -11,7 +11,11 @@ struct CoverTile: View {
         let e = store.state(entityId); let s = e.map(CoverState.init)
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
         let unavailable = e?.isUnavailable ?? false
-        GlassTile(active: open, accent: accent, unavailable: unavailable) {
+        // Lit by the *derived* state where there is one, so the wash and the glyph cannot
+        // disagree: a garage whose limits say shut must not glow because its cover entity still
+        // reports "open".
+        GlassTile(active: store.deviceState(of: entityId).isActive ?? open,
+                  accent: accent, unavailable: unavailable) {
             // Centred on the tile rather than on what the slider leaves of it — see `LightTile`,
             // which has the same arrangement and the same reason: a cover with a reported position
             // and one without must not put their glyphs in different places.
@@ -24,7 +28,10 @@ struct CoverTile: View {
                                          unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: open, unavailable: unavailable)
+                      accent: accent,
+                      // The derived state's own tint where there is one — see `DeviceState.isActive`.
+                      active: store.deviceState(of: entityId).isActive ?? open,
+                      unavailable: unavailable)
                 .overlay(alignment: .trailing) {
                     // Unlike the light, this is shown at every position including 0 — a closed shade
                     // has a real, meaningful position — so a drag up from the bottom genuinely opens

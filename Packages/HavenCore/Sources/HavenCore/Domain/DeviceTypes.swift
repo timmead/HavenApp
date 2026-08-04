@@ -36,10 +36,17 @@ public enum DeviceTypes {
         simple("binary_sensor", "Binary sensor", .binarySensor),
         simple("unknown", "Device", .unknown),
 
-        // A cover with the two sensors that let it say "Partly open" — a state the cover entity
-        // itself has no word for. See `CompositeState.derivedFace`.
+        // A door opener with the two sensors that say where the door actually is.
+        //
+        // **The primary can be a switch, not only a cover.** Home Assistant models an opener however
+        // the integration does: a `cover` when it reports position, and very often a plain `switch`
+        // when it is a relay that pulses a button on the wall. The second case is the one that needs
+        // this most — a relay's own state says whether a contact closed, not whether the door is
+        // open — and it was missing, so a household whose opener is a switch was never offered the
+        // type at all.
         DeviceType(id: "garage_door", name: "Garage door", roles: [
-            DeviceTypeRole(role: .primary, domains: [.cover], cardinality: .one, isRequired: true),
+            DeviceTypeRole(role: .primary, domains: [.cover, .switchOutlet],
+                           cardinality: .one, isRequired: true),
             DeviceTypeRole(role: .openLimit, domains: [.binarySensor], cardinality: .one),
             DeviceTypeRole(role: .closedLimit, domains: [.binarySensor], cardinality: .one),
         ]),
