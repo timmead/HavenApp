@@ -184,22 +184,22 @@ struct AddTileView: View {
     }
 
     private func entityRow(_ entityId: String) -> some View {
-        Button {
-            // **Only ask when there is a question.** A light has one way to be rendered, so offering
-            // a chooser with a single row would be a step that teaches nothing. A cover has three.
-            let types = DeviceTypes.candidates(for: entityId)
-            if types.count > 1 {
-                choosingTypeFor = entityId
-            } else {
-                Task { await add(entityId) }
+        EntityPickerRow(title: store.displayName(of: entityId),
+                        entityId: entityId,
+                        isSelected: false)
+            .padding(.vertical, 7)
+            // Not a `Button`: this list is long and scrolled constantly, and in a sheet a button
+            // fires on the lift at the end of a scroll — see `TapWithoutDrag`. Adding the wrong
+            // device because you flicked past it is the worst version of that bug in this app.
+            .tapWithoutDrag {
+                // **Only ask when there is a question.** A light has one way to be rendered, so a
+                // chooser with a single row would be a step that teaches nothing. A cover has three.
+                if DeviceTypes.candidates(for: entityId).count > 1 {
+                    choosingTypeFor = entityId
+                } else {
+                    Task { await add(entityId) }
+                }
             }
-        } label: {
-            EntityPickerRow(title: store.displayName(of: entityId),
-                            entityId: entityId,
-                            isSelected: false)
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 7)
     }
 
     private var subtitle: String {
@@ -228,9 +228,7 @@ struct AddTileView: View {
             Text("How should “\(store.displayName(of: entityId))” be shown?")
                 .font(.system(size: 15, weight: .semibold))
             ForEach(DeviceTypes.candidates(for: entityId)) { type in
-                Button {
-                    Task { await add(entityId, as: type) }
-                } label: {
+                Group {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(type.name)
@@ -247,9 +245,8 @@ struct AddTileView: View {
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.vertical, 9)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .tapWithoutDrag { Task { await add(entityId, as: type) } }
                 Divider()
             }
             Button("Back") { choosingTypeFor = nil }

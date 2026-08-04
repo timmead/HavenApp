@@ -51,16 +51,14 @@ struct RoomConfigView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(candidates, id: \.self) { candidate in
-                        Button {
-                            Task { await select(candidate) }
-                        } label: {
-                            EntityPickerRow(title: store.displayName(of: candidate.entityId),
-                                            entityId: candidate.entityId,
-                                            detail: detail(for: candidate),
-                                            isSelected: environment?[role] == candidate)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.vertical, 7)
+                        EntityPickerRow(title: store.displayName(of: candidate.entityId),
+                                        entityId: candidate.entityId,
+                                        detail: detail(for: candidate),
+                                        isSelected: environment?[role] == candidate)
+                            .padding(.vertical, 7)
+                            // Not a `Button`: in a sheet these fire on the lift at the end of a
+                            // scroll — see `TapWithoutDrag`.
+                            .tapWithoutDrag { Task { await select(candidate) } }
                     }
                 }
             }

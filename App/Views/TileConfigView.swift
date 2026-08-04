@@ -259,34 +259,31 @@ struct TileConfigView: View {
                 } else {
                     // "Not set" is a row like any other, so unbinding is the same gesture as
                     // binding rather than a separate control to find.
-                    Button {
+                    HStack {
+                        Text("Not set").font(.system(size: 15, weight: .semibold))
+                        Spacer(minLength: 8)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(HavenColor.domain(.cover))
+                            .opacity(bound == nil ? 1 : 0)
+                    }
+                    .padding(.vertical, 7)
+                    // Not a `Button`: in a sheet these fire on the lift at the end of a scroll —
+                    // see `TapWithoutDrag`.
+                    .tapWithoutDrag {
                         bindings[typeRole.role] = nil
                         expandedRole = nil
-                    } label: {
-                        HStack {
-                            Text("Not set").font(.system(size: 15, weight: .semibold))
-                            Spacer(minLength: 8)
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(HavenColor.domain(.cover))
-                                .opacity(bound == nil ? 1 : 0)
-                        }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 7)
 
                     ForEach(options, id: \.self) { id in
-                        Button {
-                            bindings[typeRole.role] = id
-                            expandedRole = nil
-                        } label: {
-                            EntityPickerRow(title: store.displayName(of: id),
-                                            entityId: id,
-                                            isSelected: bound == id)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.vertical, 7)
+                        EntityPickerRow(title: store.displayName(of: id),
+                                        entityId: id,
+                                        isSelected: bound == id)
+                            .padding(.vertical, 7)
+                            .tapWithoutDrag {
+                                bindings[typeRole.role] = id
+                                expandedRole = nil
+                            }
                     }
                 }
             }
