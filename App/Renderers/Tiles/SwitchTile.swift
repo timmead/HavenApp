@@ -14,15 +14,15 @@ struct SwitchTile: View {
         let name = store.displayName(of: entityId)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: on, accent: accent, unavailable: unavailable) {
-            // Both emphases are stated as what the tile wants *when reachable*; `TileLabel`
-            // applies the unavailable rule. `on` already reads `false` for an `unavailable` state
-            // string, so these would resolve to `.secondary` there anyway — but incidentally, via
-            // the `state == "on"` check, rather than because anything decided it.
-            TileLabel(symbol: IconMap.symbol(domain: .switchOutlet, deviceClass: nil),
+            // The state in the middle, as for the other two-state tiles. `unavailable` is decided
+            // by `TileState` rather than incidentally by `state == "on"` reading false for an
+            // unreachable switch — which was right by accident rather than because anything chose
+            // it.
+            StateFace(state: TileState.switchOutlet(deviceClass: e?.deviceClass, isOn: on,
+                                                    unavailable: unavailable),
+                      style: store.stateStyle(of: entityId),
                       name: name,
-                      icon: on ? .accent : .secondary,
-                      title: on ? .primary : .secondary,
-                      accent: accent, unavailable: unavailable)
+                      accent: accent, active: on, unavailable: unavailable)
         }
         .contentShape(Rectangle())
         .onTapGesture { store.toggle(entityId) }

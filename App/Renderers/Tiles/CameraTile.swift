@@ -310,3 +310,14 @@ struct CameraTile: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+extension CameraTileSize {
+    /// The rendering a span asks for.
+    ///
+    /// **Anything narrower than four columns is the 2×2**, including spans this renderer has no size
+    /// for: there is deliberately no 1-column camera, and the useful answer to a request for one is
+    /// the smallest picture worth showing rather than no tile at all.
+    init(span: TileSpan) {
+        self = span.columns >= 4 ? .wide : .square
+    }
+}

@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth, fifth }
+    enum Page { case first, second, third, fourth, fifth, sixth, seventh }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -68,6 +68,7 @@ struct TileGallery: View {
                     section("Binary sensor") { ids("binary_sensor", ["active", "clear", "unavailable"]) }
                     section("Generic") { ids("generic", ["idle", "unavailable"]) }
                     section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
+                    sensorWide
                     mediaWide
                 case .fourth:
                     section("Room configuration — candidates, and none") {
@@ -91,6 +92,10 @@ struct TileGallery: View {
                     // The two configuration sheets have no other verification, which is the same
                     // argument this file makes about the tiles. Rendered side by side rather than
                     // only next to their own views, so the pair is reviewed as a pair.
+                case .sixth:
+                    stateStyles
+                case .seventh:
+                    climateLarge
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -123,11 +128,87 @@ struct TileGallery: View {
         }
     }
 
+    /// **The two ways a two-state tile can show itself**, side by side, because the choice between
+    /// them is a household setting and neither is obviously right. The glyphs differ between states
+    /// — an open door against a closed one, a filled power symbol against a hollow one — which is
+    /// what makes the icon style worth having; the label style exists for the device classes where a
+    /// picture is a guess.
+    ///
+    /// The unreachable cases are here deliberately. Both styles must say "Unavailable" rather than
+    /// asserting a state, and the lock is the one where getting that wrong is a security claim.
+    private var stateStyles: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            section("Icon — light, binary sensor, lock, cover, switch") {
+                LazyVGrid(columns: Self.columns, spacing: 10) {
+                    ForEach(Self.twoStateCases, id: \.self) { id in
+                        DeviceTileView(entityId: id, surface: .overview)
+                    }
+                }
+            }
+            section("Label — the same devices, same states") {
+                LazyVGrid(columns: Self.columns, spacing: 10) {
+                    ForEach(Self.twoStateCases.map { $0 + "_l" }, id: \.self) { id in
+                        DeviceTileView(entityId: id, surface: .overview)
+                    }
+                }
+            }
+        }
+    }
+
+    /// **Typed and hoisted out of the view builder deliberately.** As inline literals inside
+    /// `ForEach` these two lists compiled fine in a normal build and defeated the *preview*
+    /// compiler — "unable to type-check this expression in reasonable time" — which would have made
+    /// the one page that verifies this feature the one page nobody could look at.
+    ///
+    /// The label row is these same ids with a suffix, so the two rows cannot drift apart: a case
+    /// added to one is added to both.
+    private static let twoStateCases: [String] = [
+        "light.on", "light.off",
+        "binary_sensor.active", "binary_sensor.clear",
+        "lock.locked", "lock.unlocked", "lock.jammed",
+        "cover.open", "cover.closed",
+        "switch.on", "switch.off",
+        "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
+        "cover.unavailable", "light.unavailable",
+    ]
+
+    /// **The 4×2 climate tile, at the height a room actually gives it.**
+    ///
+    /// 173pt — two `RoomGrid` rows plus the spacing between them — rather than whatever a `VStack`
+    /// would hand it. That distinction is the entire reason this section exists: a tile that looks
+    /// right at its natural height and overflows at its real one is a tile nobody has verified.
+    private var climateLarge: some View {
+        section("Climate — 4×2, at a room's row height") {
+            VStack(spacing: 10) {
+                ForEach(["climate.heating", "climate.off", "climate.unavailable"], id: \.self) { id in
+                    ClimateTile(entityId: id, size: .large)
+                        .frame(height: 173)
+                }
+            }
+        }
+    }
+
     /// Climate at its real width: 2 of 4 columns, as both surfaces draw it.
     private var climateRow: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
             ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
                 DeviceTileView(entityId: "climate.\(name)", surface: .overview)
+            }
+        }
+    }
+
+    /// The 2×1 sensor, in the three states that decide whether it draws a line at all.
+    ///
+    /// **The empty and flat cases are the point.** A sparkline with nothing behind it must render as
+    /// a plain reading rather than as an axis-less chart of one point, and that is invisible in the
+    /// happy case — which is exactly the kind of thing this gallery exists to make visible.
+    private var sensorWide: some View {
+        section("Sensor — 2×1") {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
+                SensorTile(entityId: "sensor.value", size: .wide)
+                SensorTile(entityId: "sensor.spiky", size: .wide)
+                SensorTile(entityId: "sensor.nohistory", size: .wide)
+                SensorTile(entityId: "sensor.text", size: .wide)
             }
         }
     }
@@ -173,24 +254,31 @@ struct TileGallery: View {
         // action to colour by. Same mode and target where they can be, so the only difference on
         // screen is the one being checked.
         set("climate.heating", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
+            "current_temperature": .double(20.4),
                                         "fan_mode": .string("auto"), "hvac_action": .string("heating"),
                                         "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.cooling", "cool", ["friendly_name": .string("Study"), "temperature": .double(19),
+            "current_temperature": .double(22.1),
                                         "fan_mode": .string("auto"), "hvac_action": .string("cooling"),
                                         "hvac_modes": .array([.string("off"), .string("cool")])])
         set("climate.drying", "dry", ["friendly_name": .string("Cellar"), "temperature": .double(20),
+            "current_temperature": .double(19.6),
                                       "hvac_action": .string("drying"),
                                       "hvac_modes": .array([.string("off"), .string("dry")])])
         set("climate.fan", "fan_only", ["friendly_name": .string("Porch"), "temperature": .double(22),
+            "current_temperature": .double(20.8),
                                         "fan_mode": .string("high"), "hvac_action": .string("fan"),
                                         "hvac_modes": .array([.string("off"), .string("fan_only")])])
         // On and at target: the pair with `climate.heating` that the fill rule is about.
         set("climate.idle", "heat", ["friendly_name": .string("Hall"), "temperature": .double(21),
+            "current_temperature": .double(20.4),
                                      "fan_mode": .string("auto"), "hvac_action": .string("idle"),
                                      "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.off", "off", ["friendly_name": .string("Attic"), "temperature": .double(18),
+            "current_temperature": .double(20.8),
                                    "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unknown", "unknown", ["friendly_name": .string("Garage"), "temperature": .double(19),
+            "current_temperature": .double(22.1),
                                            "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23)])
@@ -213,6 +301,15 @@ struct TileGallery: View {
         set("scene.idle", "scening", ["friendly_name": .string("Movie")])
         set("scene.unavailable", "unavailable", ["friendly_name": .string("Away")])
 
+        set("sensor.spiky", "63", ["friendly_name": .string("Power"),
+                                   "device_class": .string("power"),
+                                   "unit_of_measurement": .string("W")])
+        set("sensor.nohistory", "18.2", ["friendly_name": .string("Shed"),
+                                         "device_class": .string("temperature"),
+                                         "unit_of_measurement": .string("°C")])
+        // A sensor whose state is a word. It is offered the 2×1 like every other sensor — the option
+        // set is a fact about the device type, not about today's reading — and it simply has no line.
+        set("sensor.text", "Away", ["friendly_name": .string("Mode")])
         set("sensor.value", "21.4", ["friendly_name": .string("Temp"),
                                      "device_class": .string("temperature"),
                                      "unit_of_measurement": .string("°C")])
@@ -251,6 +348,48 @@ struct TileGallery: View {
             ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
         ])])
         store.resolveEnvironment()
+        // The label-style twins: the same states again, with the household's choice stored, so both
+        // styles can be compared rather than described.
+        var document = store.config.document
+        for (id, state, name, dc) in [
+            ("binary_sensor.active_l", "on", "Door", "door"),
+            ("binary_sensor.clear_l", "off", "Window", "window"),
+            ("binary_sensor.unavailable_l", "unavailable", "Motion", "motion"),
+            ("lock.locked_l", "locked", "Front", nil),
+            ("lock.unlocked_l", "unlocked", "Back", nil),
+            ("lock.jammed_l", "jammed", "Side", nil),
+            ("lock.unavailable_l", "unavailable", "Shed", nil),
+            ("cover.open_l", "open", "Blinds", nil),
+            ("cover.closed_l", "closed", "Garage", "garage"),
+            ("switch.on_l", "on", "Fan", nil),
+            ("switch.off_l", "off", "Heater", "outlet"),
+            ("switch.unavailable_l", "unavailable", "Pump", nil),
+            ("cover.unavailable_l", "unavailable", "Awning", nil),
+            ("light.on_l", "on", "Kitchen", nil),
+            ("light.off_l", "off", "Hallway", nil),
+            ("light.unavailable_l", "unavailable", "Porch", nil),
+        ] as [(String, String, String, String?)] {
+            var attrs: [String: JSONValue] = ["friendly_name": .string(name)]
+            if let dc { attrs["device_class"] = .string(dc) }
+            store.states[id] = EntityState(entityId: id, state: state, attributes: attrs,
+                                           lastUpdated: Date(timeIntervalSince1970: 0))
+            document = document.settingStateStyle(.label, for: id)
+        }
+        store.config.seedForTesting(document)
+
+        // Seeded history, so the sparkline can be looked at without a server. A gentle curve and a
+        // spiky one, because the two are what the y-domain choice is about: a room that moved half a
+        // degree all day must still show its shape rather than a flat line against a zero baseline.
+        let origin = Date(timeIntervalSince1970: 0)
+        func seed(_ id: String, _ values: [Double]) {
+            let points = values.enumerated().map {
+                HistoryPoint(time: origin.addingTimeInterval(Double($0.offset) * 3600), value: $0.element)
+            }
+            store.historyCache.byKey[HomeStore.historyKey(id, .day, nil)] = (HistorySeries(points: points), origin)
+        }
+        seed("sensor.value", [20.8, 20.9, 21.2, 21.6, 21.4, 21.1, 20.9, 21.0, 21.3, 21.5, 21.4, 21.4])
+        seed("sensor.spiky", [4, 6, 5, 210, 180, 12, 8, 7, 240, 190, 15, 63])
+        // `sensor.nohistory` and `sensor.text` are deliberately left unseeded.
         return store
     }
 }
@@ -278,5 +417,13 @@ struct TileGallery: View {
 /// a baseline — the same reason climate's eight fixtures forced a third.
 #Preview("Tiles 5 — add a device") {
     TileGallery(page: .fifth)
+}
+
+#Preview("Tiles 6 — two-state styles") {
+    TileGallery(page: .sixth)
+}
+
+#Preview("Tiles 7 — climate 4×2") {
+    TileGallery(page: .seventh)
 }
 #endif

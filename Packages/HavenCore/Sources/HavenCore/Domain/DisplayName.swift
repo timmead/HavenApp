@@ -34,6 +34,16 @@ public enum DisplayName {
         raw.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    /// What a typed draft becomes when stored: trimmed, and `nil` when that leaves nothing.
+    ///
+    /// **The same rule `resolve` already applies when reading, stated once for writing**, so the two
+    /// cannot drift. The configuration sheet's field starts empty for a device nobody has renamed, so
+    /// `""` has to mean "no override" rather than an override *to* nothing — which would shadow Home
+    /// Assistant's name with a blank caption, and read as a broken tile rather than an unnamed one.
+    public static func override(from draft: String) -> String? {
+        present(draft)
+    }
+
     private static func present(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }

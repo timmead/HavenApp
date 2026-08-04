@@ -195,6 +195,18 @@ struct DashboardView: View {
     /// halves of what this screen needs: `.page` swipes but drops the bar, and the styles that
     /// show a bar do not swipe. Building the bar is the smaller of the two gaps to close.
     ///
+    /// How much room a *pushed* view has to leave beneath its content for this bar.
+    ///
+    /// **The bar sits over `RoomDetailView` rather than insetting it** — see `floorTab`, which
+    /// depends on that: changing floors has to stay reachable from inside a room. The dashboard's
+    /// own content is inset by `safeAreaInset`, but a pushed destination is not, so a room that
+    /// scrolls ends with its last row of tiles behind the capsule.
+    ///
+    /// Derived from the bar rather than guessed: a 16pt glyph, 3pt of spacing and an 11pt label is
+    /// 32, plus 8 above and below, plus a gap so the last tile is clear rather than touching. It
+    /// lives here so the number and the bar it clears cannot drift apart.
+    static let clearance: CGFloat = 62
+
     /// This is what costs us `.tabViewStyle(.sidebarAdaptable)` — on iPad the floors were a
     /// sidebar and are now this same bottom bar. Accepted: the swipe is the feature being built,
     /// and the iPad layout was an affordance we got for free rather than one that was designed.

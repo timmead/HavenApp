@@ -1,13 +1,161 @@
 import SwiftUI
 import HavenCore
+
+/// The two approved climate tile renderings.
+enum ClimateTileSize {
+    /// 2×1. A target temperature, a mode summary, and the controls that fit beside them.
+    case compact
+    /// 4×2. The room's actual temperature large, the setpoint as a control rather than a readout,
+    /// and every mode the unit declares as its own button.
+    case large
+}
+
+extension ClimateTileSize {
+    /// The rendering a span asks for. See `DeviceTileView.tile`.
+    init(span: TileSpan) {
+        self = span.columns >= 4 ? .large : .compact
+    }
+}
+
 struct ClimateTile: View {
     let entityId: String
+    var size: ClimateTileSize = .compact
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
     /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
     /// configuration mode removes it from.
     @Environment(\.havenSurface) private var surface
     var body: some View {
+        switch size {
+        case .compact: compact
+        case .large: large
+        }
+    }
+
+    /// **The 4×2: what the sheet offers, without opening it.**
+    ///
+    /// The compact tile is a readout with two controls squeezed beside it — the target temperature
+    /// is its largest text, and the mode is a word at the bottom. Four times the area does not mean
+    /// the same thing bigger; it means the things that were compressed get to be themselves. So the
+    /// *room's* temperature leads, because that is what you look at a thermostat to find out, the
+    /// setpoint becomes a control with its own two buttons rather than a number with steppers in the
+    /// corner, and every mode the unit declares gets a labelled button instead of a summary you
+    /// have to open a sheet to change.
+    private var large: some View {
+        let e = store.state(entityId)
+        let s = e.map(ClimateState.init)
+        let on = s?.isOn ?? false
+        let accent = HavenColor.climate(s?.function ?? .unspecified)
+        let unavailable = e?.isUnavailable ?? false
+        return GlassTile(active: s?.isConditioning ?? false, accent: accent,
+                         unavailable: unavailable) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "thermometer.medium")
+                        .font(.system(size: 16))
+                        .foregroundStyle((on ? Emphasis.accent : .secondary)
+                            .color(unavailable: unavailable, accent: accent))
+                        .symbolRenderingMode(.hierarchical)
+                    Text(store.displayName(of: entityId))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                accent: accent))
+                    Spacer(minLength: 0)
+                    powerButton(on: on, unavailable: unavailable,
+                                unreachable: e?.state == "unavailable",
+                                accent: accent, modes: s?.modes ?? [])
+                }
+                Spacer(minLength: 6)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    // **The room's temperature, not the target.** The compact tile leads with the
+                    // setpoint because at two columns there is room for one number and the setpoint
+                    // is the one you can change. Here both fit, and what a thermostat is for is
+                    // telling you how warm the room actually is.
+                    Text(s?.currentTemp.map { "\(String(format: "%.1f", $0))°" } ?? "—")
+                        .font(.system(size: 34, weight: .bold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                accent: accent))
+                    Spacer(minLength: 0)
+                    // The setpoint as a control: the number between its own two buttons rather
+                    // than a readout with steppers in a far corner. Only while it is on, for the
+                    // reason the compact tile records — a target for a thermostat that is off is a
+                    // setting with no visible effect.
+                    if on {
+                        HStack(spacing: 8) {
+                            stepper("minus", label: "Decrease target temperature",
+                                    unavailable: unavailable, unreachable: e?.state == "unavailable",
+                                    accent: accent, target: s?.targetTemp, delta: -1)
+                            Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—")
+                                .font(.system(size: 20, weight: .bold))
+                                .lineLimit(1)
+                                .frame(minWidth: 42)
+                                .foregroundStyle(Emphasis.accent.color(unavailable: unavailable,
+                                                                       accent: accent))
+                            stepper("plus", label: "Increase target temperature",
+                                    unavailable: unavailable, unreachable: e?.state == "unavailable",
+                                    accent: accent, target: s?.targetTemp, delta: 1)
+                        }
+                    }
+                }
+                Spacer(minLength: 6)
+                modeRow(s, accent: accent, unavailable: unavailable,
+                        unreachable: e?.state == "unavailable")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { navigation.open(entityId, on: surface) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(s.map { AccessibilitySummary.climate(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
+    }
+
+    /// Every mode the unit declares, as a button.
+    ///
+    /// **The unit's own list, in the unit's own order** — not a fixed set. Home Assistant reports
+    /// `hvac_modes` per device and they genuinely differ: a heat-only radiator valve declares two,
+    /// a heat pump five. Inventing modes a device does not have would send commands it will refuse.
+    ///
+    /// Labels shrink rather than truncate. "Heat Cool" beside four others at this width is tight,
+    /// and a mode clipped to "Heat C…" is a control you cannot identify.
+    @ViewBuilder
+    private func modeRow(_ s: ClimateState?, accent: Color, unavailable: Bool,
+                         unreachable: Bool) -> some View {
+        if let s, !s.modes.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(s.modes, id: \.self) { mode in
+                    let selected = mode == s.hvacMode
+                    Button {
+                        store.setClimateMode(entityId, mode: mode)
+                    } label: {
+                        Text(TileName.words(mode))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .foregroundStyle(selected
+                                ? Emphasis.accent.color(unavailable: unavailable, accent: accent)
+                                : Color.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(selected ? accent.opacity(0.16) : HavenColor.glassFill))
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(unreachable)
+                    // `.buttonStyle(.plain)` does not dim a disabled control — the same note the
+                    // stepper and the power button carry.
+                    .opacity(unreachable ? 0.45 : 1)
+                    .accessibilityLabel(TileName.words(mode))
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                }
+            }
+        }
+    }
+
+    private var compact: some View {
         let e = store.state(entityId); let s = e.map(ClimateState.init)
         let on = s?.isOn ?? false
         // **Heating and cooling are not the same colour.** One climate accent made a room being
@@ -28,7 +176,7 @@ struct ClimateTile: View {
         // `on` is still read, one line below, for the power button: the button commands the *mode*,
         // so it has to reflect the mode. The two differ on purpose and the tile shows both — a warm
         // thermometer with no wash is a thermostat on and idle.
-        GlassTile(active: s?.isConditioning ?? false, accent: accent, unavailable: unavailable) {
+        return GlassTile(active: s?.isConditioning ?? false, accent: accent, unavailable: unavailable) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top, spacing: 0) {
                     // **Accent while it is on, `.secondary` while it is off** — the rule every

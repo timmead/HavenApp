@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Domain: String, Sendable, Equatable {
+public enum Domain: String, Sendable, Equatable, CaseIterable {
     case light, switchOutlet, cover, lock, climate, mediaPlayer, camera, scene, script, button, sensor, binarySensor, unknown
 
     public static func of(_ entityId: String) -> Domain {

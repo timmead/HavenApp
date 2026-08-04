@@ -12,31 +12,33 @@ struct CoverTile: View {
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: open, accent: accent, unavailable: unavailable) {
-            HStack(alignment: .top, spacing: 0) {
-                // The symbol needs no unavailable-specific choice: it is the neutral domain glyph
-                // in every case, not an open/closed variant. Only the tint and the name do, and
-                // `open` reading `false` for an `unavailable` state string made them right
-                // incidentally rather than deliberately.
-                TileLabel(symbol: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
-                          name: store.displayName(of: entityId),
-                          icon: open ? .accent : .secondary,
-                          title: open ? .primary : .secondary,
-                          accent: accent, unavailable: unavailable)
-                // Unlike the light, this is shown at every position including 0 — a closed shade
-                // has a real, meaningful position — so a drag up from the bottom genuinely opens
-                // it, and `CoverOptimistic.position` moves the open/closed state along with the
-                // number so the tile's tint and the bar can't disagree. Hence `minimum: 0`: for a
-                // cover, dragging to the bottom is closing it, which is a legitimate thing to ask
-                // for and leaves the control on screen.
-                if let pos = s?.positionPercent {
-                    Spacer(minLength: 6)
-                    PipSlider(percent: pos, accent: accent,
-                              label: "Position",
-                              onCommit: { store.setCoverPosition(entityId, percent: $0) },
-                              onTap: { store.openCloseCover(entityId) })
-                        .padding(.vertical, 2)
+            // Centred on the tile rather than on what the slider leaves of it — see `LightTile`,
+            // which has the same arrangement and the same reason: a cover with a reported position
+            // and one without must not put their glyphs in different places.
+            StateFace(state: TileState.cover(deviceClass: e?.deviceClass, isOpen: open,
+                                             unavailable: unavailable),
+                      style: store.stateStyle(of: entityId),
+                      name: store.displayName(of: entityId),
+                      accent: accent, active: open, unavailable: unavailable)
+                .overlay(alignment: .trailing) {
+                    // Unlike the light, this is shown at every position including 0 — a closed shade
+                    // has a real, meaningful position — so a drag up from the bottom genuinely opens
+                    // it, and `CoverOptimistic.position` moves the open/closed state along with the
+                    // number so the tile's tint and the bar can't disagree. Hence `minimum: 0`: for a
+                    // cover, dragging to the bottom is closing it, which is a legitimate thing to ask
+                    // for and leaves the control on screen.
+                    if let pos = s?.positionPercent {
+                        PipSlider(percent: pos, accent: accent,
+                                  label: "Position",
+                                  onCommit: { store.setCoverPosition(entityId, percent: $0) },
+                                  onTap: { store.openCloseCover(entityId) })
+                            .padding(.top, 2)
+                            // Stops above the name rather than running the full height of the
+                            // tile, so the label is exactly as wide with a slider as without one —
+                            // see `StateFace.nameHeight`.
+                            .padding(.bottom, StateFace.nameHeight)
+                    }
                 }
-            }
         }
         .contentShape(Rectangle()).onTapGesture { store.openCloseCover(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)

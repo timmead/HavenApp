@@ -10,11 +10,12 @@ struct RoomDetailView: View {
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
     @State private var showingEnvironmentHistory = false
+    /// Only the `+` still uses a `LazyVGrid`: it is a single 1×1 cell with no span to honour.
+    ///
+    /// The groups themselves moved to `RoomGrid`. The Climate group used to need a second, 2-column
+    /// `[GridItem]` to get a half-width tile — `.gridCellColumns(2)` being inert inside a
+    /// `LazyVGrid` — and that workaround is what a real span-aware layout removes.
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
-    // The Climate group renders in its own 2-column grid — a half-width tile is exactly a
-    // 2-of-4 span, matching the approved mockups. (`.gridCellColumns(2)` is inert inside a
-    // `LazyVGrid`; a real 2-column `[GridItem]` is the only way to get an actual span.)
-    private let climateColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 2)
 
     /// Domain buckets for this room's `.entity` refs, in display order. `Domain.of(_:)`
     /// is switched exhaustively (every `Domain` case appears in exactly one branch), so
@@ -57,11 +58,11 @@ struct RoomDetailView: View {
         let rollups = store.rollups(room)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                group("Climate", g.climate, columns: climateColumns)
+                group("Climate", g.climate)
                 group("Lights", g.lights, rollup: rollups.first { $0.kind == .lights })
                 group("Shades", g.covers, rollup: rollups.first { $0.kind == .covers })
-                mediaGroup(g.media)
-                cameraGroup(g.cameras)
+                group("Media", g.media)
+                group("Cameras", g.cameras)
                 group("Scenes & more", g.other)
                 group("Sensors", g.sensors)
                 // One `+` for the whole screen rather than one per group: the groups here are a
@@ -76,11 +77,40 @@ struct RoomDetailView: View {
                 }
             }
             .padding()
+            // The floor bar floats over this view rather than insetting it, so the last row of
+            // tiles would otherwise sit behind it — see `DashboardView.clearance`.
+            .padding(.bottom, DashboardView.clearance)
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            // **Configuration is reachable from a room, not only from the dashboard.** It was
+            // reachable only from the dashboard's menu, which made a room you had opened a screen
+            // you could look at and not arrange — and left the devices that live *only* here, the
+            // demoted sensors curation keeps off the overview, with no way to be configured at all.
+            //
+            // Two items with distinct ids rather than an `if` inside one, for the reason
+            // `DashboardView`'s toolbar records: one item holding both states gives them one
+            // identity, and SwiftUI does not reliably swap the control when the condition flips.
+            if navigation.isConfiguring {
+                ToolbarItem(id: "room-configuration-done", placement: .topBarTrailing) {
+                    Button("Done") { navigation.isConfiguring = false }
+                        .fontWeight(.semibold)
+                }
+            } else if store.config.canConfigure {
+                // Shown only to a confirmed admin with a document Haven can read and write — see
+                // `HavenConfig.canConfigure`. Omitted rather than disabled, this app's standing rule
+                // for a control that cannot act.
+                ToolbarItem(id: "room-configuration-enter", placement: .topBarTrailing) {
+                    Button {
+                        navigation.isConfiguring = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Edit room")
+                }
+            }
+            ToolbarItem(id: "room-environment", placement: .topBarTrailing) {
                 RoomEnvironmentChips(sensors: room.headerSensors) {
                     showingEnvironmentHistory = true
                 }
@@ -91,49 +121,18 @@ struct RoomDetailView: View {
         }
     }
 
-    /// The Media group, at full width (4-of-4 columns) — the size the approved design gives the
-    /// artwork-and-transport tile. Its own `VStack`, not `group(_:_:columns:)`: a full-bleed 4×2
-    /// tile is not a `DeviceTileView` in a narrower grid, it is a different tile rendering, and the
-    /// dispatcher deliberately only knows the 1×1 (see `DeviceTileView`).
-    @ViewBuilder
-    private func mediaGroup(_ ids: [String]) -> some View {
-        if !ids.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack { Text("Media").font(.system(size: 14, weight: .bold)); Spacer() }
-                VStack(spacing: 9) {
-                    ForEach(ids, id: \.self) { id in
-                        MediaPlayerTile(entityId: id, size: .large).configurable(entityId: id, on: .roomDetail)
-                    }
-                }
-            }
-        }
-    }
-
-    /// The Cameras group, at full width (4-of-4 columns) — the full-bleed 4×2 rendering, which is
-    /// the one the design gives the most space to and the only one that drops the staleness stamp,
-    /// because at this width you can see the scene rather than having to be told about it.
+    /// One group: a heading, an optional roll-up count and action, then the group's tiles.
     ///
-    /// Its own `VStack` for the same structural reason as `mediaGroup`: this is a different tile
-    /// rendering, not a `DeviceTileView` in a narrower grid.
-    @ViewBuilder
-    private func cameraGroup(_ ids: [String]) -> some View {
-        if !ids.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack { Text("Cameras").font(.system(size: 14, weight: .bold)); Spacer() }
-                VStack(spacing: 9) {
-                    ForEach(ids, id: \.self) { id in
-                        CameraTile(entityId: id, size: .wide).configurable(entityId: id, on: .roomDetail)
-                    }
-                }
-            }
-        }
-    }
-
-    /// One group: heading (+ optional roll-up count/action) then a grid of tiles (4 columns
-    /// by default; pass `columns:` to override, e.g. Climate's 2-column half-width span).
+    /// **One builder for every group, where there used to be three.** Media and cameras each had
+    /// their own, for one reason: a full-bleed 4×2 tile could not be expressed in a `LazyVGrid`
+    /// whose cells are all one column, so those two groups were hand-built stacks and climate got a
+    /// second `[GridItem]` to fake a half-width span. `RoomGrid` places by span, so all three
+    /// special cases became the same code — and, more to the point, a tile's size in room detail is
+    /// now `TileSpan.default(for:on:)` rather than three separate hand-agreements with it.
+    ///
     /// Renders nothing when `ids` is empty so an unused domain never leaves a gap.
     @ViewBuilder
-    private func group(_ title: String, _ ids: [String], rollup: Rollup? = nil, columns: [GridItem]? = nil) -> some View {
+    private func group(_ title: String, _ ids: [String], rollup: Rollup? = nil) -> some View {
         if !ids.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -169,9 +168,11 @@ struct RoomDetailView: View {
                         Spacer()
                     }
                 }
-                LazyVGrid(columns: columns ?? self.columns, spacing: 9) {
+                RoomGrid(columns: 4, spacing: 9) {
                     ForEach(ids, id: \.self) { id in
-                        DeviceTileView(entityId: id, surface: .roomDetail)
+                        let span = store.span(of: id, on: .roomDetail)
+                        DeviceTileView(entityId: id, surface: .roomDetail, span: span)
+                            .tileSpan(span)
                     }
                 }
             }

@@ -58,6 +58,10 @@ struct TileLabel<Subtitle: View>: View {
     var title: Emphasis = .primary
     let accent: Color
     let unavailable: Bool
+    /// How big the glyph is drawn. 20 is the tile default; a tile whose *reading* is the thing worth
+    /// looking at passes something smaller, so the icon says which device this is without competing
+    /// with the number.
+    var iconSize: CGFloat = 20
     /// Optional second line, for the tiles that show a reading under the name. Its own styling is
     /// the caller's: every current subtitle is unconditionally `.secondary` — a hierarchy choice
     /// rather than a state claim — so there is nothing here for the rule to resolve.
@@ -66,7 +70,7 @@ struct TileLabel<Subtitle: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Image(systemName: symbol)
-                .font(.system(size: 20))
+                .font(.system(size: iconSize))
                 .foregroundStyle(icon.resolved(unavailable: unavailable).color(accent: accent))
                 .symbolRenderingMode(.hierarchical)
             Spacer(minLength: 2)
@@ -81,8 +85,8 @@ struct TileLabel<Subtitle: View>: View {
 
 extension TileLabel where Subtitle == EmptyView {
     init(symbol: String, name: String, icon: Emphasis = .secondary,
-         title: Emphasis = .primary, accent: Color, unavailable: Bool) {
+         title: Emphasis = .primary, accent: Color, unavailable: Bool, iconSize: CGFloat = 20) {
         self.init(symbol: symbol, name: name, icon: icon, title: title,
-                  accent: accent, unavailable: unavailable) { EmptyView() }
+                  accent: accent, unavailable: unavailable, iconSize: iconSize) { EmptyView() }
     }
 }

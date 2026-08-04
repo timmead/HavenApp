@@ -16,8 +16,17 @@ struct RoomGrid: Layout {
     var columns: Int = 4
     var spacing: CGFloat = 9
 
-    /// The row height when there is nothing single-row to measure — `GlassTile`'s own floor.
-    private static let fallbackRowHeight: CGFloat = 66
+    /// The row height when there is nothing single-row to measure.
+    ///
+    /// **Not `GlassTile`'s 66pt floor, which is the trap this grid exists to have escaped.** 66 is a
+    /// minimum; a real 1×1 tile renders nearer 82 because its content needs the room, and
+    /// `CameraTile` records what assuming the floor cost — a hard-coded 141 that made every camera
+    /// shorter than the two rows it claimed to occupy.
+    ///
+    /// A grid with nothing single-row in it is not hypothetical: room detail groups by domain, so
+    /// its Cameras group is *all* 2-row tiles and has nothing to measure. Falling back to the floor
+    /// there would have quietly rebuilt the same bug on the other surface.
+    private static let fallbackRowHeight: CGFloat = 82
 
     struct Cache {
         var placements: [GridPlacement]
@@ -47,6 +56,14 @@ struct RoomGrid: Layout {
     /// Only *single-row* tiles are measured. A tall tile's ideal height is a function of the row
     /// height, so letting it vote would be circular — and a room with one camera and a room with a
     /// camera and a light would end up with different row heights for the same camera.
+    ///
+    /// **Every tile therefore has to measure as what it draws, and this is where a tile that does
+    /// not shows up.** One single-row tile reporting an inflated ideal height makes *every* row in
+    /// the room that tall. `SensorTile`'s sparkline did exactly that: a `Chart` has a large ideal
+    /// height, and as a `ZStack` member it handed that to its parent — so putting one sensor on a
+    /// dashboard grew every tile beside it, and only once its history had loaded. A background
+    /// rather than a stack member was the fix, and the same hazard applies to anything with an
+    /// opinion about its own size: charts, images with an aspect ratio, maps.
     private func rowHeight(subviews: Subviews, placements: [GridPlacement]) -> CGFloat {
         let singleRow = zip(subviews, placements)
             .filter { $0.1.span.rows == 1 }

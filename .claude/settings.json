@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "swiftui-pro@swiftui-agent-skill": true,
+    "swift-concurrency-pro@swift-concurrency-agent-skill": true,
+    "swift-api-design-guidelines@swift-api-design-guidelines-skill": true,
+    "swift-architecture-skill@swift-architecture-skill": true
+  }
+}
