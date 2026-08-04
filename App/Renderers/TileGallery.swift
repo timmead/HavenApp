@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth, fifth, sixth, seventh }
+    enum Page { case first, second, third, fourth, fifth, sixth, seventh, eighth }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -96,6 +96,8 @@ struct TileGallery: View {
                     stateStyles
                 case .seventh:
                     climateLarge
+                case .eighth:
+                    deviceContext
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -171,6 +173,26 @@ struct TileGallery: View {
         "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
         "cover.unavailable", "light.unavailable",
     ]
+
+    /// **What else a device knows**, in the three shapes that decide whether the card is honest.
+    ///
+    /// The no-companion case is the important one: it must draw *nothing at all*, because every
+    /// device in a home without a registry `device_id` is that case and none of them should grow an
+    /// empty card. The unreachable reading is the second: an offline sensor and an absent one must
+    /// not look the same.
+    private var deviceContext: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            section("No companions — draws nothing") {
+                DeviceContextCard(entityId: "light.on")
+            }
+            section("A lock, and whether the door is actually shut") {
+                DeviceContextCard(entityId: "lock.locked")
+            }
+            section("Several, including one unreachable") {
+                DeviceContextCard(entityId: "cover.open")
+            }
+        }
+    }
 
     /// **The 4×2 climate tile, at the height a room actually gives it.**
     ///
@@ -333,6 +355,20 @@ struct TileGallery: View {
                                                 "supported_features": .int(4)])
         set("media_player.idle", "idle", ["friendly_name": .string("TV")])
         set("media_player.unavailable", "unavailable", ["friendly_name": .string("Radio")])
+        // Companion fixtures: entities that share a device_id with a primary and sit at
+        // `.companion`, which is what `CompositeState` joins on. Without registry info the resolver
+        // correctly finds nothing, and the card would render blank while proving nothing.
+        set("binary_sensor.front_contact", "off", ["friendly_name": .string("Door Contact"),
+                                                   "device_class": .string("door")])
+        set("sensor.front_battery", "88", ["friendly_name": .string("Battery"),
+                                           "device_class": .string("battery"),
+                                           "unit_of_measurement": .string("%")])
+        set("binary_sensor.garage_fully_closed", "on", ["friendly_name": .string("Fully Closed"),
+                                                        "device_class": .string("door")])
+        set("binary_sensor.garage_fully_open", "unavailable", ["friendly_name": .string("Fully Open"),
+                                                               "device_class": .string("door")])
+        set("sensor.garage_signal", "-61", ["friendly_name": .string("Signal"),
+                                            "unit_of_measurement": .string("dBm")])
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
             // Tiers spelled out rather than left to `tier(of:)`'s `.primary` fallback: a sensor is
             // `.secondary` in a real home (see `EntityCuration`), and with everything `.primary` the
@@ -346,7 +382,33 @@ struct TileGallery: View {
                                  "sensor.lounge_hum": .secondary,
                                  "sensor.lounge_hum_2": .secondary]),
             ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
-        ])])
+            // The composite fixtures. `.companion` is the tier `EntityCuration`'s container rule
+            // produces and that no surface rendered until `DeviceContextCard`.
+            ResolvedArea(id: "doors", name: "Doors",
+                         entityIds: ["lock.locked", "binary_sensor.front_contact",
+                                     "sensor.front_battery", "cover.open",
+                                     "binary_sensor.garage_fully_closed",
+                                     "binary_sensor.garage_fully_open", "sensor.garage_signal"],
+                         tiers: ["lock.locked": .primary,
+                                 "binary_sensor.front_contact": .companion,
+                                 "sensor.front_battery": .companion,
+                                 "cover.open": .primary,
+                                 "binary_sensor.garage_fully_closed": .companion,
+                                 "binary_sensor.garage_fully_open": .companion,
+                                 "sensor.garage_signal": .companion]),
+        ])],
+        // Two devices: the front door's lock with its contact and battery, and the garage cover
+        // with its two limit sensors and a signal reading. `light.on` deliberately has no device at
+        // all, which is the case that must render nothing.
+        registryInfo: [
+            "lock.locked": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "front-door"),
+            "binary_sensor.front_contact": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "front-door"),
+            "sensor.front_battery": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "front-door"),
+            "cover.open": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "garage"),
+            "binary_sensor.garage_fully_closed": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "garage"),
+            "binary_sensor.garage_fully_open": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "garage"),
+            "sensor.garage_signal": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "garage"),
+        ])
         store.resolveEnvironment()
         // The label-style twins: the same states again, with the household's choice stored, so both
         // styles can be compared rather than described.
@@ -425,5 +487,9 @@ struct TileGallery: View {
 
 #Preview("Tiles 7 — climate 4×2") {
     TileGallery(page: .seventh)
+}
+
+#Preview("Tiles 8 — what else a device knows") {
+    TileGallery(page: .eighth)
 }
 #endif

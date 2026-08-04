@@ -5,20 +5,25 @@ struct DeviceModalView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-            switch Domain.of(entityId) {
-            case .light: LightModal(entityId: entityId)
-            case .switchOutlet: SwitchModal(entityId: entityId)
-            case .cover: CoverModal(entityId: entityId)
-            case .lock: LockModal(entityId: entityId)
-            case .climate: ClimateModal(entityId: entityId)
-            case .mediaPlayer: MediaPlayerModal(entityId: entityId)
-            case .camera: CameraModal(entityId: entityId)
-            case .scene, .script, .button: SceneModal(entityId: entityId)
-            case .sensor: SensorModal(entityId: entityId)
-            case .binarySensor: BinarySensorModal(entityId: entityId)
-            case .unknown: GenericModal(entityId: entityId)
+        VStack(spacing: 12) {
+            Group {
+                switch Domain.of(entityId) {
+                case .light: LightModal(entityId: entityId)
+                case .switchOutlet: SwitchModal(entityId: entityId)
+                case .cover: CoverModal(entityId: entityId)
+                case .lock: LockModal(entityId: entityId)
+                case .climate: ClimateModal(entityId: entityId)
+                case .mediaPlayer: MediaPlayerModal(entityId: entityId)
+                case .camera: CameraModal(entityId: entityId)
+                case .scene, .script, .button: SceneModal(entityId: entityId)
+                case .sensor: SensorModal(entityId: entityId)
+                case .binarySensor: BinarySensorModal(entityId: entityId)
+                case .unknown: GenericModal(entityId: entityId)
+                }
             }
+            // Beneath whichever modal was chosen, and measured with it — see `DeviceContextCard`,
+            // which draws nothing for a device with no companions.
+            DeviceContextCard(entityId: entityId)
         }
         // **Every modal measures, cameras included.** The camera used to be excluded and opened
         // straight to `.large`, on the stated grounds that its content is "a picture that will

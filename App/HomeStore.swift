@@ -565,6 +565,31 @@ final class HomeStore {
     /// candidates and hands them to `CameraEvents`, which decides what is related and what counts
     /// as an event. Every rule — same-device before name-stem, which device classes qualify, how
     /// short a stem is too short — is over there, under test.
+    /// A device's state — the entity being rendered, plus the companions that qualify it.
+    ///
+    /// Flattens the per-area tier maps on each call. A home holds a few hundred entities and this is
+    /// read when a modal opens rather than per frame, so the map is built where it is needed instead
+    /// of becoming a third source of truth to keep in step.
+    ///
+    /// **A camera's event sensors are excluded**, because `CameraModal` already draws them as chips
+    /// with a curated kind and its own most-alarming-first ordering. That exclusion lives here and
+    /// not in the resolver: which view draws what is a rendering fact, not a fact about the device.
+    func deviceState(of entityId: String) -> DeviceState {
+        var tiers: [String: CurationTier] = [:]
+        for floor in home.floors {
+            for area in floor.areas { tiers.merge(area.tiers) { _, new in new } }
+        }
+        let excluded: Set<String> = Domain.of(entityId) == .camera
+            ? Set(cameraEvents(entityId).map(\.entityId))
+            : []
+        return CompositeState.resolve(primary: entityId,
+                                      deviceId: home.registryInfo[entityId]?.deviceId,
+                                      registry: home.registryInfo,
+                                      tiers: tiers,
+                                      states: states,
+                                      excluding: excluded)
+    }
+
     func cameraEvents(_ id: String) -> [CameraEventSensor] {
         let candidates = home.registryInfo.compactMap { entityId, info -> CameraEventCandidate? in
             guard entityId.hasPrefix("binary_sensor.") else { return nil }
