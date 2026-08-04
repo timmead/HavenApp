@@ -33,30 +33,24 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// rule had to reach both.
     public func refs(for surface: HavenSurface) -> [DeviceRef] {
         let visible = visibleRefs(for: surface)
-        let ids = visible.compactMap { ref -> String? in
-            guard case .entity(let id) = ref else { return nil }
-            return id
-        }
-        let ordered = TileOrder.resolve(stored: order, present: ids)
+        // **Every ref has an id, composites included**, so a shade group is dragged and ordered like
+        // anything else. This used to sort composites to the end on the grounds that they carried no
+        // single entity id — true when nothing constructed them, and wrong now that a composite's id
+        // is its own rather than derived from its inputs.
+        let ordered = TileOrder.resolve(stored: order, present: visible.map(\.id))
         let position = Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($0.element, $0.offset) })
-        // A composite carries no single entity id and so has no position; nothing constructs them
-        // yet, and when something does it will be an ordered unit by definition. Until then they
-        // keep the order they arrived in, after everything that *can* be ordered.
-        return visible.sorted { a, b in
-            switch (a, b) {
-            case let (.entity(x), .entity(y)): return (position[x] ?? 0) < (position[y] ?? 0)
-            case (.entity, _): return true
-            default: return false
-            }
-        }
+        return visible.sorted { (position[$0.id] ?? 0) < (position[$1.id] ?? 0) }
     }
 
     private func visibleRefs(for surface: HavenSurface) -> [DeviceRef] {
         deviceRefs.filter { ref in
-            // A composite carries no single entity id, so no tier and no membership — nothing
-            // constructs them yet (see `DeviceRef`), and when something does it will be a curated
-            // unit by definition.
-            guard case .entity(let id) = ref else { return true }
+            // **A composite is shown unless the household removed it.** It has no curation tier of
+            // its own — curation ranks Home Assistant's entities, and a composite is Haven's — so it
+            // is a curated unit by construction: somebody made it deliberately. Its membership
+            // override still applies, so removing one from a surface works like removing anything.
+            guard case .entity(let id) = ref else {
+                return overrides[ref.id]?[surface] != .hidden
+            }
             return SurfaceMembership.shows(tier: tier(of: id), on: surface,
                                            override: overrides[id]?[surface])
         }
@@ -76,8 +70,12 @@ public enum SectionBuilder {
     /// - Parameter overrides: each entity's per-surface membership — see `SurfaceMembership`.
     ///   Required for the same reason, and the failure is worse: an omitted map means every removal
     ///   the household has ever made silently reverts, and nothing at the call site would say so.
+    /// - Parameter devices: the household's composites, by id — see `DashboardDocument.devices`.
+    ///   Required like the maps above: omitting it silently drops every shade group in the home and
+    ///   renders its members as loose tiles, which looks like the feature was never built.
     public static func rooms(from home: ResolvedHome,
                              environment: [String: RoomEnvironment],
+                             devices: [String: DashboardDocument.StoredDevice],
                              overrides: [String: [HavenSurface: SurfaceMembership]],
                              orders: [String: [String]]) -> [RoomSection] {
         home.floors.flatMap(\.areas).map { area in
@@ -91,7 +89,21 @@ public enum SectionBuilder {
                 guard case .state = sensor.source else { return nil }
                 return sensor.entityId
             })
-            let devices = area.entityIds.filter { !uplifted.contains($0) }.map { DeviceRef.entity($0) }
+            // Composites first, then the entities none of them consumed.
+            //
+            // **An entity a composite uses does not also render alone**, or a shade group and its
+            // three shades are four tiles. Scoped to *this* area: a shade moved to another room in
+            // Home Assistant still gets a tile there, the same precedence `RegistryResolver` and the
+            // curation rules already apply.
+            let composites = devices
+                .filter { $0.value.areaId == area.id }
+                .sorted { $0.key < $1.key }
+                .map { DeviceRef.composite(id: $0.key, type: $0.value.type, inputs: $0.value.inputs) }
+            let consumed = Set(composites.flatMap(\.entityIds))
+            let plain = area.entityIds
+                .filter { !uplifted.contains($0) && !consumed.contains($0) }
+                .map { DeviceRef.entity($0) }
+            let devices = composites + plain
             return RoomSection(id: area.id, name: area.name, areaId: area.id, headerSensors: header,
                                deviceRefs: devices, tiers: area.tiers, overrides: overrides,
                                order: orders[area.id] ?? [])

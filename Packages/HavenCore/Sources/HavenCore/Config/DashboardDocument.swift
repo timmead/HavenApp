@@ -35,6 +35,7 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let sizesKey = "sizes"
     private static let stateStyleKey = "state_style"
     private static let bindingsKey = "bindings"
+    private static let devicesKey = "devices"
     private static let orderKey = "order"
 
     public let raw: JSONValue
@@ -346,6 +347,73 @@ public struct DashboardDocument: Sendable, Equatable {
             root.removeValue(forKey: Self.entitiesKey)
         } else {
             root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Composite devices
+
+    /// One stored composite: what it is, where it lives, and what it is made of.
+    public struct StoredDevice: Sendable, Equatable {
+        public let id: String
+        public let type: String
+        public let areaId: String
+        public let inputs: [DeviceRole: [String]]
+
+        public init(id: String, type: String, areaId: String, inputs: [DeviceRole: [String]]) {
+            self.id = id; self.type = type; self.areaId = areaId; self.inputs = inputs
+        }
+    }
+
+    /// Every composite the household has made, by id.
+    ///
+    /// **Only composites are stored.** A light's device is implied by the light existing, which is
+    /// what keeps this key small and what keeps every setting already stored against an entity id
+    /// working untouched.
+    ///
+    /// A record missing a type, an area or a primary is dropped rather than half-built: a device
+    /// with no primary has no state to read, and rendering one would be a tile that cannot say
+    /// anything.
+    public var devices: [String: StoredDevice] {
+        guard let stored = raw.asObject?[Self.devicesKey]?.asObject else { return [:] }
+        var out: [String: StoredDevice] = [:]
+        for (id, value) in stored {
+            guard let o = value.asObject,
+                  let type = o["type"]?.asString, !type.isEmpty,
+                  let areaId = o["area"]?.asString, !areaId.isEmpty,
+                  let rawInputs = o["inputs"]?.asObject else { continue }
+            var inputs: [DeviceRole: [String]] = [:]
+            for (rawRole, rawIds) in rawInputs {
+                guard let role = DeviceRole(rawValue: rawRole) else { continue }
+                let ids = (rawIds.asArray ?? []).compactMap { $0.asString }.filter { !$0.isEmpty }
+                if !ids.isEmpty { inputs[role] = ids }
+            }
+            guard inputs[.primary]?.isEmpty == false else { continue }
+            out[id] = StoredDevice(id: id, type: type, areaId: areaId, inputs: inputs)
+        }
+        return out
+    }
+
+    /// This document with one composite stored, or — for `nil` — removed.
+    public func settingDevice(_ device: StoredDevice?, id: String) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var stored = root[Self.devicesKey]?.asObject ?? [:]
+        if let device {
+            var inputs: [String: JSONValue] = [:]
+            for (role, ids) in device.inputs where !ids.isEmpty {
+                inputs[role.rawValue] = .array(ids.map { .string($0) })
+            }
+            stored[id] = .object(["type": .string(device.type),
+                                  "area": .string(device.areaId),
+                                  "inputs": .object(inputs)])
+        } else {
+            stored.removeValue(forKey: id)
+        }
+        if stored.isEmpty {
+            root.removeValue(forKey: Self.devicesKey)
+        } else {
+            root[Self.devicesKey] = .object(stored)
         }
         return DashboardDocument(raw: .object(root))
     }

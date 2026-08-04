@@ -631,6 +631,7 @@ final class HomeStore {
     /// household's per-surface decisions about which devices each surface shows.
     func rooms() -> [RoomSection] {
         SectionBuilder.rooms(from: home, environment: environment,
+                             devices: config.document.devices,
                              overrides: config.document.surfaceOverrides,
                              orders: home.floors.flatMap(\.areas).reduce(into: [:]) { out, area in
                                  let order = config.document.order(forRoom: area.id)

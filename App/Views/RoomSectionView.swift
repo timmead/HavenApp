@@ -66,7 +66,12 @@ struct RoomSectionView: View {
             if !refs.isEmpty || navigation.isConfiguring {
                 RoomGrid(columns: 4, spacing: 9) {
                     ForEach(refs) { ref in
-                        if case .entity(let id) = ref {
+                        // **Every ref renders, composites included.** A composite draws as its
+                        // primary for now — a shade group looks like its master shade — which is
+                        // 7a's landing point: the model works end to end, and the type-specific
+                        // renderings are 7c. `primaryEntityId` is nil only for a stored device whose
+                        // primary vanished, and `DashboardDocument.devices` already drops those.
+                        if let id = ref.primaryEntityId {
                             // The household's choice where there is one, the surface's default
                             // otherwise — see `HomeStore.span(of:on:)`.
                             let span = store.span(of: id, on: .overview)
@@ -106,12 +111,10 @@ struct RoomSectionView: View {
         }
     }
 
-    private func visibleIds(_ refs: [DeviceRef]) -> [String] {
-        refs.compactMap { ref in
-            guard case .entity(let id) = ref else { return nil }
-            return id
-        }
-    }
+    /// The ids a drag reorders. **Every ref's own id**, so a composite is dragged like any other
+    /// tile — it used to be entity ids only, which was right when nothing constructed composites and
+    /// would now silently drop a shade group out of the room's order.
+    private func visibleIds(_ refs: [DeviceRef]) -> [String] { refs.map(\.id) }
 
     /// The renderer for one entity, at the size the grid has given it.
     ///

@@ -73,12 +73,19 @@ private struct RoomGridPreviews: View {
             ["temperature": .double(21), "hvac_action": .string("heating"),
              "hvac_modes": .array([.string("off"), .string("heat")])])
         for i in 1...3 { set("light.b\(i)", "on", "Lamp \(i)") }
+        // A shade group's master and its two followers. One tile, not three — see
+        // `SectionBuilder.rooms`.
+        for (id, name) in [("cover.b_master", "Living Shades"), ("cover.b_two", "Shade 2"),
+                           ("cover.b_three", "Shade 3")] {
+            set(id, "open", name, ["current_position": .int(60)])
+        }
         // **Power, not temperature.** A temperature sensor is uplifted into the room's environment
         // chips and never reaches the grid, so it cannot show what a wide sensor does to a row.
         set("sensor.b_temp", "63", "Power", ["device_class": .string("power"),
                                              "unit_of_measurement": .string("W")])
         area("gap", "Thermostat then lights",
-             ["climate.b"] + (1...3).map { "light.b\($0)" } + ["sensor.b_temp"])
+             ["climate.b"] + (1...3).map { "light.b\($0)" } + ["sensor.b_temp",
+             "cover.b_master", "cover.b_two", "cover.b_three"])
 
         // Two cameras: 2×2s side by side, then a light that must go *below* them, not beside.
         set("camera.c1", "recording", "Front Door")
@@ -103,6 +110,12 @@ private struct RoomGridPreviews: View {
                                     "sensor.d_temp", "sensor.d_hum"])
 
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: areas)])
+        store.config.seedForTesting(store.config.document.settingDevice(
+            DashboardDocument.StoredDevice(
+                id: "haven:shades", type: "shade_group", areaId: "gap",
+                inputs: [.primary: ["cover.b_master"],
+                         .follower: ["cover.b_two", "cover.b_three"]]),
+            id: "haven:shades"))
         store.resolveEnvironment()
         let origin = Date(timeIntervalSince1970: 0)
         let points = [20.8, 20.9, 21.2, 21.6, 21.4, 21.1, 20.9, 21.0, 21.3, 21.5, 21.4, 21.4]

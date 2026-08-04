@@ -37,7 +37,8 @@ struct RoomDetailView: View {
         // off the grid, which is what makes this view the place demoted entities are reachable. A
         // device removed from the *dashboard* is still here; removal is per surface.
         for ref in room.refs(for: .roomDetail) {
-            guard case .entity(let id) = ref else { continue }
+            // A composite is bucketed by what its primary is: a shade group sits with the shades.
+            guard let id = ref.primaryEntityId else { continue }
             switch Domain.of(id) {
             case .climate: g.climate.append(id)
             case .light: g.lights.append(id)
