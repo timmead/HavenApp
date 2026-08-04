@@ -287,6 +287,10 @@ struct AddTileView: View {
             failure = "Couldn't save that. Check your connection and try again."
             return
         }
+        // **Adding it means showing it.** A device the household removed earlier carries a stored
+        // `.hidden` for this surface, and creating the device does not clear it — so without this
+        // the tile would be created, configured, and still invisible.
+        _ = await store.setMembership(id, on: surface, to: .shown)
         // Straight into its configuration: a shade group with no followers is a shade with a
         // different label, and the roles are the reason the type was chosen.
         navigation.presented = .tileConfig(entityId: id, surface: surface)

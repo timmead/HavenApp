@@ -200,9 +200,17 @@ final class HomeStore {
     func addableEntityIds(in room: RoomSection, on surface: HavenSurface) -> [String] {
         let showing = Set(room.refs(for: surface).map(\.id))
         return room.deviceRefs.compactMap { ref -> String? in
-            guard case .entity(let id) = ref, !showing.contains(id),
-                  room.tier(of: id) != .hidden else { return nil }
-            return id
+            guard !showing.contains(ref.id) else { return nil }
+            // **Composites are offerable too, and leaving them out stranded one.** This walked only
+            // `.entity` refs, from when nothing constructed composites. A garage door the household
+            // removed then vanished completely: hidden by its membership override, and absent from
+            // this list because it was no longer a plain entity — off the dashboard with no way back
+            // to it.
+            //
+            // Curation's `.hidden` still bars a plain entity, because that is Home Assistant's own
+            // decision and it outranks ours. A composite has no tier: somebody made it deliberately.
+            if case .entity(let id) = ref, room.tier(of: id) == .hidden { return nil }
+            return ref.id
         }.sorted()
     }
 
