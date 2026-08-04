@@ -212,17 +212,31 @@ struct TileConfigView: View {
         }
     }
 
-    /// What could fill a role: entities the role's own domains accept.
+    /// What could fill a role: **everything in the room** the role's domains accept.
     ///
-    /// A garage door's limits come from its physical device, since a limit sensor is part of the
-    /// opener. A shade group's followers are any cover in the room — the whole point is grouping
-    /// shades that Home Assistant considers unrelated.
+    /// **Not restricted to the primary's own Home Assistant device**, which is what the first
+    /// version did and which made this unusable for the commonest garage: a relay opener and a pair
+    /// of contact sensors are three separate devices in Home Assistant, so the pickers came back
+    /// empty for exactly the household that needed them.
+    ///
+    /// That restriction was a heuristic — "a limit sensor is part of the opener" — applied to the
+    /// one feature whose entire justification is *not* inferring these relationships. If Haven could
+    /// work out which sensor was the closed limit, it would not be asking.
+    ///
+    /// Ordered by how likely each is to be the right answer: the primary's own device first, then
+    /// its room, then the rest of the home. **The tail matters** — a household that has not assigned
+    /// its contact sensors to an area in Home Assistant still has to be able to point at them, and
+    /// a picker that is empty for that household is the bug this replaced.
     private func candidates(for typeRole: DeviceTypeRole) -> [String] {
         guard let primary = store.device(entityId).primaryEntityId else { return [] }
-        let pool = typeRole.role == .follower
-            ? store.roomEntityIds(containing: primary)
-            : store.bindableEntityIds(for: primary)
-        return pool.filter { $0 != primary && typeRole.accepts($0) }
+        let sameDevice = Set(store.bindableEntityIds(for: primary))
+        let sameRoom = Set(store.roomEntityIds(containing: primary))
+        func rank(_ id: String) -> Int {
+            sameDevice.contains(id) ? 0 : (sameRoom.contains(id) ? 1 : 2)
+        }
+        return store.allEntityIds
+            .filter { $0 != primary && typeRole.accepts($0) }
+            .sorted { a, b in rank(a) == rank(b) ? a < b : rank(a) < rank(b) }
     }
 
     private var roleHint: String {
@@ -230,8 +244,8 @@ struct TileConfigView: View {
             .filter { $0.role != .primary }
             .contains { !candidates(for: $0).isEmpty }
         return anyCandidates
-            ? "Only entities that could fill each role are offered."
-            : "Nothing in this room can fill these roles."
+            ? "Nearest first: this device, then this room, then the rest of the home."
+            : "Nothing in this home can fill these roles."
     }
 
     /// Roles whose binding differs from what is stored. `nil` for a role clears it.
@@ -346,6 +360,35 @@ private struct TileConfigPreviewHost: View {
             entityId: "light.kitchen", state: "on",
             attributes: ["friendly_name": .string("Kitchen Light")],
             lastUpdated: Date(timeIntervalSince1970: 0))
+        // A relay opener and two contact sensors on **three different Home Assistant devices** —
+        // the shape that made the role pickers come back empty.
+        store.states["switch.opener"] = EntityState(
+            entityId: "switch.opener", state: "off",
+            attributes: ["friendly_name": .string("Garage Opener")],
+            lastUpdated: Date(timeIntervalSince1970: 0))
+        for (id, name) in [("binary_sensor.g_closed", "Garage Closed"),
+                           ("binary_sensor.g_open", "Garage Open")] {
+            store.states[id] = EntityState(
+                entityId: id, state: "off",
+                attributes: ["friendly_name": .string(name), "device_class": .string("door")],
+                lastUpdated: Date(timeIntervalSince1970: 0))
+        }
+        store.home = ResolvedHome(
+            floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
+                ResolvedArea(id: "garage", name: "Garage",
+                             entityIds: ["switch.opener", "binary_sensor.g_closed",
+                                         "binary_sensor.g_open"],
+                             tiers: ["switch.opener": .primary,
+                                     "binary_sensor.g_closed": .secondary,
+                                     "binary_sensor.g_open": .secondary])])],
+            registryInfo: ["switch.opener": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "relay"),
+                           "binary_sensor.g_closed": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "contact-a"),
+                           "binary_sensor.g_open": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "contact-b")])
+        store.config.seedForTesting(store.config.document.settingDevice(
+            DashboardDocument.StoredDevice(id: "switch.opener", type: "garage_door",
+                                           areaId: "garage",
+                                           inputs: [.primary: ["switch.opener"]]),
+            id: "switch.opener"))
         store.states["sensor.hall_temp"] = EntityState(
             entityId: "sensor.hall_temp", state: "21.4",
             attributes: ["friendly_name": .string("Hall Temperature"),
@@ -368,6 +411,13 @@ private struct TileConfigPreviewHost: View {
 /// from every preview above and its presence here is the only thing that shows it exists at all.
 #Preview("Tile config — resizable") {
     TileConfigPreviewHost(entityId: "sensor.hall_temp", overridden: false)
+}
+
+/// **A garage door whose limit sensors are on other Home Assistant devices**, which is the shape
+/// that made these pickers come back empty — the restriction to the primary's own device was a
+/// heuristic applied to the one feature that exists because heuristics do not work here.
+#Preview("Tile config — garage door roles") {
+    TileConfigPreviewHost(entityId: "switch.opener", overridden: false)
 }
 
 /// The other surface, where both the button and its explanation change wording.
