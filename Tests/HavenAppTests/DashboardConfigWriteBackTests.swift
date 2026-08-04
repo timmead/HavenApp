@@ -256,6 +256,7 @@ extension DashboardConfigWriteBackTests {
 
         let outcome = await store.applyTileConfig("sensor.lr_temp", name: "Lounge",
                                                   size: .some(TileSpan(columns: 2, rows: 1)),
+                                                  stateStyle: .some(.label),
                                                   on: .overview)
         #expect(outcome == .written)
 
@@ -266,6 +267,9 @@ extension DashboardConfigWriteBackTests {
         let entity = entities?["sensor.lr_temp"] as? [String: Any]
         #expect(entity?["name"] as? String == "Lounge")
         #expect((entity?["sizes"] as? [String: Any])?["overview"] as? String == "2x1")
+        // The third field, for the same reason as the other two: a sheet holding a name, a size and
+        // a state style still commits once.
+        #expect(entity?["state_style"] as? String == "label")
     }
 
     /// Choosing the size a tile already had is not an edit, and must not write. The sheet decides

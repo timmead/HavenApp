@@ -168,6 +168,7 @@ struct TileGallery: View {
         "cover.open", "cover.closed",
         "switch.on", "switch.off",
         "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
+        "cover.unavailable",
     ]
 
     /// **The 4×2 climate tile, at the height a room actually gives it.**
