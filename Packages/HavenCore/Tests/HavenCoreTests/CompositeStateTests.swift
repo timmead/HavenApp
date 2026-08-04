@@ -297,11 +297,16 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
 
 // MARK: - Which domains offer roles
 
-@Test func onlyCoversOfferRolesToBind() {
-    #expect(DeviceRole.roles(for: .cover) == [.openLimit, .closedLimit])
-    #expect(DeviceRole.roles(for: .lock).isEmpty)
-    #expect(DeviceRole.roles(for: .light).isEmpty)
-    #expect(DeviceRole.roles(for: .camera).isEmpty)
+/// **Roles belong to a type, not a domain.** A plain shade is a cover and has none; a garage door is
+/// also a cover and has two. Keying them on the domain was right for one type and wrong for a
+/// registry, which is what choosing a type in the `+` flow made obvious.
+@Test func rolesBelongToATypeRatherThanADomain() {
+    let garage = DeviceTypes.type(id: "garage_door")!
+    #expect(garage.roles.map(\.role) == [.primary, .openLimit, .closedLimit])
+    let shade = DeviceTypes.type(id: "cover")!
+    #expect(shade.roles.map(\.role) == [.primary])
+    let group = DeviceTypes.type(id: "shade_group")!
+    #expect(group.roles.map(\.role) == [.primary, .follower])
 }
 
 /// **Partly open must not look like open.** A tile set to the icon style shows no word, so if the

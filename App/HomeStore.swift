@@ -250,16 +250,90 @@ final class HomeStore {
             if let stateStyle {
                 next = next.settingStateStyle(stateStyle, for: entityId)
             }
-            for (role, target) in bindings ?? [:] {
-                next = next.settingBinding(target, role: role, for: entityId)
+            // Roles live in the device's own inputs — one home for them, since choosing a type is
+            // what creates the device they belong to.
+            if let bindings, var stored = next.devices[entityId] {
+                var inputs = stored.inputs
+                for (role, target) in bindings {
+                    if let target, !target.isEmpty { inputs[role] = [target] }
+                    else { inputs.removeValue(forKey: role) }
+                }
+                stored = DashboardDocument.StoredDevice(id: stored.id, type: stored.type,
+                                                        areaId: stored.areaId, inputs: inputs)
+                next = next.settingDevice(stored, id: entityId)
             }
             return next
         }
     }
 
-    /// Which companion plays which role for this device.
-    func bindings(of entityId: String) -> [DeviceRole: String] {
-        config.document.tileBindings[entityId] ?? [:]
+    /// The device behind an id — a stored composite, or the entity itself.
+    ///
+    /// **The fallback is the whole model**: a light's device is implied by the light existing, which
+    /// is why no stored record has to move and why every caller can ask for a device without caring
+    /// whether one was ever configured.
+    func device(_ id: String) -> DeviceRef {
+        guard let stored = config.document.devices[id] else { return .entity(id) }
+        return .composite(id: id, type: stored.type, inputs: stored.inputs)
+    }
+
+    /// What kind of thing a device is. A stored composite says so; anything else is the one-entity
+    /// type for its domain.
+    func deviceType(of id: String) -> DeviceType {
+        if let stored = config.document.devices[id], let type = DeviceTypes.type(id: stored.type) {
+            return type
+        }
+        return DeviceTypes.default(for: id)
+    }
+
+    /// Which entity plays which role for this device.
+    ///
+    /// **Read from the device's own inputs**, which is the one place roles live. An earlier revision
+    /// stored them under `entities.<id>.bindings` — a second home for the same idea, from before
+    /// choosing a type *was* creating a device.
+    func bindings(of id: String) -> [DeviceRole: String] {
+        guard let stored = config.document.devices[id] else { return [:] }
+        return stored.inputs.compactMapValues(\.first)
+    }
+
+    /// Every entity in the room that holds `entityId` — the pool a shade group's followers come
+    /// from, since grouping shades Home Assistant considers unrelated is the entire point.
+    func roomEntityIds(containing entityId: String) -> [String] {
+        home.floors.flatMap(\.areas)
+            .first { $0.entityIds.contains(entityId) }?
+            .entityIds.sorted() ?? []
+    }
+
+    /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
+    ///
+    /// Returns the new device's id, or nil when the write failed. **The id is generated and never
+    /// derived from the inputs** — deriving it would orphan the device's own name and size the
+    /// moment somebody added a follower.
+    func createDevice(type: DeviceType, primary: String,
+                      areaId: String) async -> String? {
+        let id = "haven:\(type.id):\(UUID().uuidString.prefix(8).lowercased())"
+        let device = DashboardDocument.StoredDevice(
+            id: id, type: type.id, areaId: areaId, inputs: [.primary: [primary]])
+        switch await config.update({ $0.settingDevice(device, id: id) }) {
+        case .written, .unchanged: return id
+        case .notAuthorized, .failed: return nil
+        }
+    }
+
+    /// Sets or clears one role on a composite, leaving its other inputs alone.
+    func setRole(_ role: DeviceRole, to entityIds: [String],
+                 on deviceId: String) async -> HavenConfig.Outcome {
+        await config.update { document in
+            guard var stored = document.devices[deviceId] else { return document }
+            var inputs = stored.inputs
+            if entityIds.isEmpty {
+                inputs.removeValue(forKey: role)
+            } else {
+                inputs[role] = entityIds
+            }
+            stored = DashboardDocument.StoredDevice(id: stored.id, type: stored.type,
+                                                    areaId: stored.areaId, inputs: inputs)
+            return document.settingDevice(stored, id: deviceId)
+        }
     }
 
     /// The companions a role could be bound to: this device's own entities, minus the primary.
@@ -610,7 +684,7 @@ final class HomeStore {
                                       registry: home.registryInfo,
                                       tiers: tiers,
                                       states: states,
-                                      bindings: config.document.tileBindings[entityId] ?? [:],
+                                      bindings: bindings(of: entityId),
                                       excluding: excluded)
     }
 

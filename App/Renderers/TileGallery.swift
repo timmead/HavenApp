@@ -87,6 +87,11 @@ struct TileGallery: View {
                             }
                             Divider()
                             AddTileView(areaId: "lounge", surface: .overview)
+                            Divider()
+                            // **The second step**, which is otherwise only reachable by tapping a
+                            // cover — and an unrendered state is one nobody has looked at.
+                            AddTileView(areaId: "lounge", surface: .overview,
+                                        choosingTypeForPreview: "cover.open")
                         }
                     }
                     // The two configuration sheets have no other verification, which is the same
@@ -469,13 +474,17 @@ struct TileGallery: View {
                                            lastUpdated: Date(timeIntervalSince1970: 0))
             document = document.settingStateStyle(.label, for: id)
         }
-        // The bindings that make the three garages above mean anything.
+        // Each garage is a *device* of type `garage_door` whose primary is the cover — which is
+        // what choosing that type in the `+` flow creates — with its limits as inputs.
         for garage in Self.garages {
             let stem = String(garage.id.split(separator: ".")[1])
-            let id = garage.id
-            document = document
-                .settingBinding("binary_sensor.\(stem)_closed", role: .closedLimit, for: id)
-                .settingBinding("binary_sensor.\(stem)_open", role: .openLimit, for: id)
+            document = document.settingDevice(
+                DashboardDocument.StoredDevice(
+                    id: garage.id, type: "garage_door", areaId: "lounge",
+                    inputs: [.primary: [garage.id],
+                             .closedLimit: ["binary_sensor.\(stem)_closed"],
+                             .openLimit: ["binary_sensor.\(stem)_open"]]),
+                id: garage.id)
         }
         store.config.seedForTesting(document)
 

@@ -35,20 +35,6 @@ public enum DeviceRole: String, Sendable, Equatable, CaseIterable {
         }
     }
 
-    /// The roles worth binding for a domain, or none.
-    ///
-    /// **Two roles, because two are needed.** A lock's door contact is a real role — it would let
-    /// Haven say "locked, but the door is open" — and it is deliberately absent: that is a second
-    /// derivation with its own question about what the tile should then read, and inventing storage
-    /// for it now would be designing against a device nobody has described.
-    @available(*, deprecated, message: "Roles belong to a DeviceType, not a domain — see DeviceTypes")
-    public static func roles(for domain: Domain) -> [DeviceRole] {
-        switch domain {
-        case .cover: return [.openLimit, .closedLimit]
-        case .light, .switchOutlet, .lock, .climate, .mediaPlayer, .camera, .scene, .script,
-             .button, .sensor, .binarySensor, .unknown: return []
-        }
-    }
 }
 
 /// How many entities a role holds.

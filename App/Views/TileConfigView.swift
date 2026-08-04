@@ -115,19 +115,22 @@ struct TileConfigView: View {
             }
             // Only for the domains with a role worth binding — see `DeviceRole.roles(for:)`. A
             // garage's two limit sensors describe a state the cover entity cannot: partly open.
-            let roles = DeviceRole.roles(for: Domain.of(entityId))
+            // **The type's roles, not the domain's.** A garage door has limit sensors because it is
+            // a garage door, not because it is a cover — a plain shade is a cover too and has none.
+            // Only a composite has roles to bind, because choosing a type is what created it.
+            let roles = store.deviceType(of: entityId).roles.filter { $0.role != .primary }
             if !roles.isEmpty {
                 FacetCard(title: "Sensors") {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(roles, id: \.self) { role in
+                        ForEach(roles, id: \.role) { typeRole in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(role.label)
+                                Text(typeRole.role.label)
                                     .font(.system(size: 12, weight: .semibold))
-                                Picker(role.label, selection: Binding(
-                                    get: { bindings[role] ?? "" },
-                                    set: { bindings[role] = $0.isEmpty ? nil : $0 })) {
+                                Picker(typeRole.role.label, selection: Binding(
+                                    get: { bindings[typeRole.role] ?? "" },
+                                    set: { bindings[typeRole.role] = $0.isEmpty ? nil : $0 })) {
                                         Text("None").tag("")
-                                        ForEach(candidates, id: \.self) { id in
+                                        ForEach(candidates(for: typeRole), id: \.self) { id in
                                             Text(store.displayName(of: id)).tag(id)
                                         }
                                     }
@@ -135,9 +138,7 @@ struct TileConfigView: View {
                                     .labelsHidden()
                             }
                         }
-                        Text(candidates.isEmpty
-                             ? "This device has no other entities in Home Assistant to bind."
-                             : "Bind both to tell a door standing part-way open from one that is shut.")
+                        Text(roleHint)
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
@@ -211,16 +212,35 @@ struct TileConfigView: View {
         }
     }
 
-    /// The device's other entities, which is what a role can be bound to.
-    private var candidates: [String] { store.bindableEntityIds(for: entityId) }
+    /// What could fill a role: entities the role's own domains accept.
+    ///
+    /// A garage door's limits come from its physical device, since a limit sensor is part of the
+    /// opener. A shade group's followers are any cover in the room — the whole point is grouping
+    /// shades that Home Assistant considers unrelated.
+    private func candidates(for typeRole: DeviceTypeRole) -> [String] {
+        guard let primary = store.device(entityId).primaryEntityId else { return [] }
+        let pool = typeRole.role == .follower
+            ? store.roomEntityIds(containing: primary)
+            : store.bindableEntityIds(for: primary)
+        return pool.filter { $0 != primary && typeRole.accepts($0) }
+    }
+
+    private var roleHint: String {
+        let anyCandidates = store.deviceType(of: entityId).roles
+            .filter { $0.role != .primary }
+            .contains { !candidates(for: $0).isEmpty }
+        return anyCandidates
+            ? "Only entities that could fill each role are offered."
+            : "Nothing in this room can fill these roles."
+    }
 
     /// Roles whose binding differs from what is stored. `nil` for a role clears it.
     private var bindingEdits: [DeviceRole: String?]? {
         let stored = store.bindings(of: entityId)
         var out: [DeviceRole: String?] = [:]
-        for role in DeviceRole.roles(for: Domain.of(entityId)) {
-            let now = bindings[role]
-            if now != stored[role] { out[role] = now }
+        for typeRole in store.deviceType(of: entityId).roles where typeRole.role != .primary {
+            let now = bindings[typeRole.role]
+            if now != stored[typeRole.role] { out[typeRole.role] = now }
         }
         return out.isEmpty ? nil : out
     }

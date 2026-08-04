@@ -21,6 +21,7 @@ struct AddTileView: View {
     let areaId: String
     let surface: HavenSurface
     @Environment(HomeStore.self) private var store
+    @Environment(Navigation.self) private var navigation
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     /// Kinds the user has unticked. Empty — everything shown — every time the sheet opens; see
@@ -32,13 +33,19 @@ struct AddTileView: View {
     /// Which device groups are open. Collapsed by default, which is the entire point of grouping.
     @State private var expanded: Set<String> = []
     @State private var failure: String?
+    /// The entity awaiting a type, or nil. **A second step, not a second sheet**: a sheet-in-sheet
+    /// dismisses and re-presents its parent, which this file's kind filter already records as
+    /// disruptive enough to have been redesigned away.
+    @State private var choosingTypeFor: String?
 
     /// `filteringByKindForPreview` exists so a preview can render the expanded state, which is
     /// otherwise only reachable by tapping — and an unrendered state is one nobody has looked at.
-    init(areaId: String, surface: HavenSurface, filteringByKindForPreview: Bool = false) {
+    init(areaId: String, surface: HavenSurface, filteringByKindForPreview: Bool = false,
+         choosingTypeForPreview: String? = nil) {
         self.areaId = areaId
         self.surface = surface
         _isFilteringByKind = State(initialValue: filteringByKindForPreview)
+        _choosingTypeFor = State(initialValue: choosingTypeForPreview)
     }
 
     var body: some View {
@@ -52,6 +59,9 @@ struct AddTileView: View {
                         subtitle: subtitle,
                         accent: HavenColor.domain(.cover), unavailable: false,
                         accessory: AnyView(ModalDoneButton { dismiss() }))
+            if let entityId = choosingTypeFor {
+                typeChooser(entityId)
+            } else {
             searchAndFilter(candidates: candidates)
             if isFilteringByKind {
                 TileKindFilter(available: AddTileGrouping.categories(of: candidates),
@@ -83,6 +93,7 @@ struct AddTileView: View {
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -174,7 +185,14 @@ struct AddTileView: View {
 
     private func entityRow(_ entityId: String) -> some View {
         Button {
-            Task { await add(entityId) }
+            // **Only ask when there is a question.** A light has one way to be rendered, so offering
+            // a chooser with a single row would be a step that teaches nothing. A cover has three.
+            let types = DeviceTypes.candidates(for: entityId)
+            if types.count > 1 {
+                choosingTypeFor = entityId
+            } else {
+                Task { await add(entityId) }
+            }
         } label: {
             EntityPickerRow(title: store.displayName(of: entityId),
                             entityId: entityId,
@@ -197,6 +215,77 @@ struct AddTileView: View {
         case .notAuthorized: failure = "Only Home Assistant admins can change the household dashboard."
         case .failed: failure = "Couldn't save that. Check your connection and try again."
         }
+    }
+
+    /// The second step: what kind of device this entity should be.
+    ///
+    /// Replaces the list in place rather than pushing or presenting, for the reason the kind filter
+    /// records — a sheet over this sheet dismisses and re-presents the one underneath, which reads
+    /// as the app losing its place.
+    @ViewBuilder
+    private func typeChooser(_ entityId: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("How should “\(store.displayName(of: entityId))” be shown?")
+                .font(.system(size: 15, weight: .semibold))
+            ForEach(DeviceTypes.candidates(for: entityId)) { type in
+                Button {
+                    Task { await add(entityId, as: type) }
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(type.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text(describe(type))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider()
+            }
+            Button("Back") { choosingTypeFor = nil }
+                .font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    /// What choosing a type gets you, in one line — a name alone does not say why a "Garage door" is
+    /// different from a "Shade".
+    private func describe(_ type: DeviceType) -> String {
+        let extra = type.roles.filter { $0.role != .primary }
+        guard !extra.isEmpty else { return "On its own, as Home Assistant reports it." }
+        switch type.id {
+        case "garage_door":
+            return "With sensors for fully open and fully closed, so it can say when it is part-way."
+        case "shade_group":
+            return "With other shades, controlled together as one tile."
+        default:
+            return "With " + extra.map { $0.role.label.lowercased() }.joined(separator: " and ") + "."
+        }
+    }
+
+    /// Adding as a composite **creates a device**; adding as a one-entity type is the membership
+    /// change it always was.
+    private func add(_ entityId: String, as type: DeviceType) async {
+        guard type.roles.count > 1 else {
+            await add(entityId)
+            return
+        }
+        guard let id = await store.createDevice(type: type, primary: entityId, areaId: areaId) else {
+            failure = "Couldn't save that. Check your connection and try again."
+            return
+        }
+        // Straight into its configuration: a shade group with no followers is a shade with a
+        // different label, and the roles are the reason the type was chosen.
+        navigation.presented = .tileConfig(entityId: id, surface: surface)
     }
 }
 
