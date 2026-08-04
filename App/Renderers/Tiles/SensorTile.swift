@@ -125,14 +125,30 @@ struct SensorTile: View {
             //
             // The icon is unconditionally `.secondary`: a sensor is a reading, not a state, and
             // has no "active" to tint for.
+            // **A sensor's reading is the thing on the tile worth reading**, so it is the largest
+            // thing on it and the glyph shrinks to half size. The icon still says which device this
+            // is; it no longer competes with the number for the eye.
             TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
                       name: store.displayName(of: entityId),
-                      accent: .gray, unavailable: unavailable) {
-                // Already unconditionally `.secondary` — a hierarchy choice, not an on/off one —
-                // so it already satisfies "unavailable text is secondary" with no change. For an
-                // unreachable sensor the value string *is* "unavailable", which is honest.
-                Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                      accent: .gray, unavailable: unavailable, iconSize: 10) {
+                // Value and unit are drawn separately because they are not equally interesting:
+                // "21.4" is the reading and "°C" is a label on it. Baseline-aligned so the small
+                // unit sits on the number's line rather than floating beside its middle.
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(s?.value ?? "")
+                        .font(.system(size: 16, weight: .semibold))
+                        // An unreachable sensor's value string *is* "unavailable" — honest, and
+                        // long, so it shrinks rather than truncating.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                accent: .gray))
+                    if let unit = s?.unit {
+                        Text(unit)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .contentShape(Rectangle()).onTapGesture { navigation.open(entityId, on: surface) }
