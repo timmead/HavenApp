@@ -99,8 +99,8 @@ public struct TileSpan: Sendable, Equatable, Hashable {
     /// somebody chose, to save them from a layout they can undo in two taps.
     ///
     /// **Nothing is listed that cannot be drawn.** Each entry corresponds to a real rendering; when
-    /// one is added, it is added here. Climate has a 4×2 design and not yet a 4×2 rendering, so it
-    /// is absent until it exists rather than offered and blank.
+    /// one is added, it is added here — `nothingIsOfferedThatTheDefaultsDoNotAlreadyContain` is what
+    /// fails if a rendering is ever withdrawn without this list following it.
     public static func available(for domain: Domain) -> [TileSpan] {
         switch domain {
         case .light, .switchOutlet, .cover, .lock, .scene, .script, .button, .binarySensor, .unknown:
@@ -108,8 +108,10 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         // A reading, or a reading over a day of itself — see `SensorSparkline`.
         case .sensor:
             return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1)]
+        // A readout with two controls squeezed beside it, or the sheet's controls without the
+        // sheet — see `ClimateTile`.
         case .climate:
-            return [TileSpan(columns: 2, rows: 1)]
+            return [TileSpan(columns: 2, rows: 1), TileSpan(columns: 4, rows: 2)]
         case .mediaPlayer:
             return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1),
                     TileSpan(columns: 4, rows: 2)]

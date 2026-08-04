@@ -1,7 +1,7 @@
 # Choosing a tile's size, and a sheet that saves on Done — design
 
 **Date:** 2026-07-30
-**Status:** approved, ready for implementation plans
+**Status:** implemented on `feat/tile-sizes`
 **Follows:** sub-projects 5a/5b (the room grid, and rearranging it)
 
 ## What this is
@@ -98,11 +98,18 @@ attribute, the tile's fetch is a second one. The policy above is what bounds it,
 Setpoint and mode given the room to be direct controls rather than a summary — the 2×1's compact
 readout is what it is because a quarter-row cannot hold more.
 
-**It must survive a 66pt row.** `RoomGrid` takes its row height from the tallest *single-row* subview
-and falls back to 66pt when there is none, so a room containing only multi-row tiles gives a 4×2
-tile 141pt rather than the height it was designed at. Either the design survives that or the fallback
-gains a rule; this is settled when the tile is built, and it is called out here because a suite
-cannot see it.
+**As built:** the *room's* temperature leads, because that is what a thermostat is for telling you
+and the compact tile can only afford one number; the setpoint becomes a control with its own two
+buttons rather than a readout with steppers in a corner; and every mode the unit declares gets a
+button, in the unit's own order, rather than a summary line you had to open a sheet to change.
+
+**It must survive a room's real row height, and the fallback was wrong.** `RoomGrid` took its row
+height from the tallest *single-row* subview and fell back to `GlassTile`'s 66pt *floor* when there
+was none — so a room of only multi-row tiles gave a 4×2 tile 141pt. That was settled early, during
+plan 2: room detail's Cameras group is all 2-row tiles by construction and hit it immediately,
+rebuilding the very bug `CameraTile`'s comment records. The fallback is now 82, the height a real 1×1
+renders at, and the gallery draws this tile at the resulting 173pt rather than at whatever height a
+`VStack` would give it.
 
 ## Plan 4 — The size model
 

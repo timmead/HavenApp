@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth, fifth, sixth }
+    enum Page { case first, second, third, fourth, fifth, sixth, seventh }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -94,6 +94,8 @@ struct TileGallery: View {
                     // only next to their own views, so the pair is reviewed as a pair.
                 case .sixth:
                     stateStyles
+                case .seventh:
+                    climateLarge
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -168,6 +170,22 @@ struct TileGallery: View {
         "binary_sensor.unavailable", "lock.unavailable", "switch.unavailable",
     ]
 
+    /// **The 4×2 climate tile, at the height a room actually gives it.**
+    ///
+    /// 173pt — two `RoomGrid` rows plus the spacing between them — rather than whatever a `VStack`
+    /// would hand it. That distinction is the entire reason this section exists: a tile that looks
+    /// right at its natural height and overflows at its real one is a tile nobody has verified.
+    private var climateLarge: some View {
+        section("Climate — 4×2, at a room's row height") {
+            VStack(spacing: 10) {
+                ForEach(["climate.heating", "climate.off", "climate.unavailable"], id: \.self) { id in
+                    ClimateTile(entityId: id, size: .large)
+                        .frame(height: 173)
+                }
+            }
+        }
+    }
+
     /// Climate at its real width: 2 of 4 columns, as both surfaces draw it.
     private var climateRow: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
@@ -234,24 +252,31 @@ struct TileGallery: View {
         // action to colour by. Same mode and target where they can be, so the only difference on
         // screen is the one being checked.
         set("climate.heating", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
+            "current_temperature": .double(20.4),
                                         "fan_mode": .string("auto"), "hvac_action": .string("heating"),
                                         "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.cooling", "cool", ["friendly_name": .string("Study"), "temperature": .double(19),
+            "current_temperature": .double(22.1),
                                         "fan_mode": .string("auto"), "hvac_action": .string("cooling"),
                                         "hvac_modes": .array([.string("off"), .string("cool")])])
         set("climate.drying", "dry", ["friendly_name": .string("Cellar"), "temperature": .double(20),
+            "current_temperature": .double(19.6),
                                       "hvac_action": .string("drying"),
                                       "hvac_modes": .array([.string("off"), .string("dry")])])
         set("climate.fan", "fan_only", ["friendly_name": .string("Porch"), "temperature": .double(22),
+            "current_temperature": .double(20.8),
                                         "fan_mode": .string("high"), "hvac_action": .string("fan"),
                                         "hvac_modes": .array([.string("off"), .string("fan_only")])])
         // On and at target: the pair with `climate.heating` that the fill rule is about.
         set("climate.idle", "heat", ["friendly_name": .string("Hall"), "temperature": .double(21),
+            "current_temperature": .double(20.4),
                                      "fan_mode": .string("auto"), "hvac_action": .string("idle"),
                                      "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.off", "off", ["friendly_name": .string("Attic"), "temperature": .double(18),
+            "current_temperature": .double(20.8),
                                    "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unknown", "unknown", ["friendly_name": .string("Garage"), "temperature": .double(19),
+            "current_temperature": .double(22.1),
                                            "hvac_modes": .array([.string("off"), .string("heat")])])
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23)])
@@ -391,5 +416,9 @@ struct TileGallery: View {
 
 #Preview("Tiles 6 — two-state styles") {
     TileGallery(page: .sixth)
+}
+
+#Preview("Tiles 7 — climate 4×2") {
+    TileGallery(page: .seventh)
 }
 #endif

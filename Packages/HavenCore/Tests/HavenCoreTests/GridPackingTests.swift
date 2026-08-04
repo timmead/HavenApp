@@ -109,6 +109,8 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
     #expect(TileSpan.available(for: .camera) == [TileSpan(columns: 2, rows: 2),
                                                  TileSpan(columns: 4, rows: 2)])
     #expect(TileSpan.available(for: .light) == [TileSpan(columns: 1, rows: 1)])
+    #expect(TileSpan.available(for: .climate) == [TileSpan(columns: 2, rows: 1),
+                                                  TileSpan(columns: 4, rows: 2)])
 }
 
 /// One option is not a choice — the sheet shows no control at all for these.

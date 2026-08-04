@@ -42,7 +42,7 @@ struct DeviceTileView: View {
         case .switchOutlet: SwitchTile(entityId: entityId)
         case .cover: CoverTile(entityId: entityId)
         case .lock: LockTile(entityId: entityId)
-        case .climate: ClimateTile(entityId: entityId)
+        case .climate: ClimateTile(entityId: entityId, size: ClimateTileSize(span: span))
         case .mediaPlayer:
             MediaPlayerTile(entityId: entityId, size: MediaTileSize(span: span))
         case .camera:
