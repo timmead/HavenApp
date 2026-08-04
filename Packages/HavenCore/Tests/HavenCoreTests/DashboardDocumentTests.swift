@@ -318,3 +318,37 @@ private func json(_ text: String) -> JSONValue {
             "sizes": .object(["overview": .string("enormous")])])])]))
     #expect(doc.tileSizes["sensor.hall"] == nil)
 }
+
+// MARK: - How a two-state tile shows its state
+
+@Test func aStateStyleIsStoredPerEntityRatherThanPerSurface() {
+    let doc = DashboardDocument().settingStateStyle(.label, for: "binary_sensor.front")
+    #expect(doc.tileStateStyles["binary_sensor.front"] == .label)
+}
+
+@Test func aStateStyleSurvivesTheOtherDecisionsAboutADevice() {
+    let doc = DashboardDocument()
+        .settingDisplayName("Front Door", for: "binary_sensor.front")
+        .settingSize(TileSpan(columns: 1, rows: 1), for: "binary_sensor.front", on: .overview)
+        .settingStateStyle(.label, for: "binary_sensor.front")
+    #expect(doc.displayNames["binary_sensor.front"] == "Front Door")
+    #expect(doc.tileSizes["binary_sensor.front"]?[.overview] == TileSpan(columns: 1, rows: 1))
+    #expect(doc.tileStateStyles["binary_sensor.front"] == .label)
+}
+
+@Test func clearingTheStateStyleRemovesTheRecord() {
+    let doc = DashboardDocument()
+        .settingStateStyle(.label, for: "binary_sensor.front")
+        .settingStateStyle(nil, for: "binary_sensor.front")
+    #expect(doc.tileStateStyles["binary_sensor.front"] == nil)
+    #expect(doc.raw.asObject?["entities"] == nil)
+}
+
+/// A style a newer build understands and this one does not is dropped rather than guessed at.
+@Test func anUnreadableStateStyleIsIgnored() {
+    let doc = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "entities": .object(["binary_sensor.front": .object([
+            "state_style": .string("interpretive-dance")])])]))
+    #expect(doc.tileStateStyles["binary_sensor.front"] == nil)
+}

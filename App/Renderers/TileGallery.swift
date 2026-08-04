@@ -25,7 +25,7 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth, fifth }
+    enum Page { case first, second, third, fourth, fifth, sixth }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -92,6 +92,8 @@ struct TileGallery: View {
                     // The two configuration sheets have no other verification, which is the same
                     // argument this file makes about the tiles. Rendered side by side rather than
                     // only next to their own views, so the pair is reviewed as a pair.
+                case .sixth:
+                    stateStyles
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -120,6 +122,38 @@ struct TileGallery: View {
         LazyVGrid(columns: Self.columns, spacing: 10) {
             ForEach(cases, id: \.self) { name in
                 DeviceTileView(entityId: "\(domain).\(name)", surface: .overview)
+            }
+        }
+    }
+
+    /// **The two ways a two-state tile can show itself**, side by side, because the choice between
+    /// them is a household setting and neither is obviously right. The glyphs differ between states
+    /// — an open door against a closed one — which is what makes the icon style worth having; the
+    /// label style exists for the device classes where a picture is a guess.
+    ///
+    /// The unreachable cases are here deliberately. Both styles must say "Unavailable" rather than
+    /// asserting a state, and the lock is the one where getting that wrong is a security claim.
+    private var stateStyles: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            section("Icon — binary sensor, lock, cover") {
+                LazyVGrid(columns: Self.columns, spacing: 10) {
+                    ForEach(["binary_sensor.active", "binary_sensor.clear",
+                             "lock.locked", "lock.unlocked", "lock.jammed",
+                             "cover.open", "cover.closed",
+                             "binary_sensor.unavailable", "lock.unavailable"], id: \.self) { id in
+                        DeviceTileView(entityId: id, surface: .overview)
+                    }
+                }
+            }
+            section("Label — the same devices, same states") {
+                LazyVGrid(columns: Self.columns, spacing: 10) {
+                    ForEach(["binary_sensor.active_l", "binary_sensor.clear_l",
+                             "lock.locked_l", "lock.unlocked_l", "lock.jammed_l",
+                             "cover.open_l", "cover.closed_l",
+                             "binary_sensor.unavailable_l", "lock.unavailable_l"], id: \.self) { id in
+                        DeviceTileView(entityId: id, surface: .overview)
+                    }
+                }
             }
         }
     }
@@ -277,6 +311,28 @@ struct TileGallery: View {
             ResolvedArea(id: "hall", name: "Hall", entityIds: [], tiers: [:]),
         ])])
         store.resolveEnvironment()
+        // The label-style twins: the same states again, with the household's choice stored, so both
+        // styles can be compared rather than described.
+        var document = store.config.document
+        for (id, state, name, dc) in [
+            ("binary_sensor.active_l", "on", "Door", "door"),
+            ("binary_sensor.clear_l", "off", "Window", "window"),
+            ("binary_sensor.unavailable_l", "unavailable", "Motion", "motion"),
+            ("lock.locked_l", "locked", "Front", nil),
+            ("lock.unlocked_l", "unlocked", "Back", nil),
+            ("lock.jammed_l", "jammed", "Side", nil),
+            ("lock.unavailable_l", "unavailable", "Shed", nil),
+            ("cover.open_l", "open", "Blinds", nil),
+            ("cover.closed_l", "closed", "Garage", "garage"),
+        ] as [(String, String, String, String?)] {
+            var attrs: [String: JSONValue] = ["friendly_name": .string(name)]
+            if let dc { attrs["device_class"] = .string(dc) }
+            store.states[id] = EntityState(entityId: id, state: state, attributes: attrs,
+                                           lastUpdated: Date(timeIntervalSince1970: 0))
+            document = document.settingStateStyle(.label, for: id)
+        }
+        store.config.seedForTesting(document)
+
         // Seeded history, so the sparkline can be looked at without a server. A gentle curve and a
         // spiky one, because the two are what the y-domain choice is about: a room that moved half a
         // degree all day must still show its shape rather than a flat line against a zero baseline.
@@ -317,5 +373,9 @@ struct TileGallery: View {
 /// a baseline — the same reason climate's eight fixtures forced a third.
 #Preview("Tiles 5 — add a device") {
     TileGallery(page: .fifth)
+}
+
+#Preview("Tiles 6 — two-state styles") {
+    TileGallery(page: .sixth)
 }
 #endif

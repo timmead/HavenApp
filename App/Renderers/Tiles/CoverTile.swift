@@ -12,16 +12,16 @@ struct CoverTile: View {
         let open = s?.isOpen ?? false; let accent = HavenColor.domain(.cover)
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: open, accent: accent, unavailable: unavailable) {
-            HStack(alignment: .top, spacing: 0) {
-                // The symbol needs no unavailable-specific choice: it is the neutral domain glyph
-                // in every case, not an open/closed variant. Only the tint and the name do, and
-                // `open` reading `false` for an `unavailable` state string made them right
-                // incidentally rather than deliberately.
-                TileLabel(symbol: IconMap.symbol(domain: .cover, deviceClass: e?.deviceClass),
+            HStack(alignment: .center, spacing: 0) {
+                // The state, large, in what the slider leaves of the tile — a garage door open
+                // against one closed, rather than the neutral domain glyph both states used to
+                // share. `unavailable` is now handled by `TileState` rather than incidentally by
+                // `open` reading false for an unreachable cover.
+                StateFace(state: TileState.cover(deviceClass: e?.deviceClass, isOpen: open,
+                                                 unavailable: unavailable),
+                          style: store.stateStyle(of: entityId),
                           name: store.displayName(of: entityId),
-                          icon: open ? .accent : .secondary,
-                          title: open ? .primary : .secondary,
-                          accent: accent, unavailable: unavailable)
+                          accent: accent, active: open, unavailable: unavailable)
                 // Unlike the light, this is shown at every position including 0 — a closed shade
                 // has a real, meaningful position — so a drag up from the bottom genuinely opens
                 // it, and `CoverOptimistic.position` moves the open/closed state along with the

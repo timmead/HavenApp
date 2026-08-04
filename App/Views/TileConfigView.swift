@@ -37,6 +37,8 @@ struct TileConfigView: View {
     /// The chosen size, seeded from what is stored or the surface's default. A draft like the name:
     /// nothing is written until the sheet closes.
     @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
+    /// Whether this device's tile shows its state as a glyph or a word. A draft, like the rest.
+    @State private var stateStyle: TileStateStyle = .icon
 
     private var storedOverride: String? { store.config.document.displayNames[entityId] }
 
@@ -91,6 +93,24 @@ struct TileConfigView: View {
                     }
                 }
             }
+            // Only for the devices that *have* two states to show — a thermostat or a camera has
+            // nothing this would mean. See `TileState.isTwoState`.
+            if TileState.isTwoState(Domain.of(entityId)) {
+                FacetCard(title: "Show state as") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Picker("Show state as", selection: $stateStyle) {
+                            Text("Icon").tag(TileStateStyle.icon)
+                            Text("Label").tag(TileStateStyle.label)
+                        }
+                        .pickerStyle(.segmented)
+                        // Unlike the size, this is one answer for the device rather than one per
+                        // surface: whether a word is easier to read than a picture is a fact about
+                        // the reader, and asking it twice for the same door would be strange.
+                        Text("On the dashboard and in the room.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
             FacetCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
@@ -122,6 +142,7 @@ struct TileConfigView: View {
         .onAppear {
             draft = storedOverride ?? ""
             span = store.span(of: entityId, on: surface)
+            stateStyle = store.stateStyle(of: entityId)
         }
         // **Swiping the sheet away commits too**, because there is no Cancel here and discarding a
         // typed name without warning is worse than a write the user cannot watch. Fire-and-forget by
@@ -131,9 +152,13 @@ struct TileConfigView: View {
             guard !committed, hasChanges else { return }
             let name = DisplayName.override(from: draft)
             let size = sizeEdit
+            let style = stateStyleEdit
             let surface = surface
             committed = true
-            Task { _ = await store.applyTileConfig(entityId, name: name, size: size, on: surface) }
+            Task {
+                _ = await store.applyTileConfig(entityId, name: name, size: size,
+                                                stateStyle: style, on: surface)
+            }
         }
     }
 
@@ -189,8 +214,18 @@ struct TileConfigView: View {
     /// Whether committing would change anything. Compared against the stored override rather than
     /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
     /// an edit — and so a sheet merely opened and closed writes nothing at all.
+    /// Whether the state style differs from what is stored — `.some(nil)` to clear a stored choice
+    /// back to the default rather than storing the default as though it had been chosen.
+    private var stateStyleEdit: TileStateStyle?? {
+        guard TileState.isTwoState(Domain.of(entityId)) else { return nil }
+        let stored = store.config.document.tileStateStyles[entityId]
+        guard stateStyle != stored else { return nil }
+        return stateStyle == .icon ? .some(nil) : .some(stateStyle)
+    }
+
     private var hasChanges: Bool {
-        DisplayName.override(from: draft) != storedOverride || sizeEdit != nil
+        DisplayName.override(from: draft) != storedOverride
+            || sizeEdit != nil || stateStyleEdit != nil
     }
 
     /// The one write this sheet performs. Returns whether the sheet may close.
@@ -205,7 +240,8 @@ struct TileConfigView: View {
         guard hasChanges else { committed = true; return true }
         committed = true
         switch await store.applyTileConfig(entityId, name: DisplayName.override(from: draft),
-                                           size: sizeEdit, on: surface) {
+                                           size: sizeEdit, stateStyle: stateStyleEdit,
+                                           on: surface) {
         case .written, .unchanged:
             return true
         case .notAuthorized:

@@ -13,14 +13,16 @@ struct BinarySensorTile: View {
         let accent = HavenColor.warning
         let unavailable = e?.isUnavailable ?? false
         GlassTile(active: active, accent: accent, unavailable: unavailable) {
-            // The symbol is the neutral device-class glyph in every state, not an active/clear
-            // variant, so it needs no unavailable-specific choice of its own — only the tint,
-            // which `TileLabel` resolves. The name stays `.primary` when reachable: unlike a light
-            // or a switch, a *clear* door sensor is not "off", it is simply reporting.
-            TileLabel(symbol: IconMap.symbol(domain: .binarySensor, deviceClass: e?.deviceClass),
+            // **The state is the tile.** A door sensor has no control and no reading — whether the
+            // door is open is the only thing it has to say — so it says it in the middle, large,
+            // rather than in a 20pt glyph in a corner that made every binary tile look alike until
+            // you read the tint. The glyph now differs between states; `TileState` owns that table
+            // and the unreachable rule with it.
+            StateFace(state: TileState.binarySensor(deviceClass: e?.deviceClass,
+                                                    isActive: active, unavailable: unavailable),
+                      style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      icon: active ? .accent : .secondary,
-                      accent: accent, unavailable: unavailable)
+                      accent: accent, active: active, unavailable: unavailable)
         }
         .contentShape(Rectangle()).onTapGesture { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)

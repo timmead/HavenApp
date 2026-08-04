@@ -33,6 +33,7 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let nameKey = "name"
     private static let surfacesKey = "surfaces"
     private static let sizesKey = "sizes"
+    private static let stateStyleKey = "state_style"
     private static let orderKey = "order"
 
     public let raw: JSONValue
@@ -245,6 +246,44 @@ public struct DashboardDocument: Sendable, Equatable {
             entity.removeValue(forKey: Self.sizesKey)
         } else {
             entity[Self.sizesKey] = .object(sizes)
+        }
+        if entity.isEmpty {
+            entities.removeValue(forKey: entityId)
+        } else {
+            entities[entityId] = .object(entity)
+        }
+        if entities.isEmpty {
+            root.removeValue(forKey: Self.entitiesKey)
+        } else {
+            root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - How a two-state tile shows its state
+
+    /// Whether each two-state device shows a glyph or a word, keyed by entity id.
+    ///
+    /// **Not per surface**, unlike a size. A size is about how much room a tile has, and the two
+    /// surfaces genuinely differ; whether "Open" is easier to read than an open door is a fact about
+    /// the reader, and it would be strange to answer it twice for the same device.
+    public var tileStateStyles: [String: TileStateStyle] {
+        guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
+        return entities.compactMapValues { entity in
+            entity.asObject?[Self.stateStyleKey]?.asString.flatMap(TileStateStyle.init(rawValue:))
+        }
+    }
+
+    /// This document with one entity's state style set, or — for `nil` — cleared back to the default.
+    public func settingStateStyle(_ style: TileStateStyle?, for entityId: String) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var entities = root[Self.entitiesKey]?.asObject ?? [:]
+        var entity = entities[entityId]?.asObject ?? [:]
+        if let style {
+            entity[Self.stateStyleKey] = .string(style.rawValue)
+        } else {
+            entity.removeValue(forKey: Self.stateStyleKey)
         }
         if entity.isEmpty {
             entities.removeValue(forKey: entityId)

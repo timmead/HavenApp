@@ -224,6 +224,11 @@ final class HomeStore {
                          for: Domain.of(entityId), on: surface)
     }
 
+    /// Whether a two-state tile shows a glyph or a word. `.icon` unless the household said otherwise.
+    func stateStyle(of entityId: String) -> TileStateStyle {
+        config.document.tileStateStyles[entityId] ?? .icon
+    }
+
     /// Commits everything one configuration sheet holds, in a **single** write.
     ///
     /// Not a convenience over `rename` and a size setter called in turn: each write bumps the shared
@@ -234,11 +239,15 @@ final class HomeStore {
     /// leave whatever is stored alone — the distinction matters for a sheet that shows no size
     /// control at all for a domain with one rendering.
     func applyTileConfig(_ entityId: String, name: String?, size: TileSpan??,
+                         stateStyle: TileStateStyle?? = nil,
                          on surface: HavenSurface) async -> HavenConfig.Outcome {
         await config.update { document in
             var next = document.settingDisplayName(name, for: entityId)
             if let size {
                 next = next.settingSize(size, for: entityId, on: surface)
+            }
+            if let stateStyle {
+                next = next.settingStateStyle(stateStyle, for: entityId)
             }
             return next
         }

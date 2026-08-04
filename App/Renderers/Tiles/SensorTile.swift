@@ -54,21 +54,32 @@ struct SensorTile: View {
             // whose comment records the one tile that forgot it. This one.
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 6) {
+                    // Half size, as on the 1×1 and for the same reason: the glyph says which
+                    // device this is, and the reading is what anybody actually came to read.
                     Image(systemName: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass))
-                        .font(.system(size: 20))
+                        .font(.system(size: 10))
                         .foregroundStyle(Emphasis.secondary.color(unavailable: unavailable,
                                                                   accent: .gray))
                         .symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 0)
-                    Text([s?.value, s?.unit].compactMap { $0 }.joined(separator: " "))
-                        .font(.system(size: 19, weight: .semibold))
-                        // A long reading shrinks rather than wrapping or truncating: "1,240 W" is
-                        // the number somebody came to read, and half of it is worse than a smaller
-                        // whole one.
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
-                                                                accent: .gray))
+                    // Value and unit drawn separately, baseline-aligned — "63" is the reading and
+                    // "W" is a label on it, and they are not equally interesting.
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(s?.value ?? "")
+                            .font(.system(size: 22, weight: .semibold))
+                            // A long reading shrinks rather than wrapping or truncating: "1,240" is
+                            // the number somebody came to read, and half of it is worse than a
+                            // smaller whole one.
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                    accent: .gray))
+                        if let unit = s?.unit {
+                            Text(unit)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Spacer(minLength: 2)
                 Text(store.displayName(of: entityId))
