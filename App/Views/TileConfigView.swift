@@ -41,6 +41,19 @@ struct TileConfigView: View {
     @State private var stateStyle: TileStateStyle = .icon
     /// Which companion plays which role. Drafts, like the rest — nothing writes until Done.
     @State private var bindings: [DeviceRole: String] = [:]
+    /// Seeded so a preview can render the open state, which no static render reaches by tapping.
+    var expandedRoleForPreview: DeviceRole?
+    /// Which role's picker is open. **Inline and one at a time**, rather than a sheet or two long
+    /// lists at once — the same shape the add-tile filter arrived at after a sheet-in-sheet proved
+    /// disruptive, and for the same reason.
+    @State private var expandedRole: DeviceRole?
+
+    init(entityId: String, surface: HavenSurface, expandedRoleForPreview: DeviceRole? = nil) {
+        self.entityId = entityId
+        self.surface = surface
+        self.expandedRoleForPreview = expandedRoleForPreview
+        _expandedRole = State(initialValue: expandedRoleForPreview)
+    }
 
     private var storedOverride: String? { store.config.document.displayNames[entityId] }
 
@@ -123,23 +136,13 @@ struct TileConfigView: View {
                 FacetCard(title: "Sensors") {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(roles, id: \.role) { typeRole in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(typeRole.role.label)
-                                    .font(.system(size: 12, weight: .semibold))
-                                Picker(typeRole.role.label, selection: Binding(
-                                    get: { bindings[typeRole.role] ?? "" },
-                                    set: { bindings[typeRole.role] = $0.isEmpty ? nil : $0 })) {
-                                        Text("None").tag("")
-                                        ForEach(candidates(for: typeRole), id: \.self) { id in
-                                            Text(store.displayName(of: id)).tag(id)
-                                        }
-                                    }
-                                    .pickerStyle(.menu)
-                                    .labelsHidden()
-                            }
+                            roleSection(typeRole)
                         }
                         Text(roleHint)
                             .font(.system(size: 11)).foregroundStyle(.secondary)
+                            // Wraps rather than truncating: it is a sentence, and half of one
+                            // ending in an ellipsis explains nothing.
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -212,6 +215,84 @@ struct TileConfigView: View {
         }
     }
 
+    /// One role: what it is bound to now, and — when opened — what it could be.
+    ///
+    /// **`EntityPickerRow`, not a menu.** Two contact sensors in one garage are routinely both
+    /// called "Door" — Home Assistant names entities after the measurement, not the place — so a
+    /// menu of display names asks the household to choose between two identical rows. That component
+    /// exists for precisely this, and says so in its own documentation; the first version used a
+    /// dropdown anyway.
+    @ViewBuilder
+    private func roleSection(_ typeRole: DeviceTypeRole) -> some View {
+        let isOpen = expandedRole == typeRole.role
+        let bound = bindings[typeRole.role]
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                expandedRole = isOpen ? nil : typeRole.role
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(typeRole.role.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(bound.map { store.displayName(of: $0) } ?? "Not set")
+                            .font(.system(size: 11))
+                            .foregroundStyle(bound == nil ? .secondary : HavenColor.domain(.cover))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                let options = candidates(for: typeRole)
+                if options.isEmpty {
+                    Text("Nothing in this home can fill this role.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                } else {
+                    // "Not set" is a row like any other, so unbinding is the same gesture as
+                    // binding rather than a separate control to find.
+                    Button {
+                        bindings[typeRole.role] = nil
+                        expandedRole = nil
+                    } label: {
+                        HStack {
+                            Text("Not set").font(.system(size: 15, weight: .semibold))
+                            Spacer(minLength: 8)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(HavenColor.domain(.cover))
+                                .opacity(bound == nil ? 1 : 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 7)
+
+                    ForEach(options, id: \.self) { id in
+                        Button {
+                            bindings[typeRole.role] = id
+                            expandedRole = nil
+                        } label: {
+                            EntityPickerRow(title: store.displayName(of: id),
+                                            entityId: id,
+                                            isSelected: bound == id)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.vertical, 7)
+                    }
+                }
+            }
+        }
+    }
+
     /// What could fill a role: **everything in the room** the role's domains accept.
     ///
     /// **Not restricted to the primary's own Home Assistant device**, which is what the first
@@ -244,7 +325,7 @@ struct TileConfigView: View {
             .filter { $0.role != .primary }
             .contains { !candidates(for: $0).isEmpty }
         return anyCandidates
-            ? "Nearest first: this device, then this room, then the rest of the home."
+            ? "Nearest first: this device, then the room, then the home."
             : "Nothing in this home can fill these roles."
     }
 
@@ -343,14 +424,19 @@ private struct TileConfigPreviewHost: View {
     var surface: HavenSurface = .overview
     @State private var store: HomeStore
 
-    init(entityId: String, overridden: Bool, surface: HavenSurface = .overview) {
+    var expandedRole: DeviceRole?
+
+    init(entityId: String, overridden: Bool, surface: HavenSurface = .overview,
+         expandedRole: DeviceRole? = nil) {
         self.entityId = entityId
         self.surface = surface
+        self.expandedRole = expandedRole
         _store = State(initialValue: TileConfigPreviewHost.populatedStore(overridden: overridden))
     }
 
     var body: some View {
-        TileConfigView(entityId: entityId, surface: surface).padding(16).environment(store)
+        TileConfigView(entityId: entityId, surface: surface, expandedRoleForPreview: expandedRole)
+            .padding(16).environment(store)
     }
 
     @MainActor
@@ -418,6 +504,13 @@ private struct TileConfigPreviewHost: View {
 /// heuristic applied to the one feature that exists because heuristics do not work here.
 #Preview("Tile config — garage door roles") {
     TileConfigPreviewHost(entityId: "switch.opener", overridden: false)
+}
+
+/// The picker **open**, which is the only state worth looking at — collapsed, every role is one row
+/// and the component choice is invisible.
+#Preview("Tile config — picking a limit sensor") {
+    TileConfigPreviewHost(entityId: "switch.opener", overridden: false,
+                          expandedRole: .closedLimit)
 }
 
 /// The other surface, where both the button and its explanation change wording.
