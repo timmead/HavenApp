@@ -830,7 +830,17 @@ final class AppModel {
             await onboarding.probe()
         }
         // Same live connection, for Task 3's offer — see `RemoteAccessOfferModel`.
-        remoteAccessOffer.attach(home)
+        //
+        // Guarded like every other step in this function. **It was the one that wasn't**, and the
+        // asymmetry was the real cost: a connect cancelled between the onboarding probe above and
+        // this line left this model holding a connection for a session `signOut()` had already torn
+        // down, and — worse — the next step added here would have been copied from whichever
+        // neighbour the author happened to look at. Nothing downstream reads the connection without
+        // an `offer` beside it, so the bug itself was small; every step in a best-effort sequence
+        // checking cancellation the same way is what stops the next one being large.
+        if !Task.isCancelled {
+            remoteAccessOffer.attach(home)
+        }
         // Nabu Casa bootstrap: ask the instance whether it has remote access and
         // at what domain, so remote access needs zero configuration. Same
         // best-effort footing as `get_config` above — `fetchCloudStatus` never

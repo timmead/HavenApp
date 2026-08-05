@@ -41,6 +41,15 @@ final class RemoteAccessOfferModel {
     /// The live session. Replaced on every reconnect, same as `OnboardingModel.connection`.
     private var connection: HomeConnection?
 
+    /// Whether this model is currently holding a connection.
+    ///
+    /// **Internal rather than private so a test can see it** — the same reason, and the same
+    /// wording, as `AppModel.finishConnecting` and `rememberDiscoveredURLs`. `attach` below was the
+    /// one step in `finishConnecting` with no cancellation check in front of it, and "did a
+    /// torn-down session's connection get stored here anyway" is not answerable from outside
+    /// without this. It is a read of one `nil` check and nothing in the app calls it.
+    var isAttached: Bool { connection != nil }
+
     func attach(_ connection: HomeConnection) {
         self.connection = connection
     }

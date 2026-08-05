@@ -62,13 +62,23 @@ import HavenCore
         }
     }
 
-    private func connection() async throws -> HomeConnection {
+    /// A connected `HomeConnection` over the scripted socket above.
+    ///
+    /// Static as well as instance-callable so `FinishConnectingCancellationTests` at the foot of
+    /// this file can use the same realistic-but-terminating instance rather than standing up a
+    /// second copy of it — two scripted sockets drifting apart is how one suite ends up testing a
+    /// different Home Assistant from its neighbour.
+    static func scriptedConnection() async throws -> HomeConnection {
         let socket = ScriptedConfigSocket()
         await socket.enqueue(#"{"type":"auth_required"}"#)
         await socket.enqueue(#"{"type":"auth_ok"}"#)
         let client = HAWebSocketClient(connection: socket)
         try await client.authenticate(token: "t")
         return HomeConnection(client: client)
+    }
+
+    private func connection() async throws -> HomeConnection {
+        try await Self.scriptedConnection()
     }
 
     private let internalKey = DiscoveredURLMigration.discoveredInternalURLKey
@@ -185,5 +195,39 @@ import HavenCore
                                    peerAddress: "2001:db8::1")
 
         #expect(!adopted(defaults))
+    }
+}
+
+/// **Every step of `finishConnecting` checks cancellation, including the last one to get a check.**
+///
+/// `remoteAccessOffer.attach(home)` was the single step in that sequence with no `!Task.isCancelled`
+/// in front of it, while the four around it all had one. A connect cancelled part-way — which is
+/// what `signOut()` and `requireReauthentication()` do, and what a mid-session reconnect does —
+/// could therefore leave `RemoteAccessOfferModel` holding a connection for a session already torn
+/// down.
+///
+/// Cancelling before the task body runs is deterministic here rather than racy: this suite is
+/// `@MainActor`, and a `Task { @MainActor in … }` created from it cannot begin until the enclosing
+/// synchronous block suspends — which is the `await` below, after `cancel()`.
+@Suite @MainActor struct FinishConnectingCancellationTests {
+    @Test func aCancelledConnectAttachesNothingToTheRemoteAccessOffer() async throws {
+        let defaults = makeTestDefaults()
+        let app = AppModel(defaults: defaults, tokens: FakeTokenStore())
+        let home = try await AppModelTrustTests.scriptedConnection()
+
+        let task = Task { @MainActor in
+            await app.finishConnecting(home: home,
+                                       candidate: .local(URL(string: "http://192.168.1.20:8123")!),
+                                       ssidMatch: nil,
+                                       peerAddress: "192.168.1.20")
+        }
+        task.cancel()
+        await task.value
+
+        #expect(!app.remoteAccessOffer.isAttached,
+                "a connect cancelled before this step must not hand the offer a dead session")
+        // The neighbouring guards still hold, so this test fails for its own reason rather than
+        // because cancellation happened to stop everything: nothing was adopted either.
+        #expect(defaults.string(forKey: DiscoveredURLMigration.discoveredInternalURLKey) == nil)
     }
 }
