@@ -287,8 +287,10 @@ Both suites green before every commit, and the app exercised by hand afterwards.
 | F5b climate turn-on rule | **Done.** Out of two view files, into `ClimateState.modeWhenTurningOn(from:)` |
 | F6 DesignSystem split | **Done**, re-scoped — two files moved, not eight |
 | F7 dead `bindings` key | **Done.** `deviceState`'s stale comment corrected inside F2b |
-| F1 `HomeSession` | **Not landed.** Demoted — see the correction above. The one-line guard on `AppModel.swift:833` is still open |
-| F5 tile gesture footer | **Not landed.** Left out of scope; still four copies |
+| F1 cancellation guard | **Done** (follow-up). `remoteAccessOffer.attach` now checks cancellation like its four neighbours, pinned by a test watched to fail |
+| F1 session teardown | **Done** (follow-up). `signOut`/`requireReauthentication` share `endSession()`; they differ only in whether the address survives |
+| F1 `HomeSession` object | **Not landed, and should not be** — the two useful parts above were extracted without it. See the correction above: one object over two lifetimes would break onboarding's restart step |
+| F5 tile gesture footer | **Done** (follow-up). One `TileInteraction` modifier; the four tiles no longer reference `Navigation` at all |
 
 ### Three things this document got wrong, and how they were found
 
