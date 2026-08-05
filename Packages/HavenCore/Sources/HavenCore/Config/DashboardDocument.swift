@@ -332,11 +332,19 @@ public struct DashboardDocument: Sendable, Equatable {
     /// and never found.
     ///
     /// Re-keying on read repairs them without a migration write. Where two records claim the same
-    /// primary, the one already stored under the right key wins, so this is deterministic rather
-    /// than dependent on dictionary order.
+    /// primary — a straggler and the record that replaced it — **the one stored under the right key
+    /// wins**, so a household that re-made a device gets the new one rather than the ghost.
+    ///
+    /// That comparison is on the *stored key*, and getting it wrong is what made a bound sensor
+    /// appear not to persist: an earlier version compared the id it had just constructed, which is
+    /// the primary in every case, so the test was always true and whichever record sorted first
+    /// won. `haven:…` sorts before `switch.…`, so the ghost beat the real device every time and the
+    /// freshly written binding was discarded on the next read.
     public var devices: [String: StoredDevice] {
         guard let stored = raw.asObject?[Self.devicesKey]?.asObject else { return [:] }
         var out: [String: StoredDevice] = [:]
+        /// The key each winning record was actually stored under.
+        var wonWithKey: [String: String] = [:]
         for (id, value) in stored.sorted(by: { $0.key < $1.key }) {
             guard let o = value.asObject,
                   let type = o["type"]?.asString, !type.isEmpty,
@@ -349,8 +357,9 @@ public struct DashboardDocument: Sendable, Equatable {
                 if !ids.isEmpty { inputs[role] = ids }
             }
             guard let primary = inputs[.primary]?.first else { continue }
-            // Already correctly keyed always wins over a re-keyed straggler.
-            if out[primary] != nil, out[primary]?.id == primary { continue }
+            // A record already stored under the right key is the real one; nothing displaces it.
+            if wonWithKey[primary] == primary { continue }
+            wonWithKey[primary] = id
             out[primary] = StoredDevice(id: primary, type: type, areaId: areaId, inputs: inputs)
         }
         return out

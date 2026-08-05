@@ -177,8 +177,31 @@ private func home(_ entityIds: [String]) -> ResolvedHome {
     #expect(raw.devices["haven:garage_door:abc123"] == nil)
 }
 
-/// Two records claiming one primary resolve deterministically — the correctly keyed one wins,
-/// rather than whichever the dictionary happened to yield first.
+/// **Two records claiming one primary: the correctly keyed one wins, whatever the sort order.**
+///
+/// This is what made a bound sensor appear not to persist. A household that created a device before
+/// ids were fixed has a `haven:…` straggler beside the real record; the tiebreak compared the id
+/// just constructed — always the primary — so it was true for whichever sorted first, and
+/// `haven:…` sorts before `switch.…`. The ghost won every read and the freshly written binding was
+/// thrown away.
+@Test func aCorrectlyKeyedDeviceBeatsAStragglerThatSortsFirst() {
+    let raw = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "devices": .object([
+            // Sorts first, and is the ghost.
+            "haven:garage_door:abc": .object([
+                "type": .string("garage_door"), "area": .string("garage"),
+                "inputs": .object(["primary": .array([.string("switch.opener")])])]),
+            // Sorts second, and is the one with the household's binding on it.
+            "switch.opener": .object([
+                "type": .string("garage_door"), "area": .string("garage"),
+                "inputs": .object(["primary": .array([.string("switch.opener")]),
+                                   "closed_limit": .array([.string("binary_sensor.g_closed")])])]),
+        ])]))
+    #expect(raw.devices["switch.opener"]?.inputs[.closedLimit] == ["binary_sensor.g_closed"])
+    #expect(raw.devices.count == 1)
+}
+
 @Test func aCorrectlyKeyedDeviceBeatsAStraggler() {
     let raw = DashboardDocument(raw: .object([
         "schema": .int(DashboardDocument.schema),
@@ -192,4 +215,26 @@ private func home(_ entityIds: [String]) -> ResolvedHome {
         ])]))
     #expect(raw.devices["cover.x"]?.type == "garage_door")
     #expect(raw.devices.count == 1)
+}
+
+/// The exact sequence the configuration sheet performs on Done, as a document mutation — so a
+/// binding that fails to persist is pinned to either this logic or the write around it.
+@Test func theSheetsCommitSequenceKeepsABinding() {
+    let device = DashboardDocument.StoredDevice(
+        id: "switch.opener", type: "garage_door", areaId: "garage",
+        inputs: [.primary: ["switch.opener"]])
+    var next = DashboardDocument().settingDevice(device, id: "switch.opener")
+    // Done writes the name first — nil here, because nothing was typed.
+    next = next.settingDisplayName(nil, for: "switch.opener")
+    // Then the roles, read back out of the document and put in again.
+    var stored = next.devices["switch.opener"]
+    #expect(stored != nil, "the device vanished before its roles were written")
+    var inputs = stored?.inputs ?? [:]
+    inputs[.closedLimit] = ["binary_sensor.g_closed"]
+    stored = DashboardDocument.StoredDevice(id: "switch.opener", type: "garage_door",
+                                            areaId: "garage", inputs: inputs)
+    next = next.settingDevice(stored, id: "switch.opener")
+
+    #expect(next.devices["switch.opener"]?.inputs[.closedLimit] == ["binary_sensor.g_closed"])
+    #expect(next.devices["switch.opener"]?.inputs[.primary] == ["switch.opener"])
 }
