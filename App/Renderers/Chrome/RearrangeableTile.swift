@@ -2,6 +2,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import HavenCore
 
+// In `Renderers/Chrome/` for the reason recorded on `ConfigurableTile`: it reads `HomeStore` and
+// `Navigation` from the environment, which is the one thing a widget or watch target cannot
+// supply. `import HavenCore` alone would not have moved it.
+
 /// What is being dragged, and where it would land.
 ///
 /// Shared between a room's tiles because a drag is a fact about the *room*: one tile is lifted, a

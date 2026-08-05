@@ -1,6 +1,13 @@
 import SwiftUI
 import HavenCore
 
+// Lives in `Renderers/Chrome/` rather than `DesignSystem/` because it reads `HomeStore` and
+// `Navigation` out of the environment. That is the whole membership rule for this directory, and
+// it is narrower than it first looks: importing `HavenCore` is *not* disqualifying — the package
+// has no SwiftUI or UIKit in it, so a widget or watch extension can link it happily. What such a
+// target cannot have is the app's own `@Observable` objects, which is why these two files moved
+// and the rest of `DesignSystem/` did not.
+
 /// Makes a tile a **configuration target** while the dashboard is being edited, and inert
 /// underneath.
 ///

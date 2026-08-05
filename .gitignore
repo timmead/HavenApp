@@ -20,3 +20,6 @@ Package.resolved
 
 # XcodeGen output
 HavenApp.xcodeproj/
+
+# Agent worktrees (full checkouts — never commit)
+.claude/worktrees/
