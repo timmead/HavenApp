@@ -25,17 +25,19 @@ struct CoverModal: View {
                                         set: { _ in store.openCloseCover(entityId) }))
             if s?.supportsPosition ?? false {
                 FacetCard(title: "Position") {
-                    // Pin to `next`, not `nil` — `setCoverPosition` is fire-and-forget
-                    // with no write into `states`, so clearing this would leave
-                    // `accessibilityValue` (and each next swipe's `current`) stuck on
-                    // the stale pre-swipe reading until HA's echo lands.
+                    // Pinned after an adjustment — conservatively, not necessarily.
                     //
-                    // That reasoning has since expired without the pin being revisited:
-                    // `setCoverPosition` now goes through `optimisticState` with
-                    // `CoverOptimistic.position`, so `live` does catch up synchronously and the pin
-                    // is conservative rather than required. It is kept because it is what ships;
-                    // dropping it is a behaviour change, not a tidy-up. See `CommitSlider`'s doc
-                    // comment for what clearing buys and what pinning costs.
+                    // The pin was added when `setCoverPosition` was fire-and-forget: with no write
+                    // into `states`, clearing would have left `accessibilityValue` (and each next
+                    // swipe's starting point) stuck on the stale pre-swipe reading until HA's echo
+                    // landed. That is no longer true — it goes through `optimisticState` with
+                    // `CoverOptimistic.position`, so `live` catches up synchronously and brightness'
+                    // reasoning for clearing would now apply here too.
+                    //
+                    // Kept because it is what ships, and unpinning is a behaviour change rather
+                    // than a tidy-up: it would make this slider start honouring state pushes
+                    // between adjustments, which nothing has been asked for and no test covers.
+                    // See `CommitSlider`'s doc comment for what clearing buys and pinning costs.
                     CommitSlider(value: live, preview: $dragPercent, in: 0...100,
                                  adjustmentStep: 5, tint: accent, label: "Position",
                                  pinsPreviewAfterAdjusting: true,
