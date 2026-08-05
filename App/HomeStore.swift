@@ -274,41 +274,26 @@ final class HomeStore {
         }
     }
 
-    /// The device behind an id — a stored composite, or the entity itself.
-    ///
-    /// **The fallback is the whole model**: a light's device is implied by the light existing, which
-    /// is why no stored record has to move and why every caller can ask for a device without caring
-    /// whether one was ever configured.
-    func device(_ id: String) -> DeviceRef {
-        guard let stored = config.document.devices[id] else { return .entity(id) }
-        return .composite(id: id, type: stored.type, inputs: stored.inputs)
-    }
+    // The four reads below are pure functions of the document or the home, and now live in
+    // HavenCore beside the types they read (`DashboardDocument.deviceRef(for:)` and friends,
+    // `ResolvedHome.areaEntityIds(containing:)`), with `DeviceResolutionTests` on them. Their
+    // reasoning moved with them; what stays here is the join, and the reason it stays is
+    // observation: a view reading `store.device(id)` registers a dependency on `config.document`
+    // exactly as it did when the lookup was written out here.
 
-    /// What kind of thing a device is. A stored composite says so; anything else is the one-entity
-    /// type for its domain.
-    func deviceType(of id: String) -> DeviceType {
-        if let stored = config.document.devices[id], let type = DeviceTypes.type(id: stored.type) {
-            return type
-        }
-        return DeviceTypes.default(for: id)
-    }
+    /// The device behind an id — a stored composite, or the entity itself.
+    func device(_ id: String) -> DeviceRef { config.document.deviceRef(for: id) }
+
+    /// What kind of thing a device is.
+    func deviceType(of id: String) -> DeviceType { config.document.deviceType(for: id) }
 
     /// Which entity plays which role for this device.
-    ///
-    /// **Read from the device's own inputs**, which is the one place roles live. An earlier revision
-    /// stored them under `entities.<id>.bindings` — a second home for the same idea, from before
-    /// choosing a type *was* creating a device.
-    func bindings(of id: String) -> [DeviceRole: String] {
-        guard let stored = config.document.devices[id] else { return [:] }
-        return stored.inputs.compactMapValues(\.first)
-    }
+    func bindings(of id: String) -> [DeviceRole: String] { config.document.roleBindings(for: id) }
 
     /// Every entity in the room that holds `entityId` — the pool a shade group's followers come
-    /// from, since grouping shades Home Assistant considers unrelated is the entire point.
+    /// from.
     func roomEntityIds(containing entityId: String) -> [String] {
-        home.floors.flatMap(\.areas)
-            .first { $0.entityIds.contains(entityId) }?
-            .entityIds.sorted() ?? []
+        home.areaEntityIds(containing: entityId)
     }
 
     /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
@@ -360,17 +345,10 @@ final class HomeStore {
     }
 
     /// The companions a role could be bound to: this device's own entities, minus the primary.
-    ///
-    /// Ordered by entity id so the picker does not reshuffle between openings — the same rule
-    /// `addableEntityIds` follows.
+    /// See `ResolvedHome.siblingEntityIds(of:)` for the `device_id` join and why an empty one is
+    /// not a device.
     func bindableEntityIds(for entityId: String) -> [String] {
-        guard let deviceId = home.registryInfo[entityId]?.deviceId, !deviceId.isEmpty else {
-            return []
-        }
-        return home.registryInfo
-            .filter { $0.key != entityId && $0.value.deviceId == deviceId }
-            .keys
-            .sorted()
+        home.siblingEntityIds(of: entityId)
     }
 
     /// Re-resolves every room's nomination against the current registry and states.

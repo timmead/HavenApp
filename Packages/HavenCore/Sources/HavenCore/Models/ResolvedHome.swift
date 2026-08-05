@@ -48,6 +48,40 @@ public struct ResolvedHome: Sendable, Equatable {
         self.deviceNames = deviceNames
     }
 }
+extension ResolvedHome {
+    /// Every entity in the area that holds `entityId` — the pool a shade group's followers come
+    /// from, since grouping shades Home Assistant considers unrelated is the entire point.
+    ///
+    /// Sorted, so a picker does not reshuffle between openings; the same rule `addableEntityIds`
+    /// follows.
+    public func areaEntityIds(containing entityId: String) -> [String] {
+        floors.flatMap(\.areas)
+            .first { $0.entityIds.contains(entityId) }?
+            .entityIds.sorted() ?? []
+    }
+
+    /// The other entities on the same physical device — the companions a role could be bound to.
+    ///
+    /// Joined on `device_id` rather than on names, which is how a garage opener finds *its own*
+    /// limit sensors: two devices sharing a name stem would otherwise adopt each other's, the same
+    /// trap `EntityRegistryInfo.deviceId` exists to keep the camera events card out of.
+    ///
+    /// **An empty `device_id` is not a device.** Home Assistant reports one for the many
+    /// integrations that create entities without a device, so treating it as an id would make
+    /// every such entity a sibling of every other — a picker offering the whole home. The test for
+    /// this needs *two* device-less entities to bite: with only one in the fixture, dropping this
+    /// guard still returns nothing and the test passes while proving nothing.
+    public func siblingEntityIds(of entityId: String) -> [String] {
+        guard let deviceId = registryInfo[entityId]?.deviceId, !deviceId.isEmpty else {
+            return []
+        }
+        return registryInfo
+            .filter { $0.key != entityId && $0.value.deviceId == deviceId }
+            .keys
+            .sorted()
+    }
+}
+
 public struct ResolvedFloor: Sendable, Equatable, Identifiable {
     public let id: String; public let name: String; public let level: Int; public var areas: [ResolvedArea]
     public init(id: String, name: String, level: Int, areas: [ResolvedArea]) {
