@@ -367,24 +367,23 @@ final class AppModel {
         }
     }
 
-    /// Clear the saved session and return to the login screen (also used to change server).
-    func signOut() async {
+    /// Everything both ways out of a session do: stop the connect loop, make the outgoing token
+    /// provider unable to write back, drop the per-session objects, and land on the login screen.
+    ///
+    /// **The two callers differ only in whether the address survives**, which is why that part
+    /// stays with them rather than moving here: `signOut()` is leaving this instance behind, and
+    /// `requireReauthentication()` is keeping it and asking only for a fresh grant.
+    ///
+    /// Written out twice before, identically. Nothing had drifted — but `87d12cd`, which added
+    /// `hasConnectedSinceSignIn = false`, had to add the same line in three places to do it, and
+    /// the step after that is the one that gets added in two of them.
+    private func endSession() async {
         connectTask?.cancel(); connectTask = nil
         // Must happen before dropping the reference: an in-flight refresh on the old
         // TokenProvider shares this same TokenStore, and would otherwise be able to write a
         // stale token back after we've already moved on (see TokenProvider.invalidate()).
         await tokenProvider?.invalidate()
         tokens.clear()
-        defaults.removeObject(forKey: DefaultsKeys.baseURL)
-        forgetDiscoveredURLs()
-        // Cleared here and **not** in `forgetDiscoveredURLs()`, which `signIn()` also calls. The
-        // user typed this address; it must not vanish because a refresh token expired, sent them
-        // through `requireReauthentication()` (which deliberately keeps the server URL so they only
-        // re-authorize) and back into `signIn()`. The two boundaries that *do* discard it are this
-        // one and a sign-in against a different host — see `signIn()`; both mean the instance this
-        // address describes is being left behind.
-        clearCustomRemoteURL()
-        baseURL = nil
         tokenProvider = nil
         // Dropped, not just cleared: these are pictures of the user's home, fetched with their
         // token, and nothing signed out has any business still holding them in memory.
@@ -396,21 +395,28 @@ final class AppModel {
         phase = .loggedOut
     }
 
+    /// Clear the saved session and return to the login screen (also used to change server).
+    func signOut() async {
+        // Ahead of `endSession()` so the address is gone before anything can act on the new phase.
+        defaults.removeObject(forKey: DefaultsKeys.baseURL)
+        forgetDiscoveredURLs()
+        // Cleared here and **not** in `forgetDiscoveredURLs()`, which `signIn()` also calls. The
+        // user typed this address; it must not vanish because a refresh token expired, sent them
+        // through `requireReauthentication()` (which deliberately keeps the server URL so they only
+        // re-authorize) and back into `signIn()`. The two boundaries that *do* discard it are this
+        // one and a sign-in against a different host — see `signIn()`; both mean the instance this
+        // address describes is being left behind.
+        clearCustomRemoteURL()
+        baseURL = nil
+        await endSession()
+    }
+
     /// The stored session can no longer produce a usable token — either the refresh grant was
     /// itself invalid/revoked, or Home Assistant rejected the (freshly refreshed) token outright.
     /// Unlike `signOut()`, this keeps the server URL around so the user only has to re-authorize,
     /// not retype the host.
     private func requireReauthentication() async {
-        connectTask?.cancel(); connectTask = nil
-        await tokenProvider?.invalidate()
-        tokens.clear()
-        tokenProvider = nil
-        imageLoader = nil
-        hasConnectedSinceSignIn = false
-        await store.reset()
-        onboarding.reset()
-        remoteAccessOffer.reset()
-        phase = .loggedOut
+        await endSession()
     }
 
     /// Runs `connect()` in a cancellable task. Retrying is unbounded, so a stale loop from a
