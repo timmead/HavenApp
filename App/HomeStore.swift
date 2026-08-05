@@ -372,271 +372,6 @@ final class HomeStore {
 
     func state(_ id: String) -> EntityState? { states[id] }
 
-    // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.
-    func setLight(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setLight(id, on: on) } }
-    func setSwitch(_ id: String, on: Bool) { optimistic(id, on: on) { c in try await c.setSwitch(id, on: on) } }
-    func toggle(_ id: String) {
-        let on = !(states[id]?.state == "on")
-        Domain.of(id) == .light ? setLight(id, on: on) : setSwitch(id, on: on)
-    }
-
-    /// Flip local state immediately, run the command, roll back on failure — but only if the
-    /// entity still holds the value we optimistically wrote, so a late failure can't clobber
-    /// state that changed in the meantime (e.g. attributes from a WS push while in flight).
-    ///
-    /// Guarded on `state == "unavailable"` alone, not `isUnavailable` — same class of bug as
-    /// `toggleLock`/`openCloseCover`, and this is the primitive `toggle` (lights, switches, input
-    /// booleans) delegates to, so it was the one gap those two didn't close. Without this, a tap
-    /// on an unreachable light wrote `states[id].state = "on"` unconditionally: `isUnavailable`
-    /// then read `false`, the strike vanished, and the tile looked exactly like a working light
-    /// that was just switched on — and the command still went out to a device that cannot act on
-    /// it. `unknown` is deliberately let through: that entity is reachable and simply hasn't
-    /// reported yet, and a tap is the one thing that might resolve it.
-    private func optimistic(_ id: String, on: Bool, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
-        guard let connection, var s = states[id], s.state != "unavailable" else { return }
-        let previous = s
-        let optimisticValue = on ? "on" : "off"
-        s.state = optimisticValue
-        states[id] = s
-        Task {
-            do { try await work(connection) }
-            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
-        }
-    }
-
-    /// The third primitive, alongside `optimistic(_:on:_:)` above and `optimisticState` below: a
-    /// command that writes **no** optimistic state and only has to be withheld from an entity Home
-    /// Assistant cannot reach. Every fire-and-forget command in this file routes through here.
-    ///
-    /// Which commands those are, and *why* each writes nothing, is recorded on the individual
-    /// methods — the answer differs (a scene has no state to predict; the next track is unknowable
-    /// until the device says so; a kelvin value nothing on the grid displays). What is shared, and
-    /// what lives here, is the guard, previously hand-copied into ten separate methods:
-    ///
-    /// Keyed on `state == "unavailable"` alone, **not** `EntityState.isUnavailable`, which also
-    /// covers `unknown`. There is no optimistic write here to make an unreachable device look
-    /// available — that was the `optimistic(_:on:_:)`/`toggleLock` defect — but an unreachable
-    /// entity still has no business receiving a command it cannot act on, and Home Assistant will
-    /// not tell us it didn't: `call_service` against an entity the integration cannot reach answers
-    /// *success* and does nothing. `unknown` is deliberately let through: that entity **is**
-    /// reachable and has simply not reported yet, so refusing it would remove the one interaction
-    /// that could resolve it.
-    ///
-    /// Ten copies of that guard was ten independent chances to write the eleventh command without
-    /// it, and the local failure is invisible — nothing is written to `states`, so the store looks
-    /// perfectly correct while the command goes out anyway. `UnavailableCommandGuardTests` pins
-    /// both halves against the frames actually sent.
-    private func fireAndForget(_ id: String, _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
-        guard let connection, states[id]?.state != "unavailable" else { return }
-        Task { try? await work(connection) }
-    }
-
-    /// Same class of bug as `toggleLock`, at lower stakes, and guarded the same way: keyed on
-    /// `state == "unavailable"` alone, not `isUnavailable`, so an `unavailable` cover can no longer
-    /// be optimistically flipped to "open"/"closed" with nothing left to correct it, while an
-    /// `unknown` cover — reachable, just unreported — still responds to a tap.
-    func openCloseCover(_ id: String) {
-        guard let connection, var s = states[id], s.state != "unavailable" else { return }
-        let previous = s
-        let open = s.state == "open" || s.state == "opening"
-        let optimisticValue = open ? "closed" : "open"
-        s.state = optimisticValue
-        states[id] = s
-        Task {
-            do { try await (open ? connection.closeCover(id) : connection.openCover(id)) }
-            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
-        }
-    }
-
-    /// Guarded on `state == "unavailable"` alone — not `EntityState.isUnavailable`, which also
-    /// covers `unknown`.
-    ///
-    /// An `unavailable` lock accepts `call_service` without throwing (Home Assistant's integration
-    /// fails quietly) and pushes no state update to correct a wrong guess, since an unreachable
-    /// entity reports nothing at all. Writing the optimistic flip anyway — as this used to,
-    /// computing `locked = (state == "locked")`, `false` for `unavailable` exactly as for a
-    /// genuinely unlocked door — claimed "Locked" the instant the button was tapped and left that
-    /// claim standing forever: the only rollback path is `setLock` throwing, and nothing here
-    /// ever does that for a device HA merely cannot reach. See `LockModal`'s matching guard on the
-    /// button that fires this.
-    ///
-    /// `unknown` is deliberately let through: that lock *is* reachable and has simply not reported
-    /// a position, so refusing to command it would strand the user in the one state a tap could
-    /// resolve — the same reasoning `LockModal.actionButton` already applies to a jammed lock.
-    func toggleLock(_ id: String) {
-        guard let connection, var s = states[id], s.state != "unavailable" else { return }
-        let previous = s
-        let locked = s.state == "locked"
-        let optimisticValue = locked ? "unlocked" : "locked"
-        s.state = optimisticValue
-        states[id] = s
-        Task {
-            do { try await connection.setLock(id, locked: !locked) }
-            catch { if self.states[id]?.state == optimisticValue { self.states[id] = previous } }
-        }
-    }
-
-    /// Fire-and-forget scene/script/button activation. No optimistic local state to update: a
-    /// scene has no on/off of its own to predict, and a script's "running" is Home Assistant's to
-    /// report.
-    func run(_ id: String) {
-        fireAndForget(id) { try await $0.activate(sceneOrScript: id) }
-    }
-
-    /// Brightness, optimistically. D spec §10b item 2 names this control by name as one that
-    /// visibly snaps back between release and Home Assistant's echo; `LightOptimistic.brightness`
-    /// is what removes the snap, and it writes `state` as well as `brightness` because a light
-    /// given a brightness is on — the tile's tint, icon and name colour all read the former.
-    func setBrightness(_ id: String, percent: Int) {
-        guard let current = states[id] else { return }
-        optimisticState(id, LightOptimistic.brightness(current, percent: percent)) { c in
-            try await c.setBrightness(id, percent: percent)
-        }
-    }
-
-    /// Fire-and-forget, and now deliberately *unlike* `setBrightness`, which gained an optimistic
-    /// write when the tiles got a draggable brightness pip.
-    ///
-    /// Colour temperature has no tile control and no snap-back to remove: the light modal's own
-    /// `dragKelvin` covers the in-flight preview, and it is the only place a kelvin value can be
-    /// set. Writing one into `states` here would be inventing a reading for an attribute nothing
-    /// on the grid displays, with a rollback to get right for no visible gain.
-    func setColorTemp(_ id: String, kelvin: Int) {
-        fireAndForget(id) { try await $0.setColorTemp(id, kelvin: kelvin) }
-    }
-
-    func setClimateMode(_ id: String, mode: String) {
-        fireAndForget(id) { try await $0.setClimateMode(id, mode: mode) }
-    }
-
-    func setClimateTemp(_ id: String, temp: Double) {
-        fireAndForget(id) { try await $0.setClimateTemp(id, temp: temp) }
-    }
-
-    func setFanMode(_ id: String, mode: String) {
-        fireAndForget(id) { try await $0.setFanMode(id, mode: mode) }
-    }
-
-    /// Open/stop/close, unlike `openCloseCover` and `setCoverPosition`, write nothing
-    /// optimistically: where those two know the state they are heading for, a cover asked to
-    /// *start* moving passes through `opening`/`closing` on its own schedule, and guessing at the
-    /// intermediate would fight the position pushes that follow.
-    func openCover(_ id: String) {
-        fireAndForget(id) { try await $0.openCover(id) }
-    }
-
-    func stopCover(_ id: String) {
-        fireAndForget(id) { try await $0.stopCover(id) }
-    }
-
-    func closeCover(_ id: String) {
-        fireAndForget(id) { try await $0.closeCover(id) }
-    }
-
-    /// Cover position, optimistically — and the open/closed state with it. `CoverState` reads those
-    /// two from different places (`current_position` versus the entity's `state` string), so
-    /// writing only the position leaves a shade dragged half-open rendering as closed everywhere
-    /// except the bar the user just moved, roll-up counts included. See `CoverOptimistic.position`.
-    func setCoverPosition(_ id: String, percent: Int) {
-        guard let current = states[id] else { return }
-        optimisticState(id, CoverOptimistic.position(current, percent: percent)) { c in
-            try await c.setCoverPosition(id, percent: percent)
-        }
-    }
-
-    // MARK: - Media player
-
-    /// Play ⇄ pause. Which service is sent follows from the state we just wrote optimistically, so
-    /// the two can never disagree about which direction the tap was going.
-    func mediaPlayPause(_ id: String) {
-        guard let current = states[id] else { return }
-        let wasPlaying = MediaPlayerState(current).isPlaying
-        optimisticState(id, MediaPlayerOptimistic.playPause(current, now: Date())) { c in
-            try await wasPlaying ? c.mediaPause(id) : c.mediaPlay(id)
-        }
-    }
-
-    /// No optimistic state: what the next track *is* is unknowable until the device says so, and
-    /// blanking the title in the meantime would flash an empty now-playing card between two songs.
-    func mediaNextTrack(_ id: String) {
-        fireAndForget(id) { try await $0.mediaNextTrack(id) }
-    }
-
-    func mediaPreviousTrack(_ id: String) {
-        fireAndForget(id) { try await $0.mediaPreviousTrack(id) }
-    }
-
-    /// Sets the level, and clears mute when a volume change implies it.
-    ///
-    /// Whether it implies it is `MediaPlayerState.volumeChangeShouldUnmute`, in HavenCore with
-    /// tests — not decided here. The short version: dragging a volume control on a muted speaker
-    /// otherwise changes a number and produces no audible difference at all, which reads as a
-    /// broken slider. `volume_mute` goes first so the level lands on an already-unmuted player
-    /// rather than the two racing.
-    func setMediaVolume(_ id: String, percent: Int) {
-        guard let current = states[id] else { return }
-        let unmuting = MediaPlayerState(current).volumeChangeShouldUnmute
-        optimisticState(id, MediaPlayerOptimistic.volume(current, percent: percent, unmuting: unmuting)) { c in
-            if unmuting { try await c.setMediaMuted(id, muted: false) }
-            try await c.setMediaVolume(id, percent: percent)
-        }
-    }
-
-    func setMediaMuted(_ id: String, muted: Bool) {
-        guard let current = states[id] else { return }
-        optimisticState(id, MediaPlayerOptimistic.mute(current, muted: muted)) { c in
-            try await c.setMediaMuted(id, muted: muted)
-        }
-    }
-
-    func selectMediaSource(_ id: String, source: String) {
-        guard let current = states[id] else { return }
-        optimisticState(id, MediaPlayerOptimistic.source(current, source)) { c in
-            try await c.selectMediaSource(id, source: source)
-        }
-    }
-
-    /// Power, never play/pause — the modal only offers this where `supported_features` declares
-    /// both halves.
-    func setMediaPower(_ id: String, on: Bool) {
-        guard let current = states[id] else { return }
-        optimisticState(id, MediaPlayerOptimistic.power(current, on: on)) { c in
-            try await c.setMediaPower(id, on: on)
-        }
-    }
-
-    /// The whole-state flavour of `optimistic(_:on:_:)`: the caller hands over an already-computed
-    /// next `EntityState` rather than a single on/off, because most commands imply a *set* of
-    /// attributes — pausing a player restamps the position so the progress bar doesn't jump
-    /// backwards, powering one off clears the whole now-playing set, setting a cover's position
-    /// changes whether it is open, and giving a light a brightness turns it on. Those transforms
-    /// live in `MediaPlayerOptimistic`, `LightOptimistic` and `CoverOptimistic`, in HavenCore with
-    /// tests; nothing is decided here.
-    ///
-    /// Shared by every domain rather than copied per domain — the D spec already flags five
-    /// near-identical flip/command/rollback blocks in this file as wanting extraction, and adding
-    /// a sixth and seventh for lights and covers would have been the wrong direction.
-    ///
-    /// Rollback compares the whole entity, not one field, and so is strictly safer than the on/off
-    /// version: any state push that landed while the command was in flight leaves the comparison
-    /// unequal and the rollback is skipped, exactly as intended.
-    ///
-    /// Guarded on `state == "unavailable"` alone, not `isUnavailable` — same reasoning as
-    /// `optimistic(_:on:_:)` above, and this is the primitive brightness, cover position, and
-    /// media volume/mute/source/power all route through. Left unguarded, any of them could write
-    /// a confident-looking `next` state over an unreachable device and send the matching command
-    /// into the void. `unknown` still goes through: that entity is reachable and simply hasn't
-    /// reported, so refusing to command it would remove the one interaction that could resolve it.
-    private func optimisticState(_ id: String, _ next: EntityState,
-                                 _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
-        guard let connection, let previous = states[id], previous.state != "unavailable" else { return }
-        states[id] = next
-        Task {
-            do { try await work(connection) }
-            catch { if self.states[id] == next { self.states[id] = previous } }
-        }
-    }
-
     // MARK: - Camera
 
     /// Asks Home Assistant to start a stream for a camera and returns the playlist path it minted,
@@ -656,18 +391,20 @@ final class HomeStore {
         return try? await connection.cameraStreamPath(entityId: id)
     }
 
-    /// The binary sensors that belong with a camera, for the modal's **Events** card.
-    ///
-    /// This is the App half of the join and holds no policy: it turns the two things the store has
-    /// (`registryInfo`, keyed by entity id, and `states`, which is where `device_class` lives) into
-    /// candidates and hands them to `CameraEvents`, which decides what is related and what counts
-    /// as an event. Every rule — same-device before name-stem, which device classes qualify, how
-    /// short a stem is too short — is over there, under test.
     /// A device's state — the entity being rendered, plus the companions that qualify it.
     ///
-    /// Flattens the per-area tier maps on each call. A home holds a few hundred entities and this is
-    /// read when a modal opens rather than per frame, so the map is built where it is needed instead
-    /// of becoming a third source of truth to keep in step.
+    /// Flattens the per-area tier maps on **every call, inside `body`**. An earlier version of this
+    /// comment claimed the flatten was "read when a modal opens rather than per frame"; it is not.
+    /// `SwitchTile` and `CoverTile` each call this three times inside `body`, so it runs several
+    /// times over for every visible switch and cover tile every time a state push redraws the grid
+    /// — the modal cards (`DeviceStateCard`, `DeviceContextCard`) are the *minority* of the call
+    /// sites, not all of them.
+    ///
+    /// The map is still built here, where it is needed, rather than cached: a third source of truth
+    /// to keep in step with `home` and `states` is the cost being avoided, and that reason stands
+    /// whatever the call frequency turns out to be. What no longer stands is the claim that the
+    /// frequency is low, so anyone measuring a slow grid should start here rather than trust the
+    /// comment.
     ///
     /// **A camera's event sensors are excluded**, because `CameraModal` already draws them as chips
     /// with a curated kind and its own most-alarming-first ordering. That exclusion lives here and
@@ -690,6 +427,13 @@ final class HomeStore {
                                       excluding: excluded)
     }
 
+    /// The binary sensors that belong with a camera, for the modal's **Events** card.
+    ///
+    /// This is the App half of the join and holds no policy: it turns the two things the store has
+    /// (`registryInfo`, keyed by entity id, and `states`, which is where `device_class` lives) into
+    /// candidates and hands them to `CameraEvents`, which decides what is related and what counts
+    /// as an event. Every rule — same-device before name-stem, which device classes qualify, how
+    /// short a stem is too short — is over there, under test.
     func cameraEvents(_ id: String) -> [CameraEventSensor] {
         let candidates = home.registryInfo.compactMap { entityId, info -> CameraEventCandidate? in
             guard entityId.hasPrefix("binary_sensor.") else { return nil }
@@ -854,5 +598,338 @@ final class HomeStore {
 
     func loadStateChanges(_ entityId: String, force: Bool = false) async {
         await historyCache.loadStateChanges(entityId, force: force)
+    }
+}
+
+// MARK: - Commands
+//
+// Everything Haven sends to Home Assistant, grouped by the domain it acts on. These were a flat run
+// of thirty-odd methods in the class body above, over three near-identical private primitives; the
+// primitives are now one `command(_:_:_:)` with an explicit mode, and each domain is an `extension`
+// so that a light's rules sit with the other light rules rather than wherever the method happened to
+// be added.
+//
+// They stay on `HomeStore`, reading and writing `states` directly, because the views observe this
+// object: moving the command layer onto a child would move the observation dependency with it.
+
+extension HomeStore {
+    /// What a command writes locally while it is in flight — the one axis the three primitives this
+    /// replaced actually differed on. Everything else about them (finding the connection, the
+    /// unavailability guard, running the work in a `Task`, undoing a failure) was the same thing
+    /// three times over.
+    private enum OptimisticWrite {
+        /// Write nothing, and so have nothing to roll back.
+        ///
+        /// *Why* each such command writes nothing is recorded on the individual methods, because the
+        /// answer differs: a scene has no on/off of its own to predict; the next track is unknowable
+        /// until the device says so; a kelvin value is a reading nothing on the grid displays. What
+        /// is shared, and what lives here, is the guard on `command(_:_:_:)` below.
+        case nothing
+
+        /// Write one state string, and roll back only if that string still stands.
+        ///
+        /// The flip lights, switches, locks and the open/close tap all take. `toggle` delegates to
+        /// `setLight`/`setSwitch` rather than duplicating the flip, and `toggleLock` and
+        /// `openCloseCover` — which used to be this block written out a second and third time, each
+        /// with its own copy of the rollback rule — now go through it too.
+        case flip(to: String)
+
+        /// Write a whole `EntityState`, and roll back only if it is still untouched.
+        ///
+        /// The caller hands over an already-computed next state rather than a single on/off, because
+        /// most commands imply a *set* of attributes — pausing a player restamps the position so the
+        /// progress bar doesn't jump backwards, powering one off clears the whole now-playing set,
+        /// setting a cover's position changes whether it is open, and giving a light a brightness
+        /// turns it on. Those transforms live in `MediaPlayerOptimistic`, `LightOptimistic` and
+        /// `CoverOptimistic`, in HavenCore with tests; nothing is decided here.
+        ///
+        /// Its rollback compares the whole entity, not one field, and so is strictly safer than
+        /// `.flip(to:)`'s: any state push that landed while the command was in flight leaves the
+        /// comparison unequal and the rollback is skipped, exactly as intended. The two comparisons
+        /// are deliberately not unified — `.flip(to:)` knows only the one field it wrote, and
+        /// widening it to the whole entity would silently stop rolling back the case it exists for.
+        ///
+        /// Safer at rollback is not safer at the guard, and this mode is the one brightness, cover
+        /// position, and media volume/mute/source/power all take: left unguarded, any of them could
+        /// write a confident-looking `next` state over an unreachable device and send the matching
+        /// command into the void.
+        case whole(EntityState)
+    }
+
+    /// Runs one command against Home Assistant: write what we predict, send it, and undo the
+    /// prediction if it fails — but only if the entity still holds the value we optimistically
+    /// wrote, so a late failure can't clobber state that changed in the meantime (e.g. attributes
+    /// from a WS push while in flight).
+    ///
+    /// **One primitive rather than three.** `optimistic(_:on:_:)`, `optimisticState(_:_:_:)` and
+    /// `fireAndForget(_:_:)` differed only in what they wrote before sending, which is now
+    /// `OptimisticWrite` above. Shared by every domain rather than copied per domain — the D spec
+    /// already flagged five near-identical flip/command/rollback blocks in this file as wanting
+    /// extraction, and adding a sixth and seventh for lights and covers would have been the wrong
+    /// direction.
+    ///
+    /// **Guarded on `state == "unavailable"` alone, not `EntityState.isUnavailable`, which also
+    /// covers `unknown`.** Both halves of that matter, and `UnavailableCommandGuardTests` pins both
+    /// against the frames actually sent.
+    ///
+    /// The unreachable half is a defect that shipped. `optimistic(_:on:_:)` — the primitive `toggle`
+    /// delegated to for lights, switches and input booleans — used to write
+    /// `states[id].state = "on"` unconditionally: `isUnavailable` then read `false`, the strike
+    /// vanished, and the tile looked exactly like a working light that was just switched on — and
+    /// the command still went out to a device that cannot act on it. `toggleLock` and
+    /// `openCloseCover` were the same class of bug at higher and lower stakes, and were guarded
+    /// first — `optimistic(_:on:_:)` was the one gap those two didn't close.
+    ///
+    /// A command that writes nothing is not exempt. There is no optimistic write there to make an
+    /// unreachable device *look* available, but the entity still has no business receiving a command
+    /// it cannot act on, and Home Assistant will not tell us it didn't: `call_service` against an
+    /// entity the integration cannot reach answers *success* and does nothing. That failure is
+    /// invisible locally — nothing is written to `states`, so the store looks perfectly correct
+    /// while the command goes out anyway — and the wire is the only place it shows.
+    ///
+    /// `unknown` is deliberately let through, in every mode: that entity **is** reachable and has
+    /// simply not reported yet, so refusing it would remove the one interaction that could resolve
+    /// it.
+    ///
+    /// Stating that guard exactly once is most of the point of the consolidation. It was previously
+    /// hand-copied into ten separate fire-and-forget methods, which is ten independent chances to
+    /// write the eleventh command without it.
+    ///
+    /// `.nothing` still acts on an entity that has no `states` entry at all, while the two writing
+    /// modes need a previous state to roll back to and return when there is none. That asymmetry is
+    /// how the three primitives already behaved; it is reproduced here on purpose rather than
+    /// levelled out, since levelling it either way would change what some command does.
+    private func command(_ id: String, _ write: OptimisticWrite,
+                         _ work: @escaping @Sendable (HomeConnection) async throws -> Void) {
+        guard let connection, states[id]?.state != "unavailable" else { return }
+        switch write {
+        case .nothing:
+            Task { try? await work(connection) }
+        case .flip(let value):
+            guard var next = states[id] else { return }
+            let previous = next
+            next.state = value
+            states[id] = next
+            Task {
+                do { try await work(connection) }
+                catch { if self.states[id]?.state == value { self.states[id] = previous } }
+            }
+        case .whole(let next):
+            guard let previous = states[id] else { return }
+            states[id] = next
+            Task {
+                do { try await work(connection) }
+                catch { if self.states[id] == next { self.states[id] = previous } }
+            }
+        }
+    }
+}
+
+// MARK: - Lights and switches
+
+extension HomeStore {
+    // Optimistic on/off primitives. `toggle` DELEGATES to these — do not duplicate this logic later.
+    func setLight(_ id: String, on: Bool) {
+        command(id, .flip(to: on ? "on" : "off")) { c in try await c.setLight(id, on: on) }
+    }
+
+    func setSwitch(_ id: String, on: Bool) {
+        command(id, .flip(to: on ? "on" : "off")) { c in try await c.setSwitch(id, on: on) }
+    }
+
+    func toggle(_ id: String) {
+        let on = !(states[id]?.state == "on")
+        Domain.of(id) == .light ? setLight(id, on: on) : setSwitch(id, on: on)
+    }
+
+    /// Brightness, optimistically. D spec §10b item 2 names this control by name as one that
+    /// visibly snaps back between release and Home Assistant's echo; `LightOptimistic.brightness`
+    /// is what removes the snap, and it writes `state` as well as `brightness` because a light
+    /// given a brightness is on — the tile's tint, icon and name colour all read the former.
+    func setBrightness(_ id: String, percent: Int) {
+        guard let current = states[id] else { return }
+        command(id, .whole(LightOptimistic.brightness(current, percent: percent))) { c in
+            try await c.setBrightness(id, percent: percent)
+        }
+    }
+
+    /// Writes nothing, and now deliberately *unlike* `setBrightness`, which gained an optimistic
+    /// write when the tiles got a draggable brightness pip.
+    ///
+    /// Colour temperature has no tile control and no snap-back to remove: the light modal's own
+    /// `dragKelvin` covers the in-flight preview, and it is the only place a kelvin value can be
+    /// set. Writing one into `states` here would be inventing a reading for an attribute nothing
+    /// on the grid displays, with a rollback to get right for no visible gain.
+    func setColorTemp(_ id: String, kelvin: Int) {
+        command(id, .nothing) { try await $0.setColorTemp(id, kelvin: kelvin) }
+    }
+}
+
+// MARK: - Locks
+
+extension HomeStore {
+    /// Guarded on `state == "unavailable"` alone — not `EntityState.isUnavailable`, which also
+    /// covers `unknown`. The guard itself is `command(_:_:_:)`'s now, but the reason it exists is
+    /// this lock.
+    ///
+    /// An `unavailable` lock accepts `call_service` without throwing (Home Assistant's integration
+    /// fails quietly) and pushes no state update to correct a wrong guess, since an unreachable
+    /// entity reports nothing at all. Writing the optimistic flip anyway — as this used to,
+    /// computing `locked = (state == "locked")`, `false` for `unavailable` exactly as for a
+    /// genuinely unlocked door — claimed "Locked" the instant the button was tapped and left that
+    /// claim standing forever: the only rollback path is `setLock` throwing, and nothing here
+    /// ever does that for a device HA merely cannot reach. See `LockModal`'s matching guard on the
+    /// button that fires this.
+    ///
+    /// `locked` is still computed from a state that may be `unavailable`, and that is harmless: the
+    /// primitive withholds both the flip and the command before either use of it is reached.
+    ///
+    /// `unknown` is deliberately let through: that lock *is* reachable and has simply not reported
+    /// a position, so refusing to command it would strand the user in the one state a tap could
+    /// resolve — the same reasoning `LockModal.actionButton` already applies to a jammed lock.
+    func toggleLock(_ id: String) {
+        guard let current = states[id] else { return }
+        let locked = current.state == "locked"
+        command(id, .flip(to: locked ? "unlocked" : "locked")) { c in
+            try await c.setLock(id, locked: !locked)
+        }
+    }
+}
+
+// MARK: - Covers
+
+extension HomeStore {
+    /// Same class of bug as `toggleLock`, at lower stakes, and guarded the same way — by
+    /// `command(_:_:_:)`, keyed on `state == "unavailable"` alone, not `isUnavailable`, so an
+    /// `unavailable` cover can no longer be optimistically flipped to "open"/"closed" with nothing
+    /// left to correct it, while an `unknown` cover — reachable, just unreported — still responds to
+    /// a tap.
+    ///
+    /// Which service is sent follows from the same `open` the flip is computed from, so the two can
+    /// never disagree about which direction the tap was going.
+    func openCloseCover(_ id: String) {
+        guard let current = states[id] else { return }
+        let open = current.state == "open" || current.state == "opening"
+        command(id, .flip(to: open ? "closed" : "open")) { c in
+            try await (open ? c.closeCover(id) : c.openCover(id))
+        }
+    }
+
+    /// Open/stop/close, unlike `openCloseCover` and `setCoverPosition`, write nothing
+    /// optimistically: where those two know the state they are heading for, a cover asked to
+    /// *start* moving passes through `opening`/`closing` on its own schedule, and guessing at the
+    /// intermediate would fight the position pushes that follow.
+    func openCover(_ id: String) {
+        command(id, .nothing) { try await $0.openCover(id) }
+    }
+
+    func stopCover(_ id: String) {
+        command(id, .nothing) { try await $0.stopCover(id) }
+    }
+
+    func closeCover(_ id: String) {
+        command(id, .nothing) { try await $0.closeCover(id) }
+    }
+
+    /// Cover position, optimistically — and the open/closed state with it. `CoverState` reads those
+    /// two from different places (`current_position` versus the entity's `state` string), so
+    /// writing only the position leaves a shade dragged half-open rendering as closed everywhere
+    /// except the bar the user just moved, roll-up counts included. See `CoverOptimistic.position`.
+    func setCoverPosition(_ id: String, percent: Int) {
+        guard let current = states[id] else { return }
+        command(id, .whole(CoverOptimistic.position(current, percent: percent))) { c in
+            try await c.setCoverPosition(id, percent: percent)
+        }
+    }
+}
+
+// MARK: - Climate
+
+extension HomeStore {
+    func setClimateMode(_ id: String, mode: String) {
+        command(id, .nothing) { try await $0.setClimateMode(id, mode: mode) }
+    }
+
+    func setClimateTemp(_ id: String, temp: Double) {
+        command(id, .nothing) { try await $0.setClimateTemp(id, temp: temp) }
+    }
+
+    func setFanMode(_ id: String, mode: String) {
+        command(id, .nothing) { try await $0.setFanMode(id, mode: mode) }
+    }
+}
+
+// MARK: - Media player
+
+extension HomeStore {
+    /// Play ⇄ pause. Which service is sent follows from the state we just wrote optimistically, so
+    /// the two can never disagree about which direction the tap was going.
+    func mediaPlayPause(_ id: String) {
+        guard let current = states[id] else { return }
+        let wasPlaying = MediaPlayerState(current).isPlaying
+        command(id, .whole(MediaPlayerOptimistic.playPause(current, now: Date()))) { c in
+            try await wasPlaying ? c.mediaPause(id) : c.mediaPlay(id)
+        }
+    }
+
+    /// No optimistic state: what the next track *is* is unknowable until the device says so, and
+    /// blanking the title in the meantime would flash an empty now-playing card between two songs.
+    func mediaNextTrack(_ id: String) {
+        command(id, .nothing) { try await $0.mediaNextTrack(id) }
+    }
+
+    func mediaPreviousTrack(_ id: String) {
+        command(id, .nothing) { try await $0.mediaPreviousTrack(id) }
+    }
+
+    /// Sets the level, and clears mute when a volume change implies it.
+    ///
+    /// Whether it implies it is `MediaPlayerState.volumeChangeShouldUnmute`, in HavenCore with
+    /// tests — not decided here. The short version: dragging a volume control on a muted speaker
+    /// otherwise changes a number and produces no audible difference at all, which reads as a
+    /// broken slider. `volume_mute` goes first so the level lands on an already-unmuted player
+    /// rather than the two racing.
+    func setMediaVolume(_ id: String, percent: Int) {
+        guard let current = states[id] else { return }
+        let unmuting = MediaPlayerState(current).volumeChangeShouldUnmute
+        let next = MediaPlayerOptimistic.volume(current, percent: percent, unmuting: unmuting)
+        command(id, .whole(next)) { c in
+            if unmuting { try await c.setMediaMuted(id, muted: false) }
+            try await c.setMediaVolume(id, percent: percent)
+        }
+    }
+
+    func setMediaMuted(_ id: String, muted: Bool) {
+        guard let current = states[id] else { return }
+        command(id, .whole(MediaPlayerOptimistic.mute(current, muted: muted))) { c in
+            try await c.setMediaMuted(id, muted: muted)
+        }
+    }
+
+    func selectMediaSource(_ id: String, source: String) {
+        guard let current = states[id] else { return }
+        command(id, .whole(MediaPlayerOptimistic.source(current, source))) { c in
+            try await c.selectMediaSource(id, source: source)
+        }
+    }
+
+    /// Power, never play/pause — the modal only offers this where `supported_features` declares
+    /// both halves.
+    func setMediaPower(_ id: String, on: Bool) {
+        guard let current = states[id] else { return }
+        command(id, .whole(MediaPlayerOptimistic.power(current, on: on))) { c in
+            try await c.setMediaPower(id, on: on)
+        }
+    }
+}
+
+// MARK: - Scenes, scripts and buttons
+
+extension HomeStore {
+    /// Fire-and-forget scene/script/button activation. No optimistic local state to update: a
+    /// scene has no on/off of its own to predict, and a script's "running" is Home Assistant's to
+    /// report.
+    func run(_ id: String) {
+        command(id, .nothing) { try await $0.activate(sceneOrScript: id) }
     }
 }
