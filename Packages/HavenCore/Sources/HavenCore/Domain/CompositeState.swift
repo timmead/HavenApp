@@ -94,10 +94,13 @@ public enum CompositeState {
                                type: DeviceType? = nil,
                                bindings: [DeviceRole: String] = [:],
                                excluding: Set<String> = []) -> DeviceState {
-        let face = derivedFace(primary: primary, type: type, bindings: bindings, states: states)
-        // Anything but shut is worth lighting: a door standing open, or standing part-way, is the
-        // state you want to notice from across a room.
-        let isActive = face.map { $0.word != "Closed" }
+        // **The tint comes back with the face rather than being read off its word.** It used to be
+        // `word != "Closed"`, which is a string comparison standing in for a decision the derivation
+        // had already made — and one that would have silently started lying the moment a word
+        // changed, which "Not closed" would have done.
+        let derivedState = derived(primary: primary, type: type, bindings: bindings, states: states)
+        let face = derivedState?.face
+        let isActive = derivedState?.isActive
         let bound = Set(bindings.values)
         guard let deviceId, !deviceId.isEmpty else {
             return DeviceState(primary: primary, face: face, isActive: isActive, readings: [])
@@ -120,35 +123,57 @@ public enum CompositeState {
 
     /// The device's own state, derived from its bound roles — or `nil` when they cannot say.
     ///
-    /// **A cover's two limits express a state the cover entity cannot.** `cover.garage` reports open
-    /// or closed; a door stopped half way is *neither*, and only the pair of limit sensors both
-    /// reading off can tell you so. That case is the entire reason this exists.
+    /// **A cover's limits express states the cover entity cannot.** `cover.garage` reports open or
+    /// closed; a door stopped half way is neither, and a relay opener's own state says only that a
+    /// contact closed. What the limits say is the real answer.
     ///
-    /// **Either limit unreachable yields `nil`, not a guess.** A door whose closed sensor is offline
-    /// is a door Haven does not know about, and "Partly open" asserted from one working sensor is
-    /// precisely the confident wrong answer `TileState.unavailable` exists to avoid.
+    /// **One limit is still worth having, and says less rather than nothing.** With only the fully
+    /// open sensor, a door is *Open* or *Not open* — it cannot distinguish shut from half way, and
+    /// claiming either would be inventing a reading. With only the fully closed sensor it is
+    /// *Closed* or *Not closed*. Refusing to derive anything until both were bound was the first
+    /// rule and it was needlessly strict: half the information is not none of it.
+    ///
+    /// **An unreachable limit counts as absent**, so a working pair-mate still answers what it can:
+    /// a door whose closed sensor is offline and whose open sensor reads off is *Not open*, which is
+    /// true whatever the offline one would have said. Both unreachable derives nothing.
     ///
     /// Both limits on is contradictory hardware, and resolves to **Closed** — a garage reported shut
     /// by its own closed sensor is the reading you act on.
-    static func derivedFace(primary: String, type: DeviceType?,
-                            bindings: [DeviceRole: String],
-                            states: [String: EntityState]) -> TileState? {
+    static func derived(primary: String, type: DeviceType?,
+                        bindings: [DeviceRole: String],
+                        states: [String: EntityState]) -> (face: TileState, isActive: Bool)? {
         guard type?.id == "garage_door" else { return nil }
-        guard let openId = bindings[.openLimit], let closedId = bindings[.closedLimit],
-              let open = states[openId], let closed = states[closedId],
-              !open.isUnavailable, !closed.isUnavailable else { return nil }
-        // A garage's glyphs, whatever the opener happens to be. A switch-primary opener has no
-        // cover device class of its own, and rendering it as blinds would be a picture of the wrong
-        // object.
-        let deviceClass = "garage"
-        if closed.state == "on" {
-            return TileState.cover(deviceClass: deviceClass, isOpen: false)
+
+        /// A bound limit that is actually reporting. Unreachable and unbound are the same thing
+        /// here: neither can tell you where the door is.
+        func limit(_ role: DeviceRole) -> Bool? {
+            guard let id = bindings[role], let state = states[id], !state.isUnavailable else {
+                return nil
+            }
+            return state.state == "on"
         }
-        if open.state == "on" {
-            return TileState.cover(deviceClass: deviceClass, isOpen: true)
+
+        // A garage's glyphs, whatever the opener happens to be. A switch-primary opener has no cover
+        // device class of its own, and rendering it as blinds would be a picture of the wrong object.
+        let shut = TileState.cover(deviceClass: "garage", isOpen: false)
+        let wide = TileState.cover(deviceClass: "garage", isOpen: true)
+        func between(_ word: String) -> TileState {
+            TileState(symbol: partlyOpenSymbol, word: word)
         }
-        // Neither limit reached: the state the cover entity has no word for.
-        return TileState(symbol: partlyOpenSymbol, word: "Partly open")
+
+        switch (limit(.closedLimit), limit(.openLimit)) {
+        case (nil, nil):
+            return nil
+        case let (closed?, open?):
+            if closed { return (shut, false) }
+            if open { return (wide, true) }
+            return (between("Partly open"), true)
+        case let (closed?, nil):
+            // Not closed covers both half way and fully open, and says so rather than guessing.
+            return closed ? (shut, false) : (between("Not closed"), true)
+        case let (nil, open?):
+            return open ? (wide, true) : (between("Not open"), false)
+        }
     }
 
     /// The glyph for a cover between its limits — one shape for every cover kind.

@@ -290,31 +290,29 @@ struct TileConfigView: View {
         }
     }
 
-    /// What could fill a role: **everything in the room** the role's domains accept.
+    /// What could fill a role: **entities in this device's own room** that the role accepts.
     ///
-    /// **Not restricted to the primary's own Home Assistant device**, which is what the first
-    /// version did and which made this unusable for the commonest garage: a relay opener and a pair
-    /// of contact sensors are three separate devices in Home Assistant, so the pickers came back
-    /// empty for exactly the household that needed them.
+    /// The first version scoped this to the primary's Home Assistant *device*, which made it
+    /// unusable for the commonest garage there is — a relay opener and two contact sensors are three
+    /// separate devices — and the second over-corrected to the whole home, which offers a list with
+    /// every binary sensor in the house in it.
     ///
-    /// That restriction was a heuristic — "a limit sensor is part of the opener" — applied to the
-    /// one feature whose entire justification is *not* inferring these relationships. If Haven could
-    /// work out which sensor was the closed limit, it would not be asking.
+    /// The room is the scope that matches how people think about this: the sensors on a garage door
+    /// are in the garage. A device whose parts genuinely live in different rooms is a device whose
+    /// areas want fixing in Home Assistant, which is the same order of authority the rest of Haven
+    /// applies.
     ///
-    /// Ordered by how likely each is to be the right answer: the primary's own device first, then
-    /// its room, then the rest of the home. **The tail matters** — a household that has not assigned
-    /// its contact sensors to an area in Home Assistant still has to be able to point at them, and
-    /// a picker that is empty for that household is the bug this replaced.
+    /// Entities sharing the primary's own device still come first, because when that signal exists
+    /// it is usually right — it just must not be the only option.
     private func candidates(for typeRole: DeviceTypeRole) -> [String] {
         guard let primary = store.device(entityId).primaryEntityId else { return [] }
         let sameDevice = Set(store.bindableEntityIds(for: primary))
-        let sameRoom = Set(store.roomEntityIds(containing: primary))
-        func rank(_ id: String) -> Int {
-            sameDevice.contains(id) ? 0 : (sameRoom.contains(id) ? 1 : 2)
-        }
-        return store.allEntityIds
+        return store.roomEntityIds(containing: primary)
             .filter { $0 != primary && typeRole.accepts($0) }
-            .sorted { a, b in rank(a) == rank(b) ? a < b : rank(a) < rank(b) }
+            .sorted { a, b in
+                let (l, r) = (sameDevice.contains(a), sameDevice.contains(b))
+                return l == r ? a < b : l
+            }
     }
 
     private var roleHint: String {
@@ -322,8 +320,8 @@ struct TileConfigView: View {
             .filter { $0.role != .primary }
             .contains { !candidates(for: $0).isEmpty }
         return anyCandidates
-            ? "Nearest first: this device, then the room, then the home."
-            : "Nothing in this home can fill these roles."
+            ? "Anything in this room that could fill the role."
+            : "Nothing in this room can fill these roles."
     }
 
     /// Roles whose binding differs from what is stored. `nil` for a role clears it.

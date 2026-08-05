@@ -311,14 +311,6 @@ final class HomeStore {
             .entityIds.sorted() ?? []
     }
 
-    /// Every entity in the home, in id order.
-    ///
-    /// The fallback pool for binding a role: a household that has not tidied its areas in Home
-    /// Assistant still has to be able to point at its own contact sensors.
-    var allEntityIds: [String] {
-        home.floors.flatMap(\.areas).flatMap(\.entityIds).sorted()
-    }
-
     /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
     ///
     /// **Its id is the primary's entity id**, which is the same rule a one-entity device follows —

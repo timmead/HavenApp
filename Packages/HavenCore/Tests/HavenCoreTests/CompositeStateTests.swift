@@ -231,32 +231,56 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
     #expect(out.face?.word == "Closed")
 }
 
-/// **An unreachable limit yields no face at all, not a guess.** A door whose closed sensor is
-/// offline is a door Haven does not know about, and "Partly open" asserted from one working sensor
-/// is the confident wrong answer this codebase keeps refusing to give.
-@Test func anUnreachableLimitRefinesNothing() {
-    let out = CompositeState.resolve(
-        primary: "cover.garage", deviceId: "d1",
-        registry: ["cover.garage": info("d1")],
-        tiers: ["cover.garage": .primary],
-        states: ["binary_sensor.closed": state("binary_sensor.closed", "unavailable"),
-                 "binary_sensor.open": state("binary_sensor.open", "off")],
-        type: DeviceTypes.type(id: "garage_door"),
-        bindings: garage("binary_sensor.closed", "binary_sensor.open"))
-    #expect(out.face == nil)
+/// **One limit says less, not nothing.** With only the fully closed sensor a door is Closed or Not
+/// closed — it cannot tell half way from fully open, and claiming either would be inventing a
+/// reading. Refusing to derive until both were bound was needlessly strict: half the information is
+/// not none of it.
+@Test func onlyTheClosedLimitGivesClosedOrNotClosed() {
+    func face(_ closedState: String) -> (face: TileState, isActive: Bool)? {
+        CompositeState.derived(primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
+                               bindings: [.closedLimit: "binary_sensor.closed"],
+                               states: ["binary_sensor.closed": state("binary_sensor.closed", closedState)])
+    }
+    #expect(face("on")?.face.word == "Closed")
+    #expect(face("on")?.isActive == false)
+    #expect(face("off")?.face.word == "Not closed")
+    #expect(face("off")?.isActive == true)
 }
 
-/// One limit bound and the other not says nothing either — half a pair cannot distinguish "partly
-/// open" from "at the other limit".
-@Test func oneLimitAloneRefinesNothing() {
-    let out = CompositeState.resolve(
-        primary: "cover.garage", deviceId: "d1",
-        registry: ["cover.garage": info("d1")],
-        tiers: ["cover.garage": .primary],
-        states: ["binary_sensor.closed": state("binary_sensor.closed", "off")],
-        type: DeviceTypes.type(id: "garage_door"),
-        bindings: [.closedLimit: "binary_sensor.closed"])
-    #expect(out.face == nil)
+/// And with only the fully open sensor, Open or Not open.
+@Test func onlyTheOpenLimitGivesOpenOrNotOpen() {
+    func face(_ openState: String) -> (face: TileState, isActive: Bool)? {
+        CompositeState.derived(primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
+                               bindings: [.openLimit: "binary_sensor.open"],
+                               states: ["binary_sensor.open": state("binary_sensor.open", openState)])
+    }
+    #expect(face("on")?.face.word == "Open")
+    #expect(face("on")?.isActive == true)
+    // Not open is the quiet state: a door that is not open is shut or nearly so.
+    #expect(face("off")?.face.word == "Not open")
+    #expect(face("off")?.isActive == false)
+}
+
+/// **An unreachable limit counts as absent**, so its working pair-mate still answers what it can —
+/// rather than the whole derivation going silent because one sensor dropped off the network.
+@Test func anUnreachableLimitFallsBackToTheOtherOne() {
+    let out = CompositeState.derived(
+        primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
+        bindings: ["closed_limit": "binary_sensor.closed", "open_limit": "binary_sensor.open"]
+            .reduce(into: [DeviceRole: String]()) { $0[DeviceRole(rawValue: $1.key)!] = $1.value },
+        states: ["binary_sensor.closed": state("binary_sensor.closed", "unavailable"),
+                 "binary_sensor.open": state("binary_sensor.open", "off")])
+    #expect(out?.face.word == "Not open")
+}
+
+/// Both unreachable derives nothing: neither sensor can say where the door is.
+@Test func bothLimitsUnreachableRefinesNothing() {
+    let out = CompositeState.derived(
+        primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
+        bindings: garage("binary_sensor.closed", "binary_sensor.open"),
+        states: ["binary_sensor.closed": state("binary_sensor.closed", "unavailable"),
+                 "binary_sensor.open": state("binary_sensor.open", "unavailable")])
+    #expect(out == nil)
 }
 
 /// An unbound device is unchanged — the common case, and the one that must not regress.
@@ -279,13 +303,13 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
     let bindings = garage("binary_sensor.closed", "binary_sensor.open")
 
     // A switch-primary opener derives, because its *type* says garage door.
-    let asSwitch = CompositeState.derivedFace(primary: "switch.opener",
+    let asSwitch = CompositeState.derived(primary: "switch.opener",
                                               type: DeviceTypes.type(id: "garage_door"),
                                               bindings: bindings, states: states)
-    #expect(asSwitch?.word == "Partly open")
+    #expect(asSwitch?.face.word == "Partly open")
 
     // The same cover as a plain shade derives nothing — a shade has no limits and no third state.
-    let asShade = CompositeState.derivedFace(primary: "cover.blinds",
+    let asShade = CompositeState.derived(primary: "cover.blinds",
                                              type: DeviceTypes.type(id: "cover"),
                                              bindings: bindings, states: states)
     #expect(asShade == nil)
@@ -294,12 +318,12 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
 /// A switch-primary opener still gets a garage's picture. It has no cover device class of its own,
 /// and drawing it as blinds would be a picture of the wrong object.
 @Test func aSwitchPrimaryOpenerStillLooksLikeAGarage() {
-    let closed = CompositeState.derivedFace(
+    let closed = CompositeState.derived(
         primary: "switch.opener", type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"),
         states: ["binary_sensor.closed": state("binary_sensor.closed", "on"),
                  "binary_sensor.open": state("binary_sensor.open", "off")])
-    #expect(closed?.symbol == "door.garage.closed")
+    #expect(closed?.face.symbol == "door.garage.closed")
 }
 
 /// A relay opener is offered the type at all — the case that was missing.
@@ -349,7 +373,7 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
 /// two share a glyph then a garage standing half open and one standing fully open render
 /// identically — the one comparison this feature exists to make.
 @Test func partlyOpenDoesNotLookLikeOpen() {
-    let partly = CompositeState.derivedFace(
+    let partly = CompositeState.derived(
         primary: "cover.garage", type: DeviceTypes.type(id: "garage_door"),
         bindings: garage("binary_sensor.closed", "binary_sensor.open"),
         states: ["cover.garage": state("cover.garage", "open", "garage"),
@@ -357,8 +381,8 @@ private func garage(_ closedLimit: String, _ openLimit: String) -> [DeviceRole: 
                  "binary_sensor.open": state("binary_sensor.open", "off")])
     let open = TileState.cover(deviceClass: "garage", isOpen: true)
     let closed = TileState.cover(deviceClass: "garage", isOpen: false)
-    #expect(partly?.symbol != open.symbol)
-    #expect(partly?.symbol != closed.symbol)
+    #expect(partly?.face.symbol != open.symbol)
+    #expect(partly?.face.symbol != closed.symbol)
 }
 
 /// **The tint travels with the face.** A relay opener is a switch, and taking the tint from the
