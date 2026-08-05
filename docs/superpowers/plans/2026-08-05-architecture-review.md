@@ -71,6 +71,37 @@ connection for a session that was already torn down. That bug is not interesting
 Each new session-scoped feature (onboarding, remote access, image auth…) has added another slot and
 another teardown step, and the next one will too.
 
+> **Correction — 2026-08-05, from reading the code directly during execution.** Two claims above
+> are overstated, and the July review's habit of recording its own corrections applies here.
+>
+> **"Five independently-nilable slots" overstates the sprawl.** There are five slots but only
+> *three* `attach` call sites: `HomeStore.attach` (`HomeStore.swift:49-54`) fans out to
+> `HistoryCache` and `HavenConfig` itself, at one call site, with a comment saying that is
+> deliberate — "One call site rather than three, so a new seam cannot be left holding a stale
+> connection from the previous session." The two genuinely separate attaches are `onboarding` and
+> `remoteAccessOffer`, both in `finishConnecting`.
+>
+> **"No single atomic connected transition" implies teardown is unreliable; it is not.** All four
+> children clear their own connection on reset — `HistoryCache.swift:73`, `HavenConfig.swift:44`,
+> `OnboardingModel.swift:58`, `RemoteAccessOfferModel.swift:70` — and `HomeStore.reset` calls every
+> one of them. Checked individually, not inferred.
+>
+> **What survives is real but smaller:** the missing `!Task.isCancelled` guard on line 833 (a
+> one-line fix), and the genuine hand-maintenance of `baseURL` + `tokenProvider` + `imageLoader` +
+> `hasConnectedSinceSignIn` across `beginSession`/`signOut`/`requireReauthentication`.
+>
+> **And one thing the review missed entirely: there are two lifetimes here, not one.** The
+> *sign-in session* (token provider, image loader, `hasConnectedSinceSignIn`, and onboarding's
+> accumulated knowledge) outlives the *connection*, which is replaced on every reconnect.
+> `AppModel.onboarding`'s own doc comment (`AppModel.swift:86-90`) makes this a hard constraint:
+> it is "created once and re-`attach`ed on every reconnect rather than rebuilt", because the
+> restart step deliberately kills the socket and what the flow already knows has to survive it.
+> **A `HomeSession` that conflates the two would break guided onboarding.** It must model the
+> sign-in session, holding the connection as a property that changes beneath it.
+>
+> **Re-prioritise accordingly:** F1 drops from flagship to a modest cleanup plus a one-line bug
+> fix. F2 and F5 become the highest-value remaining work.
+
 **Proposal: make the session an object.** One type — call it `HomeSession` — created only after a
 candidate wins, owning what exists exactly as long as a connection does: the `HomeConnection`, the
 `TokenProvider`, the `AuthenticatedImageLoader`, and the session-scoped models. `AppModel.phase`
