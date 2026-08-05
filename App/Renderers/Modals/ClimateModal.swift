@@ -25,7 +25,10 @@ struct ClimateModal: View {
                         subtitle: unavailable ? "Unavailable"
                             : (unknown ? "Unknown" : (s.map { $0.isOn ? TileName.words($0.hvacMode) : "Off" } ?? "")),
                         accent: accent, unavailable: unavailable,
-                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? (s?.modes.first { $0 != "off" } ?? "heat") : "off") }),
+                        // Turning on picks `ClimateState.modeWhenTurningOn` — the same rule
+                        // `ClimateTile`'s power button calls — so the tile and this sheet cannot
+                        // send different commands for the same gesture.
+                        toggle: Binding(get: { s?.isOn ?? false }, set: { store.setClimateMode(entityId, mode: $0 ? ClimateState.modeWhenTurningOn(from: s?.modes ?? []) : "off") }),
                         )
             FacetCard {
                 HStack {

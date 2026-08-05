@@ -112,4 +112,20 @@ public struct ClimateState: Sendable, Equatable {
         guard let hvacAction else { return true }
         return hvacAction != "off" && hvacAction != "idle"
     }
+
+    /// The mode to ask for when turning a thermostat on from off: the first declared non-`off`
+    /// mode, or `heat` if the device declared none.
+    ///
+    /// A static function of the declared modes rather than an instance property, because the
+    /// modal's `ClimateState` is optional: `s?.modeWhenTurningOn ?? "heat"` would put the fallback
+    /// literal straight back into the view, which is the duplication this exists to remove.
+    /// `ClimateTile`'s power button carries only the `[String]` anyway.
+    ///
+    /// Order matters and is deliberately left alone: this is the order Home Assistant declared
+    /// `hvac_modes` in, not a sorted or otherwise preferred list. `ClimateTile`'s power button and
+    /// `ClimateModal`'s header toggle both call this, so the tile and the sheet cannot send
+    /// different commands for the same gesture.
+    public static func modeWhenTurningOn(from modes: [String]) -> String {
+        modes.first { $0 != "off" } ?? "heat"
+    }
 }

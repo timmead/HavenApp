@@ -320,9 +320,9 @@ struct ClimateTile: View {
     /// a switch that reads as off while it is on, which is the oldest ambiguity in this kind of
     /// control and the reason the two states are kept apart in this file at all.
     ///
-    /// Turning *on* picks the same mode `ClimateModal`'s header toggle does — the first declared
-    /// non-`off` mode, or `heat` if the device declared none — so the tile and the sheet cannot
-    /// send different commands for the same gesture.
+    /// Turning *on* picks `ClimateState.modeWhenTurningOn` — the same rule `ClimateModal`'s header
+    /// toggle calls — so the tile and the sheet cannot send different commands for the same
+    /// gesture.
     ///
     /// Disabled rather than hidden when unreachable, matching `ModalHeader`'s toggle: the command
     /// primitives refuse an unreachable entity outright (`HomeStore.fireAndForget`), so a live
@@ -337,7 +337,7 @@ struct ClimateTile: View {
     private func powerButton(on: Bool, unavailable: Bool, unreachable: Bool,
                              accent: Color, modes: [String]) -> some View {
         Button {
-            store.setClimateMode(entityId, mode: on ? "off" : (modes.first { $0 != "off" } ?? "heat"))
+            store.setClimateMode(entityId, mode: on ? "off" : ClimateState.modeWhenTurningOn(from: modes))
         } label: {
             Image(systemName: "power")
                 .font(.system(size: 13, weight: .bold))

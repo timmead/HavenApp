@@ -127,3 +127,22 @@ private func e(_ id: String, _ st: String, _ a: [String: JSONValue] = [:]) -> En
     #expect(climate("heat", action: "preheating").function == .heat)
     #expect(climate("heat", action: "defrosting").function == .heat)
 }
+
+/// The mode to ask for when turning a thermostat on from off — moved here from `ClimateTile`'s
+/// power button and `ClimateModal`'s header toggle, which each carried their own copy of this
+/// rule before it lived anywhere under test.
+@Test func climateModeWhenTurningOn() {
+    // The first declared non-`off` mode wins.
+    #expect(ClimateState.modeWhenTurningOn(from: ["off", "heat", "cool"]) == "heat")
+    #expect(ClimateState.modeWhenTurningOn(from: ["off", "cool", "heat"]) == "cool")
+
+    // In the order Home Assistant declared them, not sorted — "auto" would come before "cool"
+    // alphabetically, but whichever one HA actually listed first must win.
+    #expect(ClimateState.modeWhenTurningOn(from: ["cool", "auto"]) == "cool")
+    #expect(ClimateState.modeWhenTurningOn(from: ["auto", "cool"]) == "auto")
+
+    // No modes at all, or only "off", falls back to "heat" — a device that declares nothing
+    // usable still has to be turnable on.
+    #expect(ClimateState.modeWhenTurningOn(from: []) == "heat")
+    #expect(ClimateState.modeWhenTurningOn(from: ["off"]) == "heat")
+}
