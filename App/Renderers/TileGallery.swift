@@ -198,8 +198,20 @@ struct TileGallery: View {
     /// not look the same.
     private var deviceContext: some View {
         VStack(alignment: .leading, spacing: 14) {
-            section("No companions — draws nothing") {
-                DeviceContextCard(entityId: "light.on")
+            section("No companions, nothing derived — both cards draw nothing") {
+                VStack(spacing: 10) {
+                    DeviceStateCard(entityId: "light.on")
+                    DeviceContextCard(entityId: "light.on")
+                }
+            }
+            // What the peek modal now shows for a composite: the state Haven works out, and the
+            // sensors it came from.
+            section("Computed state, and what it came from") {
+                VStack(spacing: 10) {
+                    DeviceStateCard(entityId: "switch.opener")
+                    DeviceStateCard(entityId: "cover.partly")
+                    DeviceStateCard(entityId: "cover.open_only")
+                }
             }
             section("A lock, and whether the door is actually shut") {
                 DeviceContextCard(entityId: "lock.locked")

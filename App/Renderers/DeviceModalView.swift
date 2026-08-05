@@ -21,8 +21,12 @@ struct DeviceModalView: View {
                 case .unknown: GenericModal(entityId: entityId)
                 }
             }
-            // Beneath whichever modal was chosen, and measured with it — see `DeviceContextCard`,
-            // which draws nothing for a device with no companions.
+            // Beneath whichever modal was chosen, and measured with it. Both draw nothing at all
+            // for an ordinary device — the state card only when Haven derives something the entity
+            // cannot say, the context card only when the device has companions.
+            //
+            // State before companions: what the device *is* outranks what else is attached to it.
+            DeviceStateCard(entityId: entityId)
             DeviceContextCard(entityId: entityId)
         }
         // **Every modal measures, cameras included.** The camera used to be excluded and opened
