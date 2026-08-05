@@ -25,29 +25,22 @@ struct CoverModal: View {
                                         set: { _ in store.openCloseCover(entityId) }))
             if s?.supportsPosition ?? false {
                 FacetCard(title: "Position") {
-                    Slider(value: Binding(get: { dragPercent ?? live },
-                                          set: { dragPercent = $0 }),
-                           in: 0...100,
-                           onEditingChanged: { editing in
-                               if !editing, let v = dragPercent {
-                                   store.setCoverPosition(entityId, percent: Int(v.rounded()))
-                                   dragPercent = nil
-                               }
-                           })
-                    .tint(accent)
-                    .accessibilityLabel("Position")
-                    .accessibilityValue("\(Int((dragPercent ?? live).rounded()))% open")
-                    .accessibilityAdjustableAction { direction in
-                        let current = dragPercent ?? live
-                        let step = 5.0
-                        let next = direction == .increment ? min(100, current + step) : max(0, current - step)
-                        // Pin to `next`, not `nil` — `setCoverPosition` is fire-and-forget
-                        // with no write into `states`, so clearing this would leave
-                        // `accessibilityValue` (and each next swipe's `current`) stuck on
-                        // the stale pre-swipe reading until HA's echo lands.
-                        dragPercent = next
-                        store.setCoverPosition(entityId, percent: Int(next.rounded()))
-                    }
+                    // Pin to `next`, not `nil` — `setCoverPosition` is fire-and-forget
+                    // with no write into `states`, so clearing this would leave
+                    // `accessibilityValue` (and each next swipe's `current`) stuck on
+                    // the stale pre-swipe reading until HA's echo lands.
+                    //
+                    // That reasoning has since expired without the pin being revisited:
+                    // `setCoverPosition` now goes through `optimisticState` with
+                    // `CoverOptimistic.position`, so `live` does catch up synchronously and the pin
+                    // is conservative rather than required. It is kept because it is what ships;
+                    // dropping it is a behaviour change, not a tidy-up. See `CommitSlider`'s doc
+                    // comment for what clearing buys and what pinning costs.
+                    CommitSlider(value: live, preview: $dragPercent, in: 0...100,
+                                 adjustmentStep: 5, tint: accent, label: "Position",
+                                 pinsPreviewAfterAdjusting: true,
+                                 valueDescription: { "\(Int($0.rounded()))% open" },
+                                 onCommit: { store.setCoverPosition(entityId, percent: Int($0.rounded())) })
                 }
             }
             FacetCard { HStack(spacing: 10) {

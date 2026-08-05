@@ -259,27 +259,14 @@ struct MediaPlayerModal: View {
                         .accessibilityLabel(s.isMuted ? "Unmute" : "Mute")
                     }
                     if s.features.contains(.volumeSet) {
-                        Slider(value: Binding(get: { dragVolume ?? live }, set: { dragVolume = $0 }),
-                               in: 0...100,
-                               onEditingChanged: { editing in
-                                   if !editing, let v = dragVolume {
-                                       store.setMediaVolume(entityId, percent: Int(v.rounded()))
-                                       // Safe to clear immediately, unlike the light modal's
-                                       // brightness slider: `setMediaVolume` writes the optimistic
-                                       // `volume_level` into `states` synchronously, so `live` has
-                                       // already caught up by the time this line runs.
-                                       dragVolume = nil
-                                   }
-                               })
-                        .tint(accent)
-                        .accessibilityLabel("Volume")
-                        .accessibilityValue(s.isMuted ? "Muted" : "\(Int((dragVolume ?? live).rounded()))%")
-                        .accessibilityAdjustableAction { direction in
-                            let current = dragVolume ?? live
-                            let next = direction == .increment ? min(100, current + 5) : max(0, current - 5)
-                            store.setMediaVolume(entityId, percent: Int(next.rounded()))
-                            dragVolume = nil
-                        }
+                        // Cleared rather than pinned, on release and after an adjustment alike:
+                        // `setMediaVolume` writes the optimistic `volume_level` into `states`
+                        // synchronously, so `live` has already caught up by the time the commit
+                        // returns. `CommitSlider` states the general rule.
+                        CommitSlider(value: live, preview: $dragVolume, in: 0...100,
+                                     adjustmentStep: 5, tint: accent, label: "Volume",
+                                     valueDescription: { s.isMuted ? "Muted" : "\(Int($0.rounded()))%" },
+                                     onCommit: { store.setMediaVolume(entityId, percent: Int($0.rounded())) })
                     }
                 }
             }

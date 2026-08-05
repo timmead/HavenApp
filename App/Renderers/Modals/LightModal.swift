@@ -40,32 +40,14 @@ struct LightModal: View {
                         )
             if s?.supportsBrightness ?? false {
                 FacetCard(title: "Brightness") {
-                    Slider(value: Binding(get: { dragPercent ?? live },
-                                          set: { dragPercent = $0 }),
-                           in: 0...100,
-                           onEditingChanged: { editing in
-                               if !editing, let v = dragPercent {
-                                   store.setBrightness(entityId, percent: Int(v.rounded()))
-                                   dragPercent = nil
-                               }
-                           })
-                    .tint(accent)
-                    .accessibilityLabel("Brightness")
-                    .accessibilityValue("\(Int((dragPercent ?? live).rounded()))%")
-                    .accessibilityAdjustableAction { direction in
-                        let current = dragPercent ?? live
-                        let step = 5.0
-                        let next = direction == .increment ? min(100, current + step) : max(0, current - step)
-                        store.setBrightness(entityId, percent: Int(next.rounded()))
-                        // Cleared, not pinned. This used to pin the preview because `setBrightness`
-                        // was fire-and-forget and `live` would otherwise still read the stale
-                        // pre-swipe value — each subsequent swipe re-deriving `next` from it. It now
-                        // writes `LightOptimistic.brightness` into `states` synchronously, so `live`
-                        // has already caught up by this line, and *keeping* the pin would be the new
-                        // bug: a non-nil `dragPercent` makes the slider ignore every later state
-                        // push, including the light being switched off.
-                        dragPercent = nil
-                    }
+                    // Cleared after an adjustment, not pinned — `setBrightness` writes
+                    // `LightOptimistic.brightness` into `states` synchronously, and `CommitSlider`'s
+                    // doc comment carries the history of why pinning it is now the bug rather than
+                    // the fix.
+                    CommitSlider(value: live, preview: $dragPercent, in: 0...100,
+                                 adjustmentStep: 5, tint: accent, label: "Brightness",
+                                 valueDescription: { "\(Int($0.rounded()))%" },
+                                 onCommit: { store.setBrightness(entityId, percent: Int($0.rounded())) })
                 }
             }
             if let range, let liveKelvin {
@@ -77,29 +59,20 @@ struct LightModal: View {
                         .clipShape(Capsule())
                         .frame(height: 4)
                         .accessibilityHidden(true)
-                    Slider(value: Binding(get: { dragKelvin ?? liveKelvin },
-                                          set: { dragKelvin = $0 }),
-                           in: Double(range.lowerBound)...Double(range.upperBound),
-                           onEditingChanged: { editing in
-                               if !editing, let v = dragKelvin {
-                                   store.setColorTemp(entityId, kelvin: Int(v.rounded()))
-                                   dragKelvin = nil
-                               }
-                           })
-                    .tint(accent)
-                    .accessibilityLabel("Color temperature")
-                    .accessibilityValue("\(Int((dragKelvin ?? liveKelvin).rounded())) Kelvin")
-                    .accessibilityAdjustableAction { direction in
-                        let current = dragKelvin ?? liveKelvin
-                        let step = Double(max(1, (range.upperBound - range.lowerBound) / 20))
-                        let next = direction == .increment
-                            ? min(Double(range.upperBound), current + step)
-                            : max(Double(range.lowerBound), current - step)
-                        // See the brightness slider's identical comment: pin to `next`, not
-                        // `nil`, since `setColorTemp` doesn't write `states` either.
-                        dragKelvin = next
-                        store.setColorTemp(entityId, kelvin: Int(next.rounded()))
-                    }
+                    // A twentieth of the light's own range per swipe, floored at 1K, and computed
+                    // in whole kelvin here rather than from the slider's `Double` bounds — the
+                    // division is integer, and an odd-width range gives a different number if it
+                    // isn't.
+                    //
+                    // Pinned after an adjustment, unlike brightness, since `setColorTemp` writes
+                    // nothing into `states`.
+                    let kelvinStep = Double(max(1, (range.upperBound - range.lowerBound) / 20))
+                    CommitSlider(value: liveKelvin, preview: $dragKelvin,
+                                 in: Double(range.lowerBound)...Double(range.upperBound),
+                                 adjustmentStep: kelvinStep, tint: accent, label: "Color temperature",
+                                 pinsPreviewAfterAdjusting: true,
+                                 valueDescription: { "\(Int($0.rounded())) Kelvin" },
+                                 onCommit: { store.setColorTemp(entityId, kelvin: Int($0.rounded())) })
                     Text("\(Int((dragKelvin ?? liveKelvin).rounded()))K")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)

@@ -26,7 +26,9 @@ struct MediaPlayerTile: View {
     /// configuration mode removes it from.
     @Environment(\.havenSurface) private var surface
     /// Non-nil only while dragging the volume slider — the preview the drag moves, so no command
-    /// goes out until the finger lifts. Exactly `MediaPlayerModal.dragVolume`.
+    /// goes out until the finger lifts. Held here rather than inside `CommitSlider` for the reason
+    /// that type's doc comment gives: the clearing signal differs per call site, and this one has
+    /// none.
     @State private var dragVolume: Double?
 
     var body: some View {
@@ -282,22 +284,19 @@ struct MediaPlayerTile: View {
         }
     }
 
-    /// The volume control itself, written to match `MediaPlayerModal.volume` line for line — same
-    /// preview state, same commit-on-release, same adjustable action — so the two cannot drift.
+    /// The volume control itself: `CommitSlider`, the same component the media modal's volume, the
+    /// light modal's brightness and colour temperature, and the cover modal's position are all
+    /// drawn with. The preview state, the commit-on-release and the adjustable action live there,
+    /// which is what stops this and `MediaPlayerModal.volume` drifting apart — they used to be kept
+    /// in step by hand, and by a comment asking whoever edited one to edit the other.
     private func volumeSlider(_ s: MediaPlayerState) -> some View {
         let live = Double(s.volumePercent ?? 0)
-        return Slider(value: Binding(get: { dragVolume ?? live }, set: { dragVolume = $0 }),
-                      in: 0...100,
-                      onEditingChanged: { editing in
-                          if !editing, let v = dragVolume {
-                              store.setMediaVolume(entityId, percent: Int(v.rounded()))
-                              // Safe to clear immediately: `setMediaVolume` writes the optimistic
-                              // `volume_level` into `states` synchronously, so `live` has already
-                              // caught up by the time this line runs. Without that this would be
-                              // the snap-back D spec §10b item 2 describes.
-                              dragVolume = nil
-                          }
-                      })
+        return CommitSlider(value: live, preview: $dragVolume, in: 0...100,
+                            adjustmentStep: 5,
+                            tint: s.isMuted ? HavenColor.warning.opacity(0.55) : accent,
+                            label: "Volume",
+                            valueDescription: { s.isMuted ? "Muted" : "\(Int($0.rounded()))%" },
+                            onCommit: { store.setMediaVolume(entityId, percent: Int($0.rounded())) })
         // **The row's height is stated, not inherited, and the tile depends on it.** A `Slider`'s
         // intrinsic height is about 33pt; the mute button beside it is 24, which is what `wide()`
         // above budgeted for when it argued that the volume strip brings the 2×1's ideal height to
@@ -307,15 +306,6 @@ struct MediaPlayerTile: View {
         // overhangs this frame by a couple of points and is not clipped, which is only a drawing
         // detail; the layout is 24.
         .frame(height: 24)
-        .tint(s.isMuted ? HavenColor.warning.opacity(0.55) : accent)
-        .accessibilityLabel("Volume")
-        .accessibilityValue(s.isMuted ? "Muted" : "\(Int((dragVolume ?? live).rounded()))%")
-        .accessibilityAdjustableAction { direction in
-            let current = dragVolume ?? live
-            let next = direction == .increment ? min(100, current + 5) : max(0, current - 5)
-            store.setMediaVolume(entityId, percent: Int(next.rounded()))
-            dragVolume = nil
-        }
     }
 
     // MARK: - Shared controls
