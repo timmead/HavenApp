@@ -34,7 +34,6 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let surfacesKey = "surfaces"
     private static let sizesKey = "sizes"
     private static let stateStyleKey = "state_style"
-    private static let bindingsKey = "bindings"
     private static let devicesKey = "devices"
     private static let orderKey = "order"
 
