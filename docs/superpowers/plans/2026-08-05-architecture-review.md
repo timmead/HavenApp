@@ -273,6 +273,52 @@ Steps 1–4 are refactors netted by existing suites plus named extensions to the
 that needs eyes on pixels, which `TileGallery` provides without a live Home Assistant. Nothing here
 requires a schema migration; F7 confirms the schemas are the part already built for the future.
 
+## What was executed — 2026-08-05
+
+Nine commits on `refactor/architecture-2026-08`. HavenCore 788 → 800 tests; HavenApp 107 → 110.
+Both suites green before every commit, and the app exercised by hand afterwards.
+
+| Item | Outcome |
+|---|---|
+| F4.1 web auth cancellation | **Done.** Resume-once gate + cancellation handler; tests pin both `cancel()` behaviours |
+| F2 device resolution | **Done**, re-scoped — pure queries moved to Core rather than into a new App object |
+| F2b command surface | **Done.** Three optimistic primitives → one `command(_:_:_:)` with an explicit write mode |
+| F5a `CommitSlider` | **Done.** Five hand-written sliders → one component |
+| F5b climate turn-on rule | **Done.** Out of two view files, into `ClimateState.modeWhenTurningOn(from:)` |
+| F6 DesignSystem split | **Done**, re-scoped — two files moved, not eight |
+| F7 dead `bindings` key | **Done.** `deviceState`'s stale comment corrected inside F2b |
+| F1 `HomeSession` | **Not landed.** Demoted — see the correction above. The one-line guard on `AppModel.swift:833` is still open |
+| F5 tile gesture footer | **Not landed.** Left out of scope; still four copies |
+
+### Three things this document got wrong, and how they were found
+
+Every correction came from reading the code; every error came from trusting a summary of it. This
+review was assembled from subagent reports, and that is where its defects came from.
+
+1. **F1 was overstated** — see the correction above. Executing it as written would have broken
+   guided onboarding, because the sign-in session and the connection are two lifetimes and
+   `OnboardingModel` must survive the restart step.
+2. **F6's membership test was wrong.** "Imports HavenCore" would have moved eight files. HavenCore
+   has no SwiftUI or UIKit, so an extension can link it; the real test is "reads the app's own
+   `@Observable` objects", which is two files.
+3. **The `bulkFlip` premise was stale.** This document repeated the July review's closing note that
+   `bulkFlip` has no explicit unavailable guard. It has had one since — `HomeStore.swift:803`, with
+   its own rationale. Caught by the agent that was told otherwise, which verified rather than
+   complied.
+
+### And one the test suite got wrong
+
+`anEntityWithNoDeviceHasNoSiblings` passed with the guard it existed to pin removed: the fixture
+held a single device-less entity, so there was no second one to wrongly match and the mutant was
+equivalent on that data. **Third occurrence of this exact shape in this codebase.** The fixture now
+carries two, and says why.
+
+Two process notes worth keeping: a test that races a possibly-hung task inside `withTaskGroup`
+hangs the whole run rather than failing, because the group awaits every child and `cancelAll()`
+cannot free one blocked on an unresumed continuation — and it wedges the simulator for later runs
+too. And `git checkout` restores a mutation only when the surrounding work is *committed*; on
+uncommitted work it destroys it. Use a file copy.
+
 ## House rules that carry over
 
 - **Comment loss is a failing check.** Most long comments encode a shipped bug and why the shape
