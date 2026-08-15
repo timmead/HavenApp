@@ -50,6 +50,10 @@ private func json(_ text: String) -> JSONValue {
         .settingSubsectionSpan(nil, kind: .climate)
     #expect(doc.subsectionSpan(.climate) == nil)
     #expect(doc.subsectionMode(.climate) == .wrap)
+    // The accessor alone can't tell a removed key from a stored null — both read back as `nil`
+    // through `.asString` — so check the raw shape too.
+    let climate = doc.raw.asObject?["subsections"]?.asObject?["climate"]?.asObject
+    #expect(climate?["size"] == nil)
 }
 
 /// Clearing the last setting for a kind leaves no shell behind, or the document fills up with empty
@@ -101,9 +105,11 @@ private func json(_ text: String) -> JSONValue {
       "display": { "order": ["climate", "lights"] },
       "subsections": {
         "climate": { "size": "4x2", "somethingNew": true },
-        "lights": { "size": "1x1" } } }
+        "lights": { "size": "1x1" },
+        "fireplaces": { "size": "2x2" } } }
     """#)
     let doc = DashboardDocument(raw: original)
+        .settingSubsectionSpan(TileSpan(columns: 2, rows: 1), kind: .lights)
         .settingSubsectionMode(.wrap, kind: .climate)
         .settingDisplayMode(.wrap)
     let root = doc.raw.asObject
@@ -116,7 +122,11 @@ private func json(_ text: String) -> JSONValue {
     #expect(climate?["somethingNew"]?.asBool == true)
     #expect(climate?["mode"]?.asString == "wrap")
 
-    #expect(root?["subsections"]?.asObject?["lights"] == original.asObject?["subsections"]?.asObject?["lights"])
+    // The lights write itself lands...
+    #expect(root?["subsections"]?.asObject?["lights"]?.asObject?["size"]?.asString == "2x1")
+    // ...and a kind key this build doesn't otherwise touch survives a span write on a sibling.
+    #expect(root?["subsections"]?.asObject?["fireplaces"] ==
+             original.asObject?["subsections"]?.asObject?["fireplaces"])
 }
 
 // MARK: - Schema stamp
