@@ -7,7 +7,9 @@ import Testing
 /// fixed output order, and the mode/span fallback chains.
 struct SubsectionResolverTests {
     /// One entity per kind, plus a second light so per-kind ordering has something to prove, plus a
-    /// composite whose primary is a cover — bucketed with the shades, exactly as a plain shade is.
+    /// composite whose primary is a cover — bucketed with the shades, exactly as a plain shade is —
+    /// plus a composite with no `.primary` entry at all, whose `primaryEntityId` is therefore `nil`
+    /// and which `aCompositeWithNoPrimaryIsDroppedFromEveryBucket` asserts lands nowhere.
     private func room(order: [String] = [], overrides: [String: [HavenSurface: SurfaceMembership]] = [:]) -> RoomSection {
         let refs: [DeviceRef] = [
             .entity("climate.lr"),
@@ -19,6 +21,7 @@ struct SubsectionResolverTests {
             .entity("camera.front"),
             .entity("scene.evening"),
             .entity("sensor.temp"),
+            .composite(id: "orphan", type: "mystery", inputs: [:]),
         ]
         return RoomSection(id: "lounge", name: "Lounge", areaId: "lounge", headerSensors: [],
                            deviceRefs: refs, tiers: [:], overrides: overrides, order: order)
@@ -48,6 +51,23 @@ struct SubsectionResolverTests {
         let result = Subsections.resolve(room: room(), surface: .overview, document: DashboardDocument())
         let shades = result.first { $0.kind == .shades }!
         #expect(shades.refs.map(\.id) == ["cover.blind", "shadegroup"])
+    }
+
+    /// A composite whose `inputs` has no `.primary` entry has no primary entity id at all
+    /// (`DeviceRef.primaryEntityId` is `inputs[.primary]?.first`) — `SubsectionKind.of` cannot take a
+    /// value it never receives, so the resolver drops the ref rather than guess a bucket for it.
+    /// Mirrors `RoomSectionView`'s existing handling of the same case (a stored device whose primary
+    /// vanished).
+    ///
+    /// The union of every subsection's refs is the cleanest place to assert "nowhere": checking one
+    /// bucket for absence would pass by accident if the ref landed in a *different* one, which is
+    /// exactly the failure a wrong implementation (bucketing the orphan into `.other`) produces.
+    @Test func aCompositeWithNoPrimaryIsDroppedFromEveryBucket() {
+        let result = Subsections.resolve(room: room(), surface: .overview, document: DashboardDocument())
+        let everyRef = result.flatMap(\.refs).map(\.id)
+        #expect(!everyRef.contains("orphan"))
+        // The drop is scoped to the one ref with no primary — its siblings still render.
+        #expect(everyRef.contains("light.a"))
     }
 
     /// Two refs land in the same kind's bucket in the order `refs(for:)` produced them — the

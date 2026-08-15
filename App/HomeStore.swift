@@ -274,8 +274,8 @@ final class HomeStore {
         }
     }
 
-    // The four reads below are pure functions of the document or the home, and now live in
-    // HavenCore beside the types they read (`DashboardDocument.deviceRef(for:)` and friends,
+    // `device` through `roomEntityIds` below are pure functions of the document or the home, and now
+    // live in HavenCore beside the types they read (`DashboardDocument.deviceRef(for:)` and friends,
     // `ResolvedHome.areaEntityIds(containing:)`), with `DeviceResolutionTests` on them. Their
     // reasoning moved with them; what stays here is the join, and the reason it stays is
     // observation: a view reading `store.device(id)` registers a dependency on `config.document`
