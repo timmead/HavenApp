@@ -17,55 +17,34 @@ struct RoomDetailView: View {
     /// `LazyVGrid` — and that workaround is what a real span-aware layout removes.
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
 
-    /// Domain buckets for this room's `.entity` refs, in display order. `Domain.of(_:)`
-    /// is switched exhaustively (every `Domain` case appears in exactly one branch), so
-    /// every entity lands in exactly one bucket below — none dropped, none duplicated.
-    /// `.composite` refs are skipped: nothing renders them yet (see `DeviceRef`'s doc
-    /// comment / `HomeStore.deviceEntityIds`, which does the same).
-    private struct Grouped {
-        var climate: [String] = []
-        var lights: [String] = []
-        var covers: [String] = []
-        var media: [String] = []
-        var cameras: [String] = []
-        var other: [String] = []
-        var sensors: [String] = []
-    }
-    private var grouped: Grouped {
-        var g = Grouped()
+    /// This room's `.entity` refs, bucketed by `SubsectionKind.of(_:)` — Core's tested copy of the
+    /// switch that used to live here as `Grouped`/`grouped`. `.composite` refs are skipped: nothing
+    /// renders them yet (see `DeviceRef`'s doc comment / `HomeStore.deviceEntityIds`, which does
+    /// the same).
+    ///
+    /// Interim scaffolding: Task 5 replaces this view's body with `SubsectionView` built on
+    /// `Subsections.resolve`, at which point this helper goes away with it.
+    private func bucket(_ kind: SubsectionKind) -> [String] {
         // `refs(for: .roomDetail)` — the overview's controls *plus* the sensors curation demoted
         // off the grid, which is what makes this view the place demoted entities are reachable. A
         // device removed from the *dashboard* is still here; removal is per surface.
-        for ref in room.refs(for: .roomDetail) {
-            // A composite is bucketed by what its primary is: a shade group sits with the shades.
-            guard let id = ref.primaryEntityId else { continue }
-            switch Domain.of(id) {
-            case .climate: g.climate.append(id)
-            case .light: g.lights.append(id)
-            case .cover: g.covers.append(id)
-            case .mediaPlayer: g.media.append(id)
-            // Its own bucket, not `.other`: `.other` renders in the 4-column grid, and a camera
-            // has no 1-column size — see `cameraGroup`.
-            case .camera: g.cameras.append(id)
-            case .scene, .script, .button, .lock, .switchOutlet, .unknown: g.other.append(id)
-            case .sensor, .binarySensor: g.sensors.append(id)
-            }
+        room.refs(for: .roomDetail).compactMap { ref -> String? in
+            guard let id = ref.primaryEntityId, SubsectionKind.of(id) == kind else { return nil }
+            return id
         }
-        return g
     }
 
     var body: some View {
-        let g = grouped
         let rollups = store.rollups(room)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                group("Climate", g.climate)
-                group("Lights", g.lights, rollup: rollups.first { $0.kind == .lights })
-                group("Shades", g.covers, rollup: rollups.first { $0.kind == .covers })
-                group("Media", g.media)
-                group("Cameras", g.cameras)
-                group("Scenes & more", g.other)
-                group("Sensors", g.sensors)
+                group("Climate", bucket(.climate))
+                group("Lights", bucket(.lights), rollup: rollups.first { $0.kind == .lights })
+                group("Shades", bucket(.shades), rollup: rollups.first { $0.kind == .covers })
+                group("Media", bucket(.media))
+                group("Cameras", bucket(.cameras))
+                group("Scenes & more", bucket(.other))
+                group("Sensors", bucket(.sensors))
                 // One `+` for the whole screen rather than one per group: the groups here are a
                 // presentation of one list, and the picker is not scoped to a domain — an added
                 // device lands in whichever group its domain belongs to.
