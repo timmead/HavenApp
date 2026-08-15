@@ -56,6 +56,20 @@ private func json(_ text: String) -> JSONValue {
     #expect(climate?["size"] == nil)
 }
 
+/// Mirrors `clearingASubsectionSpanRemovesTheKeyRatherThanWritingNull`: clearing a subsection's
+/// mode removes only that key, so a size chosen for the same kind survives, and the raw shape shows
+/// the key gone rather than holding a stored null.
+@Test func clearingASubsectionModeRemovesTheKeyRatherThanWritingNull() {
+    let doc = DashboardDocument()
+        .settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .climate)
+        .settingSubsectionMode(.wrap, kind: .climate)
+        .settingSubsectionMode(nil, kind: .climate)
+    #expect(doc.subsectionMode(.climate) == nil)
+    #expect(doc.subsectionSpan(.climate) == TileSpan(columns: 4, rows: 2))
+    let climate = doc.raw.asObject?["subsections"]?.asObject?["climate"]?.asObject
+    #expect(climate?["mode"] == nil)
+}
+
 /// Clearing the last setting for a kind leaves no shell behind, or the document fills up with empty
 /// records of decisions nobody is making any more — see `clearingTheLastSizeRemovesTheRecord`.
 @Test func clearingTheLastSubsectionSettingRemovesTheRecord() {
@@ -91,6 +105,19 @@ private func json(_ text: String) -> JSONValue {
         .settingSubsectionMode(.wrap, kind: .cameras)
         .settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .climate)
     #expect(doc.subsectionSpan(.climate) == TileSpan(columns: 4, rows: 2))
+    #expect(doc.subsectionSpan(.cameras) == TileSpan(columns: 2, rows: 2))
+    #expect(doc.subsectionMode(.cameras) == .wrap)
+}
+
+/// Mirrors `writingOneKindsSettingsLeavesASiblingKindAlone` for a mode write rather than a span
+/// write — the two mutators share the same two-level merge, and each needs its own sibling-safety
+/// case rather than one standing in for the other.
+@Test func writingOneKindsModeLeavesASiblingKindAlone() {
+    let doc = DashboardDocument()
+        .settingSubsectionSpan(TileSpan(columns: 2, rows: 2), kind: .cameras)
+        .settingSubsectionMode(.wrap, kind: .cameras)
+        .settingSubsectionMode(.wrap, kind: .climate)
+    #expect(doc.subsectionMode(.climate) == .wrap)
     #expect(doc.subsectionSpan(.cameras) == TileSpan(columns: 2, rows: 2))
     #expect(doc.subsectionMode(.cameras) == .wrap)
 }
@@ -139,5 +166,11 @@ private func json(_ text: String) -> JSONValue {
 
 @Test func aDisplayModeWriteStampsSchema() {
     let doc = DashboardDocument(raw: .object([:])).settingDisplayMode(.wrap)
+    #expect(doc.raw.asObject?["schema"]?.asInt == DashboardDocument.schema)
+}
+
+@Test func aSubsectionModeWriteStampsSchema() {
+    let doc = DashboardDocument(raw: .object([:]))
+        .settingSubsectionMode(.wrap, kind: .lights)
     #expect(doc.raw.asObject?["schema"]?.asInt == DashboardDocument.schema)
 }

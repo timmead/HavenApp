@@ -120,6 +120,14 @@ extension DashboardDocument {
     /// Writes one kind's section back into `subsections`, or removes it — an empty section is
     /// residue, not a decision anyone made, exactly as an empty entity record is elsewhere in this
     /// document.
+    ///
+    /// Every sibling mutator in `DashboardDocument.swift` inlines this write-back-or-remove step
+    /// rather than factoring it out — including three-level merges of the identical shape:
+    /// `settingSize` (`:234-260`) and `settingMembership` (`:419-445`) each repeat it once per
+    /// level, three times over. This file factors it instead because both settings here
+    /// (`settingSubsectionSpan` and `settingSubsectionMode`) walk the *exact same* two-level subtree
+    /// — kind-section, then `subsections` root — so the duplication would be between them as well as
+    /// within each, not because no inlined precedent exists.
     private static func storeSection(_ section: [String: JSONValue], forKind kind: SubsectionKind,
                                      into subsections: inout [String: JSONValue]) {
         if section.isEmpty {
