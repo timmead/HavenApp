@@ -133,6 +133,26 @@ import HavenCore
                          whenMutating: { store.resolveEnvironment() }))
     }
 
+    /// The subsection sheets read `store.subsections(_:on:)`, which joins the resolver to
+    /// `config.document` exactly as `device(_:)` joins `deviceRef(for:)` — see the comment beside it
+    /// in `HomeStore.swift`. If that join ever reads a document that isn't `config.document` itself
+    /// (a captured copy, a snapshot taken at some other time), a subsection's size or mode changing
+    /// would stop repainting it, silently.
+    @Test func aSubsectionReadSeesADocumentWrite() {
+        let store = HomeStore()
+        store.home = ResolvedHome(floors: [
+            ResolvedFloor(id: "f1", name: "Ground", level: 0, areas: [
+                ResolvedArea(id: "living", name: "Living", entityIds: ["light.a"])
+            ])
+        ])
+        let room = store.rooms().first { $0.id == "living" }!
+
+        #expect(observes({ _ = store.subsections(room, on: .overview) },
+                         whenMutating: {
+                             store.config.seedForTesting(DashboardDocument().settingDisplayMode(.wrap))
+                         }))
+    }
+
     /// **The negative control.** Without it, every test above could be passing because the harness
     /// reports `true` unconditionally rather than because observation works. Reading `states` and
     /// mutating `home` — two genuinely separate properties — must not fire.

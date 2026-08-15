@@ -296,6 +296,13 @@ final class HomeStore {
         home.areaEntityIds(containing: entityId)
     }
 
+    /// Which subsections a room resolves into — see `Subsections.resolve`. Beside `device(_:)`
+    /// above for the same observation reason: a view reading `store.subsections(_:on:)` must
+    /// register a dependency on `config.document`.
+    func subsections(_ room: RoomSection, on surface: HavenSurface) -> [RoomSubsection] {
+        Subsections.resolve(room: room, surface: surface, document: config.document)
+    }
+
     /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
     ///
     /// **Its id is the primary's entity id**, which is the same rule a one-entity device follows —
