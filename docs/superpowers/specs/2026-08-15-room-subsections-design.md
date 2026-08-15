@@ -36,6 +36,10 @@ Settled in the design discussion, recorded here so the plan doesn't re-litigate 
    beside Shades. The room heading stops carrying a button row.
 7. **Default subsection order is fixed**: climate, lights, shades, cameras, media, other, sensors.
    Per-household ordering is deferred; when it comes it is one optional key, no migration.
+8. **Configure mode forces every subsection to wrap.** Rearranging happens on a grid, never in a
+   scroll row: entering edit mode temporarily renders each subsection in wrap mode regardless of
+   its configured display mode, which lets the existing drag-to-reorder machinery be reused
+   unchanged. Leaving edit mode restores the configured mode.
 
 ## Schema
 
@@ -106,8 +110,22 @@ climate 2×1, cameras 2×2, …), so an unconfigured document renders exactly to
 - **Both surfaces** become: heading (name + environment chips, unchanged) → `ForEach` over resolved
   subsections → add-tile affordance. Floor uses `density: .compact`; exact styling is
   implementation's, the components are identical.
-- **Drag-to-rearrange** operates within a subsection only. Cross-subsection position is meaningless
-  now — a device's subsection is a fact about its domain, not a choice.
+- **Drag-to-rearrange: reuse, not rebuild.** In configure mode every subsection renders in wrap
+  mode regardless of its configured display (decision 8), so reordering always happens on
+  `RoomGrid` and the existing machinery — `RearrangeableTile`, `TileDragState`, the packing-driven
+  drop targets — is reused unchanged. No drag gesture is ever asked to work inside a horizontal
+  scroll row.
+
+  The per-subsection constraint is structural rather than enforced: each `SubsectionView` owns its
+  own `TileDragState` (as `RoomSectionView` owns one per room today — "a drag is a fact about the
+  room" becomes "a drag is a fact about the subsection"), so a lifted tile has no representation in
+  any other container and cross-subsection drops cannot be expressed at all. Cross-subsection
+  position is meaningless anyway: a device's subsection is a fact about its domain, not a choice.
+
+  The mode flip on entering configure mode is a visible layout change for scroll-mode subsections
+  (a row becomes a small grid). That is accepted, and consistent with configure mode already
+  looking deliberately different — placeholders appear, tiles go inert, headers become tap
+  targets.
 - **Configuration UI:** the tile sheet loses its size picker (name, membership, state style, role
   bindings stay). A new subsection sheet — header tap in configure mode — holds size (constrained
   to the per-domain option lists `TileSizePicker` already defines, now per kind) and mode
