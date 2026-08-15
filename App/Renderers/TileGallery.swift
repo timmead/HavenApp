@@ -358,9 +358,13 @@ struct TileGallery: View {
 
     /// Each kind at one density, in both modes, one directly above the other.
     ///
-    /// **Adjacent deliberately.** The spec's promise is that the display mode changes a subsection's
-    /// *arrangement* and never its proportions, and the only way to check that is to see the same
-    /// tiles laid out both ways with nothing in between them.
+    /// **Adjacent deliberately, and the two axes of the comparison are not equally guaranteed.**
+    /// *Widths* cannot disagree between the modes — both ask one `RoomGrid` value how wide a span is
+    /// — so a width that differs means the scroll body's measured container width is wrong. *Heights*
+    /// are only guaranteed for multi-row spans; a single-row scroll tile takes its own ideal height
+    /// because an `HStack` has no subviews to measure, and it matches its wrap twin only because a
+    /// subsection's tiles are the same renderer at the same span. See `SubsectionView.tileHeight`.
+    /// A single-row height that differs is therefore a height-mechanics finding, not a width one.
     private func subsectionPage(_ kinds: [SubsectionKind], _ density: SubsectionDensity) -> some View {
         ForEach(kinds, id: \.self) { kind in
             subsectionCase(kind, .scroll, density)
@@ -808,7 +812,8 @@ struct TileGallery: View {
 /// being a baseline.
 ///
 /// Each page puts a kind's two modes one above the other, because the claim being checked is that
-/// the mode changes only where the tiles are and never how big they are.
+/// the mode changes where the tiles are and not how wide they are — see `subsectionPage(_:_:)` for
+/// what that comparison does and does not guarantee about their heights.
 #Preview("Subsections 1 — 1×1 kinds, floor") {
     TileGallery(page: .narrowCompact)
 }

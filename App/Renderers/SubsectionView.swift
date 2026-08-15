@@ -38,9 +38,13 @@ struct SubsectionView: View {
 
     /// **One grid value, used by both modes.** The wrap body lays out with it and the scroll body
     /// asks it how wide a tile is, so the two cannot divide the width differently — which is the
-    /// spec's promise that changing the display mode changes a subsection's arrangement and never
-    /// its proportions.
-    private static let grid = RoomGrid(columns: 4, spacing: 9)
+    /// spec's promise that changing the display mode changes a subsection's *arrangement* and never
+    /// a tile's width.
+    ///
+    /// Constructed with no arguments on purpose: `RoomGrid`'s own defaults are 4 columns at 9 points,
+    /// and restating them here would be a second place for them to be changed. The scroll body reads
+    /// `Self.grid.spacing` for its own gaps for the same reason.
+    private static let grid = RoomGrid()
 
     /// How wide this container was drawn, which is what the scroll body's tiles are sized against.
     ///
@@ -72,30 +76,37 @@ struct SubsectionView: View {
     // MARK: - Heading
 
     /// The kind's name and its roll-up — and, while configuring, the way into its settings.
-    ///
-    /// The same heading in both modes, extracted rather than duplicated for the reason
-    /// `RoomSectionView.heading` records: two branches that build a heading each are two headings
-    /// that can drift into looking like different things.
     @ViewBuilder
     private var header: some View {
-        if navigation.isConfiguring {
-            Button { navigation.presented = .subsectionConfig(kind: subsection.kind) } label: { heading }
-                .buttonStyle(.plain)
-                .accessibilityHint("Configures this subsection's tile size and layout")
-        } else {
-            heading
-        }
-    }
-
-    private var heading: some View {
         HStack(spacing: 8) {
-            Text(subsection.kind.displayName)
-                .font(titleFont)
-                .foregroundStyle(density == .compact ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            // Only the *name* is wrapped for navigation — **not** the roll-up beside it, which is a
+            // `Button` of its own. `RoomSectionView` keeps its roll-up row outside the room
+            // heading's button for exactly this reason: a button inside another button's label has
+            // ambiguous hit testing, and whichever way it happens to resolve, one of the two
+            // meanings is silently unreachable. "All Off" that opens a settings sheet is a bulk
+            // action that does not happen and says nothing about not happening.
+            if navigation.isConfiguring {
+                Button { navigation.presented = .subsectionConfig(kind: subsection.kind) } label: { title }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Configures this subsection's tile size and layout")
+            } else {
+                title
+            }
             if let rollup { rollupRow(rollup) }
             Spacer(minLength: 0)
         }
-        .contentShape(Rectangle())
+    }
+
+    /// The kind's name — the tap target in configuration mode, a plain label otherwise.
+    ///
+    /// One property wrapped by both branches rather than a heading built in each, for the reason
+    /// `RoomSectionView.heading` records: two branches that build a heading each are two headings
+    /// that can drift into looking like different things.
+    private var title: some View {
+        Text(subsection.kind.displayName)
+            .font(titleFont)
+            .foregroundStyle(density == .compact ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            .contentShape(Rectangle())
     }
 
     /// Room detail's heading is the only one on its screen; the floor card's sits under a 17pt bold
@@ -188,13 +199,23 @@ struct SubsectionView: View {
     // MARK: - Bodies
 
     /// One row, scrolled sideways. **Every tile is framed to the width it would have in the grid**,
-    /// so a light is the same size in both modes and only its neighbours move.
+    /// so a light is exactly as wide in both modes and only its neighbours move.
+    ///
+    /// **Width is a guarantee; height is not, and the difference is worth being exact about.** Both
+    /// modes get their widths from the same `RoomGrid` value, so they cannot disagree. Heights do not
+    /// work that way: `RoomGrid` measures its subviews to find a row height and an `HStack` has no
+    /// `Subviews` to measure, so this cannot reproduce that number and does not claim to — see
+    /// `tileHeight`.
+    ///
+    /// `.top` alignment, deliberately: an `HStack` centres members of unequal height, and the grid
+    /// places every tile at its cell's top-leading corner. Where two tiles do differ, they should
+    /// differ downwards in both modes rather than one row being centred and the other not.
     ///
     /// Not lazy, for the reason `RoomGrid` documents at greater length: this is a *room's* worth of
     /// tiles of one kind, which is a handful.
     private var scrollBody: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 9) {
+            HStack(alignment: .top, spacing: Self.grid.spacing) {
                 ForEach(subsection.refs) { ref in
                     // A ref whose primary has vanished draws nothing, exactly as it does in the
                     // grid — the resolver already skips those, so this is belt and braces.
@@ -203,25 +224,32 @@ struct SubsectionView: View {
                             .frame(width: Self.grid.width(for: subsection.span,
                                                           inContainerOfWidth: containerWidth),
                                    height: tileHeight)
-                            // Levels a single-row row to its tallest member, which is `RoomGrid`'s
-                            // own rule for a row height. **Only when the height is not already
-                            // fixed**: asking for infinity as well would leave the row's height to
-                            // the scroll view's proposal rather than to the tiles in it.
-                            .frame(maxHeight: tileHeight == nil ? .infinity : nil)
                     }
                 }
             }
         }
     }
 
-    /// The height a scrolled tile is given, or `nil` to let the row take its tallest member's.
+    /// The height a scrolled tile is given, or `nil` to let each tile take its own ideal height.
     ///
-    /// **`nil` is the single-row answer, and it is not laziness.** `RoomGrid` measures its row
-    /// height from the tallest tile that occupies one row, and an `HStack` of equally-framed tiles
-    /// arrives at the same number by itself. A *multi-row* subsection has nothing single-row in it
-    /// to measure — every tile in one carries the same span — so the grid falls back to its
-    /// unmeasured height there, and this asks for exactly that same fallback rather than letting an
-    /// image's aspect ratio decide how tall a camera row is.
+    /// **Multi-row is the case with a guarantee.** A subsection sizes all its tiles alike, so a
+    /// subsection whose span is more than one row has nothing single-row in it — and `RoomGrid`'s
+    /// `rowHeight` measures *only* single-row subviews, so in wrap mode it finds none and falls back
+    /// to `fallbackRowHeight`. `unmeasuredHeight(for:)` is that same fallback, arrived at by the same
+    /// arithmetic, so the two modes give a camera identical height. It also stops an image's aspect
+    /// ratio deciding how tall a camera row is, which is the defect `CameraTile` records.
+    ///
+    /// **Single-row is a practical coincidence, not a mechanism, and it is stated that way on
+    /// purpose.** `RoomGrid` takes the tallest single-row subview's ideal height and gives it to
+    /// every tile in the row; an `HStack` has nothing to measure and can only give each tile the
+    /// ideal height it asks for. What makes the two agree in practice is that a subsection's tiles
+    /// are the same renderer at the same span, so their ideal heights coincide — *not* any levelling
+    /// this view performs. A `.frame(maxHeight: .infinity)` was tried here and removed: against a
+    /// finite proposal it makes every tile greedy rather than equal, which is a different bug wearing
+    /// the right comment.
+    ///
+    /// So: **if a single-row scroll tile is a different height from its wrap twin, the cause is here
+    /// and not the container width** — the widths cannot disagree.
     private var tileHeight: CGFloat? {
         subsection.span.rows > 1 ? Self.grid.unmeasuredHeight(for: subsection.span) : nil
     }

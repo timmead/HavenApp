@@ -102,9 +102,9 @@ struct RoomGrid: Layout {
     ///
     /// **Exposed rather than kept inside `placeSubviews`** because `SubsectionView`'s scroll body
     /// lays its tiles out in an `HStack` and has to size each one itself. The spec's promise there is
-    /// that the display mode changes a subsection's *arrangement* and never its proportions — which
-    /// only holds while both modes divide the width the same way, and a second copy of this formula
-    /// is exactly how the two would drift apart.
+    /// that the display mode changes a subsection's *arrangement* and never a tile's width — which
+    /// only holds while both modes divide the container the same way, and a second copy of this
+    /// formula is exactly how the two would drift apart.
     func columnWidth(inContainerOfWidth containerWidth: CGFloat) -> CGFloat {
         max(0, (containerWidth - spacing * CGFloat(columns - 1)) / CGFloat(max(1, columns)))
     }
