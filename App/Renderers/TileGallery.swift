@@ -25,7 +25,17 @@ import HavenCore
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
-    enum Page { case first, second, third, fourth, fifth, sixth, seventh, eighth }
+    enum Page {
+        case first, second, third, fourth, fifth, sixth, seventh, eighth
+        /// The subsection container, whose pages are the only thing in the app that renders it — see
+        /// `subsectionPage(_:_:)`.
+        ///
+        /// **Named rather than continuing the ordinals**, deliberately. The ordinals above are
+        /// positional: page three is "the one after page two", and which tiles are on it is a
+        /// history of what overflowed. These six are one construct rendered along two axes, so they
+        /// are named for the axes — a set, not a sequence.
+        case narrowCompact, narrowRegular, wideCompact, wideRegular, sensors, configuring
+    }
     let page: Page
 
     /// One store, pre-loaded with a fixture per case below. The tiles read `@Environment`, so this
@@ -34,6 +44,10 @@ struct TileGallery: View {
     /// The tiles write their long-press target into this. Nothing here presents a modal, but the
     /// environment has to hold one or every tile traps on a missing value.
     @State private var navigation = Navigation()
+    /// `AuthenticatedImage` reads it for the base URL, which `CameraTile` needs to exist at all.
+    /// Session-less on purpose: no request is ever made, so the cameras page renders the same
+    /// placeholder every time rather than depending on what a server happened to return.
+    @State private var app = AppModel()
 
     private static let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
 
@@ -103,6 +117,12 @@ struct TileGallery: View {
                     climateLarge
                 case .eighth:
                     deviceContext
+                case .narrowCompact: subsectionPage(Self.narrowKinds, .compact)
+                case .narrowRegular: subsectionPage(Self.narrowKinds, .regular)
+                case .wideCompact: subsectionPage(Self.wideKinds, .compact)
+                case .wideRegular: subsectionPage(Self.wideKinds, .regular)
+                case .sensors: sensorSubsections
+                case .configuring: configuringSubsections
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
                     // Both surfaces hoist climate into a 2-column grid of its own
@@ -117,6 +137,10 @@ struct TileGallery: View {
         }
         .environment(store)
         .environment(navigation)
+        .environment(app)
+        // Set on every page, not only the one that wants it: a page that leaves this alone is a page
+        // whose appearance depends on which page was looked at before it.
+        .onAppear { navigation.isConfiguring = page == .configuring }
     }
 
     @ViewBuilder
@@ -178,6 +202,22 @@ struct TileGallery: View {
         GarageFixture(id: "cover.limit_closed", name: "Garage A", closed: "on", open: "off"),
         GarageFixture(id: "cover.partly", name: "Garage B", closed: "off", open: "off"),
         GarageFixture(id: "cover.limit_open", name: "Garage C", closed: "off", open: "on"),
+    ]
+
+    /// The "Every Kind" room's devices, in the order the room holds them.
+    ///
+    /// **Hoisted and typed**, for the reason `twoStateCases` records below: as a literal inside the
+    /// fixture builder a list this long compiles fine in a normal build and defeats the *preview*
+    /// compiler, which would make the pages this exists for the ones nobody can look at.
+    private static let subsectionEntityIds: [String] = [
+        "climate.sub_a", "climate.sub_b",
+        "light.sub_0", "light.sub_1", "light.sub_2", "light.sub_3", "light.sub_4",
+        "cover.sub_a", "cover.sub_b", "cover.sub_c",
+        "media_player.sub_a", "media_player.sub_b",
+        "camera.sub_a", "camera.sub_b",
+        "scene.sub_a", "lock.sub_a", "switch.sub_a",
+        "sensor.sub_power", "binary_sensor.sub_door",
+        "sensor.sub_energy", "binary_sensor.sub_motion",
     ]
 
     private static let twoStateCases: [String] = [
@@ -285,6 +325,112 @@ struct TileGallery: View {
                 MediaPlayerTile(entityId: "media_player.unavailable", size: .wide)
             }
         }
+    }
+
+    // MARK: - Subsections
+
+    /// Split by how wide the kind's tiles are rather than by anything about the kinds themselves:
+    /// three 1×1 kinds fit one page in both modes, and the kinds that take two or four columns do
+    /// not. A page that overflows has quietly stopped being a baseline — the same argument that gave
+    /// climate a page of its own.
+    private static let narrowKinds: [SubsectionKind] = [.lights, .shades, .other]
+    private static let wideKinds: [SubsectionKind] = [.climate, .media, .cameras]
+
+    /// The room every subsection fixture is bucketed out of — the "Every Kind" area in
+    /// `populatedStore`.
+    private var subsectionsRoom: RoomSection? {
+        store.rooms().first { $0.areaId == "subs" }
+    }
+
+    /// Which surface a density is paired with.
+    ///
+    /// **The gallery's pairing, not a rule inside the view.** `SubsectionView` takes the two
+    /// separately and on purpose — see its `surface` doc comment — but the floor is always compact
+    /// and room detail always regular, so a fixture states one and gets the other.
+    ///
+    /// It follows that the regular-density pages resolve on `.roomDetail`, where media and cameras
+    /// default to the full four columns. A media player twice the size of the one on the compact
+    /// page is that default, not a bug: room detail is a room you are in, and `TileSpan.default`
+    /// has always said so.
+    private static func surface(for density: SubsectionDensity) -> HavenSurface {
+        density == .compact ? .overview : .roomDetail
+    }
+
+    /// Each kind at one density, in both modes, one directly above the other.
+    ///
+    /// **Adjacent deliberately.** The spec's promise is that the display mode changes a subsection's
+    /// *arrangement* and never its proportions, and the only way to check that is to see the same
+    /// tiles laid out both ways with nothing in between them.
+    private func subsectionPage(_ kinds: [SubsectionKind], _ density: SubsectionDensity) -> some View {
+        ForEach(kinds, id: \.self) { kind in
+            subsectionCase(kind, .scroll, density)
+            subsectionCase(kind, .wrap, density)
+        }
+    }
+
+    @ViewBuilder
+    private func subsectionCase(_ kind: SubsectionKind, _ mode: SubsectionMode,
+                                _ density: SubsectionDensity, span: TileSpan? = nil) -> some View {
+        let surface = Self.surface(for: density)
+        if let room = subsectionsRoom,
+           let resolved = subsectionFixture(kind, mode: mode, surface: surface, span: span, room: room) {
+            section(subsectionLabel(kind, mode, density, span)) {
+                SubsectionView(room: room, subsection: resolved, surface: surface, density: density)
+            }
+        }
+    }
+
+    /// One fixture subsection, resolved through the real chain.
+    ///
+    /// **`RoomSubsection` has no public initializer, deliberately** — so a fixture here is a room
+    /// and a document rather than a hand-built value. That is the better fixture anyway: the
+    /// bucketing, the mode fallback and the span fallback all run on the way past, exactly as they
+    /// do in the app, so a page cannot show a state the resolver would never produce.
+    private func subsectionFixture(_ kind: SubsectionKind, mode: SubsectionMode,
+                                   surface: HavenSurface, span: TileSpan?,
+                                   room: RoomSection) -> RoomSubsection? {
+        var document = store.config.document.settingSubsectionMode(mode, kind: kind)
+        if let span { document = document.settingSubsectionSpan(span, kind: kind) }
+        return Subsections.resolve(room: room, surface: surface, document: document)
+            .first { $0.kind == kind }
+    }
+
+    private func subsectionLabel(_ kind: SubsectionKind, _ mode: SubsectionMode,
+                                 _ density: SubsectionDensity, _ span: TileSpan?) -> String {
+        let densityName = density == .compact ? "compact (floor)" : "regular (room detail)"
+        return "\(kind.displayName) — \(densityName) · \(mode.rawValue)"
+            + (span.map { " · \($0.stored)" } ?? "")
+    }
+
+    /// **The open question this task exists to put in front of a person.**
+    ///
+    /// A Sensors subsection can be configured 2×1 — a sparkline size, offered because
+    /// `SubsectionKind.sensors.availableSpans` follows the kind's *most capable* member — while a
+    /// `binary_sensor` in it has no 2×1 rendering at all and falls back to its 1×1 content inside a
+    /// 2×1 cell (see `DeviceTileView.tile`). Whether that reads as a deliberate size or as a tile
+    /// that failed to fill its box is a judgement, not something a test can settle. The 1×1 default
+    /// is directly above it so the two can be compared rather than described.
+    @ViewBuilder
+    private var sensorSubsections: some View {
+        ForEach([SubsectionDensity.compact, .regular], id: \.self) { density in
+            subsectionCase(.sensors, .scroll, density)
+            subsectionCase(.sensors, .wrap, density)
+            subsectionCase(.sensors, .scroll, density, span: TileSpan(columns: 2, rows: 1))
+            subsectionCase(.sensors, .wrap, density, span: TileSpan(columns: 2, rows: 1))
+        }
+    }
+
+    /// **Configuration mode, where every subsection wraps** whatever the household configured —
+    /// design decision 8, because rearranging happens on a grid and never inside a scroll row.
+    ///
+    /// All three of these are configured `.scroll` and not one of them renders as one; that flip is
+    /// the thing to look at. Their headings are tap targets rather than labels, which is the other
+    /// — and it is deliberately undecorated, exactly as a room's heading is in the same mode.
+    @ViewBuilder
+    private var configuringSubsections: some View {
+        subsectionCase(.lights, .scroll, .compact)
+        subsectionCase(.cameras, .scroll, .compact)
+        subsectionCase(.shades, .scroll, .regular)
     }
 
     // MARK: - Fixtures
@@ -436,6 +582,60 @@ struct TileGallery: View {
             set("binary_sensor.\(id.split(separator: ".")[1])_open", open,
                 ["friendly_name": .string("Fully Open"), "device_class": .string("door")])
         }
+        // **A room with one of every subsection kind in it**, for the subsection pages. Its own area
+        // rather than a reuse of `lounge`: `Subsections.resolve` consumes `room.refs(for:)`, so what
+        // a subsection contains is decided by the area's membership *and its curation tiers* — and
+        // `lounge`'s sensors are deliberately `.secondary` so the add-a-device picker has something
+        // to offer. Bucketed through that room, the Sensors subsection would resolve to nothing at
+        // all and look exactly like a container that does not work.
+        //
+        // Its own entity ids, too, so a device is in exactly one area: `SectionBuilder` builds a
+        // room per area from the ids that area lists, and an id in two areas is a tile in two rooms.
+        set("climate.sub_a", "heat", ["friendly_name": .string("Lounge"), "temperature": .double(21),
+                                      "current_temperature": .double(20.4),
+                                      "fan_mode": .string("auto"), "hvac_action": .string("heating"),
+                                      "hvac_modes": .array([.string("off"), .string("heat")])])
+        set("climate.sub_b", "off", ["friendly_name": .string("Study"), "temperature": .double(18),
+                                     "hvac_modes": .array([.string("off"), .string("heat")])])
+        // Five, so wrap mode actually wraps at four columns and scroll mode actually scrolls.
+        for (index, name) in ["Ceiling", "Reading", "Corner", "Shelf", "Desk"].enumerated() {
+            set("light.sub_\(index)", index.isMultiple(of: 2) ? "on" : "off",
+                ["friendly_name": .string(name)])
+        }
+        // Three covers, two of them open: the roll-up beside the heading has something to say and
+        // its button has something to act on.
+        set("cover.sub_a", "open", ["friendly_name": .string("Bay"), "current_position": .int(70)])
+        set("cover.sub_b", "closed", ["friendly_name": .string("Side"), "current_position": .int(0)])
+        set("cover.sub_c", "open", ["friendly_name": .string("Skylight"), "current_position": .int(40)])
+        set("media_player.sub_a", "playing", ["friendly_name": .string("Speaker"),
+                                              "media_title": .string("A Song"),
+                                              "media_artist": .string("An Artist"),
+                                              "volume_level": .double(0.4),
+                                              "supported_features": .int(4)])
+        set("media_player.sub_b", "idle", ["friendly_name": .string("TV")])
+        // The cameras page is deterministic despite the header comment above: these fixtures have no
+        // registry entry and the gallery's `AppModel` has no session, so `AuthenticatedImage` fails
+        // its load immediately and every render is the same placeholder. What is being looked at
+        // here is the *container* — a 2×2 in a scroll row against a 2×2 in the grid — not a picture.
+        set("camera.sub_a", "recording", ["friendly_name": .string("Front Door")])
+        set("camera.sub_b", "idle", ["friendly_name": .string("Driveway")])
+        set("scene.sub_a", "scening", ["friendly_name": .string("Movie Night")])
+        set("lock.sub_a", "locked", ["friendly_name": .string("Patio")])
+        set("switch.sub_a", "on", ["friendly_name": .string("Lamp Socket")])
+        // **Power and energy, not temperature or humidity.** A temperature sensor is uplifted into
+        // the room's environment chips and never reaches a subsection at all (see
+        // `SectionBuilder.rooms`), so it cannot show what a Sensors subsection does with its members.
+        set("sensor.sub_power", "63", ["friendly_name": .string("Power"),
+                                       "device_class": .string("power"),
+                                       "unit_of_measurement": .string("W")])
+        set("sensor.sub_energy", "4.2", ["friendly_name": .string("Energy"),
+                                         "device_class": .string("energy"),
+                                         "unit_of_measurement": .string("kWh")])
+        set("binary_sensor.sub_door", "on", ["friendly_name": .string("Door"),
+                                             "device_class": .string("door")])
+        set("binary_sensor.sub_motion", "off", ["friendly_name": .string("Motion"),
+                                                "device_class": .string("motion")])
+
         store.home = ResolvedHome(floors: [ResolvedFloor(id: "f", name: "Ground", level: 0, areas: [
             // Tiers spelled out rather than left to `tier(of:)`'s `.primary` fallback: a sensor is
             // `.secondary` in a real home (see `EntityCuration`), and with everything `.primary` the
@@ -463,6 +663,17 @@ struct TileGallery: View {
                                  "binary_sensor.garage_fully_closed": .companion,
                                  "binary_sensor.garage_fully_open": .companion,
                                  "sensor.garage_signal": .companion]),
+            // Every tier spelled out as `.primary`, including the sensors: `refs(for: .overview)`
+            // filters by tier, and a `.secondary` sensor is off the dashboard by curation — which
+            // is right for a real home and would leave the Sensors subsection empty here.
+            //
+            // Interleaved rather than grouped by domain: the bucketing preserves the room's order
+            // within a kind, so a sensor and a binary sensor sitting next to each other in the
+            // Sensors subsection is a fact about this list.
+            ResolvedArea(id: "subs", name: "Every Kind",
+                         entityIds: Self.subsectionEntityIds,
+                         tiers: Dictionary(uniqueKeysWithValues:
+                            Self.subsectionEntityIds.map { ($0, CurationTier.primary) })),
         ])],
         // Two devices: the front door's lock with its contact and battery, and the garage cover
         // with its two limit sensors and a signal reading. `light.on` deliberately has no device at
@@ -544,6 +755,11 @@ struct TileGallery: View {
         }
         seed("sensor.value", [20.8, 20.9, 21.2, 21.6, 21.4, 21.1, 20.9, 21.0, 21.3, 21.5, 21.4, 21.4])
         seed("sensor.spiky", [4, 6, 5, 210, 180, 12, 8, 7, 240, 190, 15, 63])
+        // Both subsection sensors have history: a Sensors subsection set to 2×1 is the open question
+        // those pages exist to answer, and an unseeded sensor renders the no-line case instead —
+        // which would be a different question answered by accident.
+        seed("sensor.sub_power", [4, 6, 5, 210, 180, 12, 8, 7, 240, 190, 15, 63])
+        seed("sensor.sub_energy", [0.2, 0.6, 1.1, 1.4, 1.9, 2.3, 2.8, 3.1, 3.4, 3.8, 4.0, 4.2])
         // `sensor.nohistory` and `sensor.text` are deliberately left unseeded.
         return store
     }
@@ -584,5 +800,39 @@ struct TileGallery: View {
 
 #Preview("Tiles 8 — what else a device knows") {
     TileGallery(page: .eighth)
+}
+
+/// **The subsection container, which nothing else in the app renders yet** — Task 5 wires it into
+/// the two surfaces. Six pages rather than one: seven kinds in two modes at two densities is
+/// twenty-eight renderings, and this file's standing rule is that a page which overflows has stopped
+/// being a baseline.
+///
+/// Each page puts a kind's two modes one above the other, because the claim being checked is that
+/// the mode changes only where the tiles are and never how big they are.
+#Preview("Subsections 1 — 1×1 kinds, floor") {
+    TileGallery(page: .narrowCompact)
+}
+
+#Preview("Subsections 2 — 1×1 kinds, room detail") {
+    TileGallery(page: .narrowRegular)
+}
+
+#Preview("Subsections 3 — wide kinds, floor") {
+    TileGallery(page: .wideCompact)
+}
+
+/// The tall one, unavoidably: room detail gives media and cameras the full four columns, so two of
+/// either is two grid rows and there is no shorter honest rendering of it.
+#Preview("Subsections 4 — wide kinds, room detail") {
+    TileGallery(page: .wideRegular)
+}
+
+/// The 2×1 sensors question — see `sensorSubsections`.
+#Preview("Subsections 5 — sensors, 1×1 against 2×1") {
+    TileGallery(page: .sensors)
+}
+
+#Preview("Subsections 6 — configuring") {
+    TileGallery(page: .configuring)
 }
 #endif

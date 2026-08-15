@@ -168,6 +168,12 @@ struct DashboardView: View {
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
             case .addTile(let areaId, let surface):
                 AddTileView(areaId: areaId, surface: surface).fittedSheet()
+            // **Unreachable in this commit, not merely unbuilt.** Only a `SubsectionView` heading
+            // presents this, and nothing in the app constructs one until Task 5 wires the surfaces
+            // — so no empty sheet can appear. The arm exists because `Presentation` gained the case
+            // here, with the view that references it, and this `switch` is exhaustive. Task 6
+            // replaces it with `SubsectionConfigView(kind:).fittedSheet()`.
+            case .subsectionConfig: EmptyView()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as

@@ -26,7 +26,7 @@ struct RoomGrid: Layout {
     /// A grid with nothing single-row in it is not hypothetical: room detail groups by domain, so
     /// its Cameras group is *all* 2-row tiles and has nothing to measure. Falling back to the floor
     /// there would have quietly rebuilt the same bug on the other surface.
-    private static let fallbackRowHeight: CGFloat = 82
+    static let fallbackRowHeight: CGFloat = 82
 
     struct Cache {
         var placements: [GridPlacement]
@@ -82,12 +82,9 @@ struct RoomGrid: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
                        cache: inout Cache) {
         guard columns > 0 else { return }
-        let totalSpacing = spacing * CGFloat(columns - 1)
-        let columnWidth = max(0, (bounds.width - totalSpacing) / CGFloat(columns))
-
+        let columnWidth = self.columnWidth(inContainerOfWidth: bounds.width)
         for (subview, placement) in zip(subviews, cache.placements) {
-            let width = columnWidth * CGFloat(placement.span.columns)
-                + spacing * CGFloat(placement.span.columns - 1)
+            let width = self.width(for: placement.span, inContainerOfWidth: bounds.width)
             let height = cache.rowHeight * CGFloat(placement.span.rows)
                 + spacing * CGFloat(placement.span.rows - 1)
             let x = bounds.minX + CGFloat(placement.column) * (columnWidth + spacing)
@@ -97,6 +94,41 @@ struct RoomGrid: Layout {
                           // the grid's rows out of step with the cells it just computed.
                           proposal: ProposedViewSize(width: width, height: height))
         }
+    }
+
+    // MARK: - The cell arithmetic, for callers that place tiles themselves
+
+    /// What one column is worth in a container `containerWidth` across.
+    ///
+    /// **Exposed rather than kept inside `placeSubviews`** because `SubsectionView`'s scroll body
+    /// lays its tiles out in an `HStack` and has to size each one itself. The spec's promise there is
+    /// that the display mode changes a subsection's *arrangement* and never its proportions — which
+    /// only holds while both modes divide the width the same way, and a second copy of this formula
+    /// is exactly how the two would drift apart.
+    func columnWidth(inContainerOfWidth containerWidth: CGFloat) -> CGFloat {
+        max(0, (containerWidth - spacing * CGFloat(columns - 1)) / CGFloat(max(1, columns)))
+    }
+
+    /// The width a tile spanning `span` occupies, the spacing between its own columns included.
+    ///
+    /// Clamped to the grid's width first, exactly as `GridPacking.place` clamps what it places — so a
+    /// caller sizing its own tiles gets the width this grid *would have given* an over-wide span
+    /// rather than one that overflows the container.
+    func width(for span: TileSpan, inContainerOfWidth containerWidth: CGFloat) -> CGFloat {
+        let span = span.clamped(toWidth: columns)
+        return columnWidth(inContainerOfWidth: containerWidth) * CGFloat(span.columns)
+            + spacing * CGFloat(span.columns - 1)
+    }
+
+    /// The height a tile spanning `span` occupies when there is **nothing single-row to measure**.
+    ///
+    /// That is exactly the case a multi-row subsection is in: every tile in one carries the same
+    /// span, so a 2×2 cameras subsection has no single-row tile to take a row height from and this
+    /// grid falls back to `fallbackRowHeight` for it (see `rowHeight(subviews:placements:)`). The
+    /// scroll body has no `Subviews` to measure at all, so it asks for the same answer here rather
+    /// than letting a `Chart` or an aspect-ratioed image decide how tall a camera row is.
+    func unmeasuredHeight(for span: TileSpan) -> CGFloat {
+        Self.fallbackRowHeight * CGFloat(span.rows) + spacing * CGFloat(span.rows - 1)
     }
 }
 

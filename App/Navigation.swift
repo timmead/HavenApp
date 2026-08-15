@@ -36,6 +36,13 @@ final class Navigation {
         case roomConfig(areaId: String)
         /// The picker behind a surface's `+` — what this room has that the surface isn't showing.
         case addTile(areaId: String, surface: HavenSurface)
+        /// A subsection's size and display mode, from its heading in configuration mode.
+        ///
+        /// **Carries the kind and nothing else** — no room, no surface. A subsection's size and mode
+        /// are household-wide settings on the kind (see the schema's `subsections.<kind>`), so a
+        /// sheet opened from the Lights of one room is editing the same two values as one opened
+        /// from another. Naming a room here would say otherwise.
+        case subsectionConfig(kind: SubsectionKind)
     }
 
     var presented: Presentation?
@@ -65,6 +72,7 @@ extension Navigation.Presentation: Identifiable {
         case .tileConfig(let entityId, let surface): return "tileConfig:\(surface.rawValue):\(entityId)"
         case .roomConfig(let areaId): return "roomConfig:\(areaId)"
         case .addTile(let areaId, let surface): return "addTile:\(surface.rawValue):\(areaId)"
+        case .subsectionConfig(let kind): return "subsectionConfig:\(kind.rawValue)"
         }
     }
 }

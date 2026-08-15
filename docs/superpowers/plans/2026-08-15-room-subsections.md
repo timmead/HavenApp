@@ -249,11 +249,20 @@ enum SubsectionDensity { case regular, compact }
 struct SubsectionView: View {
     let room: RoomSection            // for rollup dispatch + add flow context
     let subsection: RoomSubsection
+    /// **Added in Task 4, not in this plan as written.** `DeviceTileView(entityId:surface:span:)`
+    /// requires a surface and `ConfigurableTile` uses it for "remove from *this* surface", so it
+    /// cannot be derived from `density` without letting a styling axis decide a membership fact.
+    let surface: HavenSurface
     let density: SubsectionDensity
     /// Configure mode forces wrap (spec decision 8); the view reads Navigation.isConfiguring
     /// itself and derives the effective mode.
 }
 ```
+
+`RoomGrid` gained `columnWidth(inContainerOfWidth:)`, `width(for:inContainerOfWidth:)` and
+`unmeasuredHeight(for:)` in Task 4: the cell arithmetic was inside `placeSubviews` where the scroll
+body could not reach it. `SubsectionView` holds one `RoomGrid` value and uses it both as the wrap
+mode's layout and as the scroll mode's source of widths and multi-row heights.
 
 Body per the spec: header (displayName styled by density; matching rollup via
 `store.rollups(room)` filtered to the kind — lights→`.lights`, shades→`.covers`; configure-mode
@@ -290,10 +299,12 @@ carrying `.tileSpan(subsection.span)`).
   is today (the doc comment explains why; it moves with the property). Configure mode forces the
   wrap body (decision 8), so drag only ever composes with `RoomGrid`.
 - [ ] **Step 2: Rewire `RoomSectionView`:** heading (name + env chips, unchanged) →
-  `ForEach(store.subsections(room, on: .overview)) { SubsectionView(room:subsection:density: .compact) }`
+  `ForEach(store.subsections(room, on: .overview)) { SubsectionView(room: room, subsection: $0, surface: .overview, density: .compact) }`
   → add-tile affordance in configure mode. Delete the room-level rollup row and the four-grid
-  remnant comments *by moving them* onto `SubsectionView` where they now apply.
-- [ ] **Step 3: Rewire `RoomDetailView`** the same way with `.roomDetail`/`.regular`; delete its
+  remnant comments *by moving them* onto `SubsectionView` where they now apply. Note that this
+  `ForEach` leans on `RoomSubsection.id == kind.rawValue`, which no test pins — decide here whether
+  to pin it, because a changed `id` would cost every subsection its view identity on each resolve.
+- [ ] **Step 3: Rewire `RoomDetailView`** the same way with `surface: .roomDetail`/`.regular`; delete its
   `group(_:_:rollup:)` and Task 1's interim `bucket(_:)`. Both duplicated rollup implementations
   are now gone; `SubsectionView` holds the only one.
 - [ ] **Step 4: Order write-back sanity.** Reordering within a subsection writes the same per-room
