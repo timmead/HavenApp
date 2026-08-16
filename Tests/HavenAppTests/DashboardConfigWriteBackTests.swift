@@ -407,6 +407,33 @@ extension DashboardConfigWriteBackTests {
         #expect(lights?["size"] == nil)
     }
 
+    /// **Passing no edits writes nothing** — the contract the deleted
+    /// `aSheetThatChangedNothingButTheNameLeavesTheSizeAlone` held for `applyTileConfig`'s `size`,
+    /// carried to `applySubsectionConfig`'s two settings.
+    ///
+    /// This is the store-level half of that contract, not the sheet's: `SubsectionConfigView`'s own
+    /// dirty-check (`spanEdit`/`modeEdit`, deciding *whether* to pass `nil`) is private and reached
+    /// by nothing here, the same as `TileConfigView.sizeEdit` always was. What this pins is that the
+    /// store honours `nil` as "leave it alone" once the sheet has decided — `HavenConfig.update`'s
+    /// own unchanged-guard would already refuse a document that came back equal, but this asserts it
+    /// at the boundary this file otherwise tests every other mutator at, rather than trusting that
+    /// guard by inference.
+    @Test func passingNoEditsToTheSubsectionSheetsCommitWritesNothing() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        #expect(await store.applySubsectionConfig(.cameras, span: nil, mode: nil) == .unchanged)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").count
+        #expect(writes == before)
+    }
+
     /// **The overflow menu's global default lands under `display.mode`**, a sibling of
     /// `subsections` rather than a pseudo-kind inside it (schema section of the design doc) — the
     /// assertion that would catch a mutator wired to the wrong key.

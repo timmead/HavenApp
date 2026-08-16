@@ -25,6 +25,9 @@ struct SubsectionConfigView: View {
     /// span the household actually picks is written exactly as picked, for every surface, whichever
     /// heading opened the sheet.
     @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
+    /// What `span` was seeded to — see `spanEdit`, which dirty-checks against this rather than
+    /// against what is stored.
+    @State private var seededSpan: TileSpan = TileSpan(columns: 1, rows: 1)
     /// The chosen mode override, or `nil` to keep following the household default. A draft, like
     /// `span`.
     @State private var mode: SubsectionMode?
@@ -64,6 +67,7 @@ struct SubsectionConfigView: View {
         }
         .onAppear {
             span = store.config.document.subsectionSpan(kind) ?? kind.defaultSpan(on: .overview)
+            seededSpan = span
             mode = store.config.document.subsectionMode(kind)
         }
         // Swiping the sheet away commits too, for the reason `TileConfigView.onDisappear` gives at
@@ -106,15 +110,25 @@ struct SubsectionConfigView: View {
         return "Household default (\(resolved == .scroll ? "Scroll" : "Wrap"))"
     }
 
-    /// Whether the span differs from what is stored. Unlike `TileConfigView.sizeEdit`, a value that
-    /// happens to match today's default is still written explicitly — there is no default *chip* to
-    /// choose here, only the sizes `kind.availableSpans` actually offers, and this sheet has no
+    /// Whether the span differs from what the sheet opened with.
+    ///
+    /// **Against `seededSpan`, not against `store.config.document.subsectionSpan(kind)`.** An
+    /// unconfigured kind has no stored span at all — `subsectionSpan(kind)` is `nil` — while `span`
+    /// is seeded to the resolved default so the picker has something selected. Comparing to the
+    /// stored value directly made every untouched sheet on an unconfigured kind look edited (`.some
+    /// (2x2) != nil`) and write the seeded default to the shared document on a swipe, for a kind
+    /// nobody had a card open for at all when `availableSpans.count == 1` — this omitted the
+    /// `TileConfigView.sizeEdit` guard that stops that. Comparing to what was actually seeded makes
+    /// "opened and closed" a no-op regardless of whether anything was stored beforehand, which is
+    /// what deferred-save means everywhere else in this app.
+    ///
+    /// Unlike `TileConfigView.sizeEdit`, a value that is *changed to* something matching today's
+    /// default is still written explicitly rather than collapsed to `nil` — there is no default
+    /// *chip* to choose here, only the sizes `kind.availableSpans` offers, and this sheet has no
     /// single surface to test "is this the default" against (`SubsectionKind.defaultSpan(on:)`
-    /// disagrees between the two for cameras and media). Collapsing to `nil` would need one anyway,
-    /// so it is not attempted — see the report for what that costs.
+    /// disagrees between the two for cameras and media). See the report for what that costs.
     private var spanEdit: TileSpan?? {
-        let stored = store.config.document.subsectionSpan(kind)
-        guard span != stored else { return nil }
+        guard kind.availableSpans.count > 1, span != seededSpan else { return nil }
         return .some(span)
     }
 
