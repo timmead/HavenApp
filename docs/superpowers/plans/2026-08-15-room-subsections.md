@@ -428,6 +428,12 @@ final review; none blocks anything, all are real.
    real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.
 8. **Known soft assertion**: `theLiveSessionIsNeverMistakenForAStaleOne`'s live-accepts half stayed
    green under the mutations tried; the stale-refusal half is mutation-proven.
+9. **Bulk-failure tallies are not surface-keyed** *(found by Group A's review, 2026-08-16)*:
+   `BulkActionRunner.Key` is `(areaId, kind)`, so a failed room-detail "All Off" can badge the
+   floor's heading with a count larger than that heading's own target set, and a successful run on
+   one surface synchronously zeroes the other surface's standing failure warning. Fixing it means
+   threading `surface` through `allOff`/`closeAll`/`bulkFlip` and into the runner's key — the API
+   the per-surface rollup change deliberately froze. Real, visible, bounded; wants its own pass.
 
 ## Execution notes
 
