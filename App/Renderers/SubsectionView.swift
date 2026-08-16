@@ -164,18 +164,15 @@ struct SubsectionView: View {
         }
     }
 
-    /// The room's roll-up for this kind. Recomputed from the room rather than passed in: it counts
-    /// live states, and a count that went stale would be a button claiming to act on lights that are
-    /// already off.
+    /// The room's roll-up for this kind, scoped to `surface`. Recomputed from the room rather than
+    /// passed in: it counts live states, and a count that went stale would be a button claiming to
+    /// act on lights that are already off.
     ///
-    /// **`HomeStore.rollups(_:)` counts `refs(for: .overview)` whatever surface asks**, so a room
-    /// detail heading says how many of the *dashboard's* lights are on. Pre-existing and left
-    /// standing here deliberately: both surfaces called that one method before subsections too, so
-    /// changing it now would be this task quietly altering behaviour rather than moving it. Written
-    /// down so it stops being invisible.
+    /// The household rule a roll-up follows — count and act on only what this surface shows — lives
+    /// on `HomeStore.rollups(_:on:)`, not here; this just passes its own surface through.
     private var rollup: Rollup? {
         guard let rollupKind else { return nil }
-        return store.rollups(room).first { $0.kind == rollupKind }
+        return store.rollups(room, on: surface).first { $0.kind == rollupKind }
     }
 
     /// A single room-level bulk action, e.g. "3/5 · All Off" or "2/2 · Close All".

@@ -400,10 +400,13 @@ the plan's own "the code in the repo wins" rule:
 The branch merged with these named and deliberately deferred. Each was triaged FOLLOW-UP-OK by the
 final review; none blocks anything, all are real.
 
-1. **`HomeStore.rollups(_:)` hardcodes `refs(for: .overview)`** — a room-detail Lights heading
-   counts the *dashboard's* lights, and "All Off" acts on that set. Named in a comment at
-   `SubsectionView.rollup`. Pre-existing; became visible when rollups moved into subsection headers
-   on both surfaces.
+1. ~~**`HomeStore.rollups(_:)` hardcodes `refs(for: .overview)`** — a room-detail Lights heading
+   counts the *dashboard's* lights, and "All Off" acts on that set.~~ **Fixed in Group A**
+   (2026-08-16, `docs/superpowers/plans/2026-08-15-room-subsections.md` follow-ups, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupA-report.md`): `rollups(_:on:)` now takes
+   the surface and derives both the count and the bulk action's target ids from that surface's own
+   `refs(for:)`. The comment naming the hardcode at `SubsectionView.rollup` is gone — its job was
+   done — replaced by a pointer to `HomeStore.rollups(_:on:)`, which now carries the household rule.
 2. **`RearrangeableTile` receives `ref.primaryEntityId` while `roomOrder` holds `ref.id`** — they
    coincide by the tested re-keying rule in `DashboardDocument.devices`, not by the same
    expression. One-expression fix; a divergence would write a wrong order to the household

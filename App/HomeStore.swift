@@ -505,27 +505,36 @@ final class HomeStore {
                              })
     }
 
-    /// Flattens a room's overview refs down to the plain entity ids `RoomRollups` needs.
+    /// Flattens `surface`'s refs down to the plain entity ids `RoomRollups` needs.
     ///
-    /// `refs(for: .overview)` rather than raw, so "3/5 lights on · All Off" counts and acts on
-    /// exactly the tiles the user can see — a bulk action that silently reaches entities curation
-    /// hid would be worse than no bulk action.
+    /// `refs(for: surface)` rather than a fixed one, so "3/5 lights on · All Off" counts and acts
+    /// on exactly the tiles *that surface* shows — see `rollups(_:on:)` for why.
     ///
-    /// That now covers the household's own removals as well as curation's, and it follows from the
-    /// same sentence rather than being a new rule: a tile a user took off the dashboard is one they
-    /// cannot see, so it drops out of the count and out of the action.
+    /// That covers the household's own removals as well as curation's, and it follows from the
+    /// same sentence rather than being a new rule: a tile a user took off a surface is one they
+    /// cannot see there, so it drops out of that surface's count and out of that surface's action —
+    /// while still counting and acting on the other surface, if it shows there.
     /// Only `.entity` refs carry a single id today; `.composite` refs aren't constructed
     /// anywhere yet, so they're skipped here. Once composites exist, this will need to
     /// expand each one into its constituent input entities instead of dropping it.
-    private func deviceEntityIds(_ room: RoomSection) -> [String] {
-        room.refs(for: .overview).compactMap { ref in
+    private func deviceEntityIds(_ room: RoomSection, on surface: HavenSurface) -> [String] {
+        room.refs(for: surface).compactMap { ref in
             if case .entity(let id) = ref { return id }
             return nil
         }
     }
 
-    func rollups(_ room: RoomSection) -> [Rollup] {
-        RoomRollups.compute(entityIds: deviceEntityIds(room), states: states)
+    /// A room's roll-ups — "3/5 lights on", "2/2 shades open" — as `surface` sees them.
+    ///
+    /// **Household rule, and the reason this takes a surface at all: an "all off" or "close all"
+    /// must reach only what the household can see when they tap it, or the button confuses more
+    /// than it helps.** So both halves of a `Rollup` — the count and `targetEntityIds`, which
+    /// `allOff`/`closeAll`/`bulkFlip` act on unchanged — are derived from the same
+    /// `deviceEntityIds(_:on:)` call, scoped to `surface`. A room detail heading counts and acts on
+    /// room detail's set; a dashboard heading counts and acts on the dashboard's — never each
+    /// other's, and count and action can never disagree because they are the same list.
+    func rollups(_ room: RoomSection, on surface: HavenSurface) -> [Rollup] {
+        RoomRollups.compute(entityIds: deviceEntityIds(room, on: surface), states: states)
     }
 
     /// Turns off every light in the roll-up.
