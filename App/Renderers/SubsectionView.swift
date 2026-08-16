@@ -313,7 +313,68 @@ struct SubsectionView: View {
                                                     drag: drag))
                 }
             }
+            if navigation.isConfiguring { endDropCell }
         }
+    }
+
+    /// **Where "put it last" lives.** One cell past the final tile, in configuration mode only,
+    /// drawn as nothing and there entirely to be dropped on.
+    ///
+    /// A caret on a tile's leading edge means "insert before this one", so the last position in a
+    /// subsection has no tile to express it: dropping on the last tile puts you *before* it. The
+    /// room's `+` used to be this — it was the end of one room-wide sequence, so a tile dropped on it
+    /// had nowhere else to mean — and when the `+` moved outside the subsections to become one per
+    /// room again, the end position went with it. It was judged reachable by dragging everything
+    /// else forward instead, which is true and was rejected on sight by the first person to try it.
+    ///
+    /// **Its caret is on the leading edge, like every tile's**, rather than the `+`'s old trailing
+    /// one. It marks the same seam — after the last tile — and the old trailing edge was a special
+    /// case only because the `+` was itself the last thing in the row.
+    ///
+    /// On drop it appends to the end of the *room's* list, which is the end of *this subsection* once
+    /// the resolver buckets it — bucketing walks the room's order and keeps its sequence, so last in
+    /// the room is last among its own kind, and no other subsection's sequence moves. Same reasoning
+    /// as `roomOrder`, from the other end.
+    ///
+    /// Always present while configuring rather than only while a drag is live, deliberately: gating
+    /// *layout* on `drag.dragging` would make a cell appear and the grid reflow from a value SwiftUI
+    /// sets at moments of its own choosing (see `TileDragState.isOver`). One empty 1×1 at the end of
+    /// each subsection is the cost, and it is paid in configuration mode, where placeholders and
+    /// dashed outlines are already what the screen is made of.
+    /// **One column, but as many rows as the subsection's tiles**, which is about the caret's height
+    /// and about not disturbing the grid's.
+    ///
+    /// The caret is as tall as the cell holding it, so a 1×1 cell beside 2-row cameras would draw a
+    /// half-height mark next to full-height tiles. Matching the rows fixes that — and `RoomGrid`
+    /// places every cell at an *exact* proposal derived from its span, so this gets the tiles' height
+    /// rather than whatever an empty view would ask for.
+    ///
+    /// The alternative — leaving it 1×1 and forcing a `minHeight` — would have been a real defect:
+    /// `RoomGrid.rowHeight` measures *single-row* subviews and takes their maximum, so a 1-row cell
+    /// claiming a 2-row ideal height would silently make every row in the subsection that tall. This
+    /// spelling sidesteps it, because a multi-row cell is excluded from that measurement exactly as
+    /// the tiles beside it are.
+    ///
+    /// In a single-row subsection this *is* measured, and harmlessly: an empty view's ideal height is
+    /// a few points and `rowHeight` floors at `fallbackRowHeight`, so it cannot drag a row shorter.
+    /// A future replacement here that reports a *large* ideal height would not be so harmless.
+    private var endDropCell: some View {
+        Color.clear
+            .tileSpan(TileSpan(columns: 1, rows: subsection.span.rows))
+            .contentShape(Rectangle())
+            .overlay(alignment: .leading) {
+                if drag.dragging != nil && drag.targetIsEnd {
+                    Capsule()
+                        .fill(HavenColor.domain(.cover))
+                        .frame(width: 3)
+                        .padding(.vertical, 2)
+                        .offset(x: -6)
+                }
+            }
+            .animation(.easeOut(duration: 0.12), value: drag.targetIsEnd)
+            .onDrop(of: [.text], delegate: TileDropDelegate(
+                target: nil, isEnd: true, room: room, visibleIds: roomOrder,
+                surface: surface, drag: drag, store: store))
     }
 
     /// The ids a drag reorders: **the whole room's, on this surface, not this subsection's.**

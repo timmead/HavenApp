@@ -42,31 +42,61 @@ final class TileDragState {
         isOver = true
     }
 
-    /// Ends the drag — but **after long enough for a finger to cross a gap**, not immediately.
+    /// Stops *drawing* the drag — but **after long enough for a finger to cross a gap**, not
+    /// immediately.
     ///
     /// The gaps between tiles are 9pt, and crossing one means leaving a target before entering the
-    /// next, so a synchronous clear would blink the slot and the caret out on every crossing. The
+    /// next, so a synchronous stop would blink the slot and the caret out on every crossing. The
     /// delay is sized to the hand rather than to the scheduler: a turn of the main actor is
     /// microseconds and a finger crossing 9pt is tens of milliseconds, so hopping once would lose
     /// this race in every case except a same-turn handoff.
-    ///
-    /// It costs nothing that shows. A completed drop clears synchronously in `performDrop`, so only
-    /// a cancelled drag — or one released over nothing — waits this out.
     func endAfterHandoff() {
         let scheduled = generation
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(200))
             guard scheduled == self.generation else { return }
-            self.clear()
+            self.endDrawing()
         }
     }
 
-    func clear() {
-        dragging = nil
+    /// Forgets where the finger is, and **deliberately not what is in the air**.
+    ///
+    /// **This split is a bug fix, and the bug was that one field did both jobs.** `dragging` names
+    /// the item the *session* is carrying; `isOver`/`target` say where the finger is *now*. Leaving
+    /// a tile ends the second and says nothing about the first — the finger is still down and iOS is
+    /// still carrying the item.
+    ///
+    /// This used to call `clear()`, which nils `dragging` — and `dragging != nil` is also what
+    /// `TileDropDelegate.validateDrop` answers with. So a finger that strayed off its subsection for
+    /// 200ms (over a sibling subsection, a heading, anywhere with no drop area of its own) had the
+    /// item silently taken out of the air beneath it: every delegate in the origin subsection began
+    /// refusing the drop, iOS drew the "no" badge, and coming back could not undo it because nothing
+    /// re-sets `dragging` mid-session. `onDrag`'s closure runs at the lift, not on re-entry.
+    ///
+    /// That it *sometimes* recovered is the same fact from the other side, and is why this presented
+    /// as intermittent: SwiftUI re-invokes the `onDrag` closure at moments of its own choosing (see
+    /// `isOver`), so a stray re-set `dragging` by luck.
+    ///
+    /// Note this fix does not depend on whether SwiftUI re-runs `validateDrop` on re-entry — a
+    /// question the documentation does not settle. If it does, it now returns true; if it caches an
+    /// earlier answer, the drop that follows no longer trips `performDrop`'s nil guard. Both branches
+    /// were broken by the same nil and are fixed by not writing it.
+    ///
+    /// What clears `dragging` is a *completed* drop, in `performDrop`. A cancelled drag leaves it
+    /// set, which draws nothing — both `isLifted` and `isTarget` are gated on state this does clear —
+    /// and the next lift overwrites it before any delegate can read it.
+    func endDrawing() {
         target = nil
         targetIsEnd = false
         isOver = false
         generation &+= 1
+    }
+
+    /// Ends the drag outright: nothing in the air, nothing drawn. The end of a *session*, which is a
+    /// completed drop — see `endDrawing` for why leaving a tile is not one.
+    func clear() {
+        dragging = nil
+        endDrawing()
     }
 }
 
@@ -185,13 +215,43 @@ struct TileDropDelegate: DropDelegate {
     let drag: TileDragState
     let store: HomeStore
 
-    func validateDrop(info: DropInfo) -> Bool { drag.dragging != nil }
+    // MARK: - DropDelegate
+    //
+    // Each of these forwards to a method below that takes no `DropInfo`. Not indirection for its own
+    // sake: `DropInfo` has no public initialiser, so a test cannot call these four at all — and the
+    // sequencing they express (enter, stray, re-enter, drop) is exactly where this file's two
+    // shipped drag defects lived. Split this way it is plain code with tests on it. Nothing here
+    // reads `info`; if something ever needs to, it takes a parameter and the split still holds.
+
+    func validateDrop(info: DropInfo) -> Bool { accepts }
 
     /// **This is where the green plus goes away.** Without an explicit `.move` the system advertises
     /// a copy, and a badge promising a second copy of a device is worse than no badge at all.
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
 
-    func dropEntered(info: DropInfo) {
+    func dropEntered(info: DropInfo) { entered() }
+    func dropExited(info: DropInfo) { exited() }
+    func performDrop(info: DropInfo) -> Bool { drop() }
+
+    // MARK: - The logic, without SwiftUI
+
+    /// Whether this area will take the drop: **only while its own subsection has something in the
+    /// air**.
+    ///
+    /// A subsection the drag did not start in answers false, which is what confines a drag to one
+    /// container — see `SubsectionView.drag`. It must go on answering true for the *origin*
+    /// subsection for as long as the session lasts, however far the finger has wandered in between;
+    /// `TileDragState.endDrawing` records the defect that got that wrong.
+    var accepts: Bool { drag.dragging != nil }
+
+    /// **Gated on `accepts`, for the same reason `endDrawing` exists.** SwiftUI is not documented to
+    /// say whether `dropEntered` can reach a delegate whose `validateDrop` answered false, and it
+    /// probably does not — but "probably does not" is the kind of unsettled contract that produced
+    /// the stray-ends-the-drag defect. Ungated, a finger crossing a *sibling* subsection would set
+    /// that subsection's `target`, and its tile would draw a caret advertising a drop that cannot
+    /// happen there.
+    func entered() {
+        guard accepts else { return }
         drag.entered()
         drag.target = isEnd ? nil : target
         drag.targetIsEnd = isEnd
@@ -199,12 +259,12 @@ struct TileDropDelegate: DropDelegate {
 
     /// Only the tile the drag is *currently* over may end it — otherwise a handoff between two tiles
     /// would let the one being left cancel the one being entered.
-    func dropExited(info: DropInfo) {
+    func exited() {
         guard isEnd ? drag.targetIsEnd : drag.target == target else { return }
         drag.endAfterHandoff()
     }
 
-    func performDrop(info: DropInfo) -> Bool {
+    func drop() -> Bool {
         defer { drag.clear() }
         guard let dragged = drag.dragging else { return false }
         let moved = TileOrder.moving(dragged, before: isEnd ? nil : target, in: visibleIds)
