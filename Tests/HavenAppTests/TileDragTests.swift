@@ -14,7 +14,13 @@ import HavenCore
 ///
 /// What still needs hands: whether iOS routes a real finger through these methods in the order the
 /// tests assume. That is why the human pass is not replaced by this file.
-@Suite @MainActor struct TileDragTests {
+///
+/// **Serialized, and it has to be.** `TileDragSession` is app-wide by design — there is one drag in
+/// iOS at a time — so two of these running concurrently would be two lifts racing, and a test that
+/// awaits the handoff timer would find its own session superseded by another test's. Every case here
+/// lifts through `lift(_:in:)` for the same reason: a state assembled by hand, without a session, is
+/// a state the app cannot produce.
+@Suite(.serialized) @MainActor struct TileDragTests {
 
     /// Built through `SectionBuilder` rather than by hand: `RoomSection`'s memberwise initialiser is
     /// internal to HavenCore, and this bundle links the package rather than living in it.
@@ -37,6 +43,9 @@ import HavenCore
                          surface: .overview, drag: drag, store: store)
     }
 
+    /// A lift, exactly as `RearrangeableTile`'s `onDrag` performs one.
+    private func lift(_ entityId: String, in drag: TileDragState) { drag.begin(entityId) }
+
     /// Longer than `endAfterHandoff`'s 200ms, so the scheduled work has demonstrably run.
     private func awaitHandoffTimer() async throws {
         try await Task.sleep(for: .milliseconds(320))
@@ -54,7 +63,7 @@ import HavenCore
     /// undo it, because `onDrag`'s closure runs at the lift and not on re-entry.
     @Test func strayingLongEnoughStopsTheDrawingButKeepsTheItemInTheAir() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         drag.entered()
         drag.target = "light.c"
 
@@ -71,7 +80,7 @@ import HavenCore
     /// the finger has been away. `accepts` is `validateDrop`.
     @Test func theOriginSubsectionStillAcceptsAfterAStray() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let overC = delegate(drag, target: "light.c")
 
         overC.entered()
@@ -86,7 +95,7 @@ import HavenCore
     /// accepting.
     @Test func comingBackAfterAStrayDrawsTheCaretAgain() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let overC = delegate(drag, target: "light.c")
 
         overC.entered()
@@ -103,7 +112,7 @@ import HavenCore
     /// `endDrawing` exists to make.
     @Test func aCompletedDropTakesTheItemOutOfTheAir() {
         let drag = TileDragState()
-        drag.dragging = "light.c"
+        lift("light.c", in: drag)
         drag.entered()
         let overA = delegate(drag, target: "light.a")
 
@@ -118,7 +127,7 @@ import HavenCore
     /// superseded and does nothing.
     @Test func aHandoffBetweenTwoTilesSurvivesTheTimer() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let overB = delegate(drag, target: "light.b")
         let overC = delegate(drag, target: "light.c")
 
@@ -135,7 +144,7 @@ import HavenCore
     /// already handed off would otherwise cancel the drag under the tile that took over.
     @Test func aStaleExitFromAnAlreadyLeftTileIsIgnored() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let overB = delegate(drag, target: "light.b")
         let overC = delegate(drag, target: "light.c")
 
@@ -154,7 +163,7 @@ import HavenCore
     /// see `SubsectionView.drag`.
     @Test func aSiblingSubsectionRefusesAndDisturbsNothing() {
         let origin = TileDragState()
-        origin.dragging = "light.a"
+        lift("light.a", in: origin)
         origin.entered()
         origin.target = "light.c"
 
@@ -172,13 +181,88 @@ import HavenCore
         #expect(origin.dragging == "light.a")
     }
 
+    // MARK: - State left behind by a drag that never finished
+
+    /// **A drag abandoned over empty space must not arm the subsection it started in.**
+    ///
+    /// Nothing calls `performDrop` when the finger lifts somewhere with no drop delegate under it —
+    /// a heading, the gap between subsections, another room — so that subsection is left holding a
+    /// `dragging` from a session that is over. The next drag, from anywhere, must not be able to
+    /// pick it up: crossing the abandoned subsection would otherwise have it accept, draw a caret,
+    /// and on release move **its own stale entity** and write that to the household document. A
+    /// silent wrong-tile reorder, from a gesture aimed at a different tile entirely.
+    @Test func aStaleDragFromAnAbandonedSessionIsRefused() {
+        let abandoned = TileDragState()
+        lift("light.a", in: abandoned)      // …and the finger comes up over nothing.
+
+        let live = TileDragState()
+        lift("light.c", in: live)           // a later, unrelated drag
+
+        #expect(delegate(abandoned, target: "light.b").accepts == false)
+    }
+
+    /// And the refusal cleans up after itself. A session that has demonstrably ended is proof the
+    /// state is dead, so the first delegate to notice discards it rather than leaving it to be
+    /// re-examined on every subsequent drag.
+    @Test func refusingAStaleDragAlsoDiscardsIt() {
+        let abandoned = TileDragState()
+        lift("light.a", in: abandoned)
+        let live = TileDragState()
+        lift("light.c", in: live)
+
+        _ = delegate(abandoned, target: "light.b").accepts
+        #expect(abandoned.dragging == nil)
+    }
+
+    /// The stale subsection draws nothing either — no caret advertising a drop that would move the
+    /// wrong tile.
+    @Test func aStaleSubsectionDrawsNothingWhenCrossed() {
+        let abandoned = TileDragState()
+        lift("light.a", in: abandoned)
+        let live = TileDragState()
+        lift("light.c", in: live)
+
+        delegate(abandoned, target: "light.b").entered()
+        #expect(abandoned.target == nil)
+        #expect(abandoned.isOver == false)
+    }
+
+    /// The write path, which is where the damage would have been done: releasing over the abandoned
+    /// subsection moves nothing and writes nothing.
+    /// The stale entity and target are chosen so the move would be a *real* one — `light.c` before
+    /// `light.a` reorders the room. A pairing whose move happens to be a no-op would pass this test
+    /// against the broken code, on the `moved != visibleIds` guard, and prove nothing.
+    @Test func droppingOnAStaleSubsectionWritesNothing() {
+        let abandoned = TileDragState()
+        lift("light.c", in: abandoned)
+        let live = TileDragState()
+        lift("light.b", in: live)
+
+        #expect(TileOrder.moving("light.c", before: "light.a", in: ids) != ids)   // it would write
+        #expect(delegate(abandoned, target: "light.a").drop() == false)
+    }
+
+    /// The other side of the same line: a *live* session's own state is not mistaken for stale, however
+    /// far the finger has strayed. Without this the fix for straying would be undone.
+    @Test func theLiveSessionIsNeverMistakenForAStaleOne() async throws {
+        let drag = TileDragState()
+        lift("light.a", in: drag)
+        let overC = delegate(drag, target: "light.c")
+
+        overC.entered()
+        overC.exited()
+        try await awaitHandoffTimer()
+
+        #expect(overC.accepts)
+    }
+
     // MARK: - The end position
 
     /// Entering the trailing drop cell means "after everything", which is a nil target plus the flag
     /// the caret is drawn from.
     @Test func enteringTheEndCellMarksTheEndRatherThanATile() {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let end = delegate(drag, target: nil, isEnd: true)
 
         end.entered()
@@ -192,7 +276,7 @@ import HavenCore
     /// one", so dropping on the last tile puts you second to last.
     @Test func droppingOnTheEndCellPutsTheTileLast() {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         drag.entered()
         let end = delegate(drag, target: nil, isEnd: true)
 
@@ -204,7 +288,7 @@ import HavenCore
     /// `isEnd` half of the same stale-exit guard.
     @Test func leavingTheEndCellEndsTheDrawingItStarted() async throws {
         let drag = TileDragState()
-        drag.dragging = "light.a"
+        lift("light.a", in: drag)
         let end = delegate(drag, target: nil, isEnd: true)
 
         end.entered()
@@ -221,7 +305,7 @@ import HavenCore
     /// version, which every other phone in the household reads as somebody rearranging the room.
     @Test func droppingATileWhereItAlreadyWasWritesNothing() {
         let drag = TileDragState()
-        drag.dragging = "light.c"
+        lift("light.c", in: drag)
         drag.entered()
         // "before nothing" for the tile that is already last.
         let end = delegate(drag, target: nil, isEnd: true)

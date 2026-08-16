@@ -6,6 +6,32 @@ import HavenCore
 // `Navigation` from the environment, which is the one thing a widget or watch target cannot
 // supply. `import HavenCore` alone would not have moved it.
 
+/// Which lift is the live one.
+///
+/// **The one genuinely app-wide fact about dragging, and the only one.** iOS runs a single drag
+/// session at a time, so "is a drag in progress, and is it *this* one" is not a question a subsection
+/// can answer from its own state — every `SubsectionView` has its own `TileDragState`, and a
+/// subsection whose drag was abandoned has no way to notice that the world moved on without it.
+///
+/// It carries no drag *content* — not what is lifted, not where it would land — so the isolation
+/// that matters is untouched: a lifted tile still has no representation in any container but its
+/// own. This is a clock, not a channel.
+///
+/// Monotonic and never reset. `&+` so a wrap after 2^63 lifts is defined rather than a crash, and
+/// the comparison is equality, so wrapping costs nothing.
+@MainActor
+enum TileDragSession {
+    /// The id of the most recent lift. Zero before the first, which no state ever claims — a fresh
+    /// `TileDragState` has `session` zero *and* a nil `dragging`, and it is `dragging` that is
+    /// checked first.
+    private(set) static var current = 0
+
+    static func begin() -> Int {
+        current &+= 1
+        return current
+    }
+}
+
 /// What is being dragged, and where it would land.
 ///
 /// Shared between a room's tiles because a drag is a fact about the *room*: one tile is lifted, a
@@ -36,6 +62,25 @@ final class TileDragState {
 
     /// Bumped on every entry, so a clear scheduled by one tile can tell it has been superseded.
     private var generation = 0
+
+    /// Which lift this state belongs to — see `TileDragSession`. Stale the moment a newer lift
+    /// happens anywhere in the app, which is what tells an abandoned drag that it is over.
+    private(set) var session = 0
+
+    /// Whether this state describes the drag that is happening *now*.
+    ///
+    /// Both halves are needed and neither is enough. `dragging` alone was the old test, and it says
+    /// only that a drag once started here. The session says it has not since been superseded.
+    var isLive: Bool { dragging != nil && session == TileDragSession.current }
+
+    /// A tile has been lifted: this is the start of a drag session.
+    ///
+    /// Called from `RearrangeableTile`'s `onDrag`, and by tests, so that what a test calls a lift and
+    /// what the app calls a lift cannot drift apart.
+    func begin(_ entityId: String) {
+        dragging = entityId
+        session = TileDragSession.begin()
+    }
 
     func entered() {
         generation &+= 1
@@ -82,9 +127,24 @@ final class TileDragState {
     /// earlier answer, the drop that follows no longer trips `performDrop`'s nil guard. Both branches
     /// were broken by the same nil and are fixed by not writing it.
     ///
-    /// What clears `dragging` is a *completed* drop, in `performDrop`. A cancelled drag leaves it
-    /// set, which draws nothing — both `isLifted` and `isTarget` are gated on state this does clear —
-    /// and the next lift overwrites it before any delegate can read it.
+    /// What clears `dragging` is a *completed* drop, in `performDrop`.
+    ///
+    /// **There is a second bug on the other side of this line, and it is worth both being written
+    /// down.** The unconditional `clear()` was wrong for a live stray, above — but it did, by
+    /// accident, mop up after a drag that was *abandoned*: released over a heading, over the gap
+    /// between subsections, anywhere without a drop area, so that `performDrop` never runs and this
+    /// state is simply left behind. Removing the clear fixed the first case and exposed the second,
+    /// which is worse: leftover state that a later, unrelated drag can pick up and act on. Fixing
+    /// one and minting the other is what happens when a single field means two things and a timer is
+    /// asked to arbitrate.
+    ///
+    /// So the abandoned case is handled where it can be handled *deterministically* rather than
+    /// after a delay — `TileDropDelegate.discardIfSuperseded`, which reads a newer lift as proof this
+    /// one is over. Nothing here needs to guess how long a drag lasts, which is the mistake both
+    /// previous defects were made of.
+    ///
+    /// A leftover `dragging` draws nothing in the meantime: `isLifted` and `isTarget` are both gated
+    /// on state this method clears.
     func endDrawing() {
         target = nil
         targetIsEnd = false
@@ -186,7 +246,7 @@ struct RearrangeableTile: ViewModifier {
                 // a white background", and that was its *bounds*, not its backing.
                 .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .onDrag {
-                    drag.dragging = entityId
+                    drag.begin(entityId)
                     return NSItemProvider(object: entityId as NSString)
                 }
                 .onDrop(of: [.text], delegate: TileDropDelegate(
@@ -242,7 +302,46 @@ struct TileDropDelegate: DropDelegate {
     /// container — see `SubsectionView.drag`. It must go on answering true for the *origin*
     /// subsection for as long as the session lasts, however far the finger has wandered in between;
     /// `TileDragState.endDrawing` records the defect that got that wrong.
-    var accepts: Bool { drag.dragging != nil }
+    /// **Discards first, then answers a single question.** The two used to be separate checks — a
+    /// session comparison here *and* a discard beside it — and a mutation test showed the comparison
+    /// was dead weight: the discard nils `dragging`, so the answer was already no. Redundant guards
+    /// that cannot fail independently are guards nobody can verify, so there is one.
+    var accepts: Bool {
+        discardIfSuperseded()
+        return drag.dragging != nil
+    }
+
+    /// Throws away state belonging to a drag that has demonstrably ended, and is the app's only
+    /// self-heal for one.
+    ///
+    /// **A drag that is abandoned never tells anyone.** `performDrop` is what clears `dragging`, and
+    /// it only runs when the finger comes up over a drop area — lift over a heading, the gap between
+    /// two subsections, or another room, and the subsection the drag started in keeps holding it.
+    /// Nothing else in the session ever fires again.
+    ///
+    /// Left there, that state is not merely untidy, it is armed: the next drag from anywhere in the
+    /// app, crossing this subsection, would find `dragging != nil`, accept, draw a caret, and on
+    /// release reorder **the abandoned entity** — a tile the user has not touched this time,
+    /// written straight to the shared household document. That is the defect this method exists for,
+    /// and `aStaleDragFromAnAbandonedSessionIsRefused` is it.
+    ///
+    /// A newer lift is proof, and the only proof available. It is not a timer and does not guess how
+    /// long a drag ought to last: the previous two defects here were both a timer deciding something
+    /// it could not know.
+    ///
+    /// **Why not read the dragged id back off the drag session instead**, which would be the more
+    /// direct check? Because it cannot be done in time. `onDrag` does carry the entity id —
+    /// `NSItemProvider(object: entityId as NSString)` — but every route back out of a provider
+    /// (`loadObject(ofClass:)`, `loadItem(forTypeIdentifier:)`) is completion-handler based, and
+    /// `validateDrop` must answer `Bool` synchronously. The synchronous things a provider does offer
+    /// are no use: `registeredTypeIdentifiers` is the same for every tile, and identity comparison of
+    /// the provider object rests on UIKit handing back the very instance `onDrag` returned, which is
+    /// not documented and would fail closed — refusing every drop in the app — if it ever stopped
+    /// being true. A session id we mint ourselves depends on nothing outside this file.
+    private func discardIfSuperseded() {
+        guard drag.dragging != nil, !drag.isLive else { return }
+        drag.clear()
+    }
 
     /// **Gated on `accepts`, for the same reason `endDrawing` exists.** SwiftUI is not documented to
     /// say whether `dropEntered` can reach a delegate whose `validateDrop` answered false, and it
@@ -266,7 +365,9 @@ struct TileDropDelegate: DropDelegate {
 
     func drop() -> Bool {
         defer { drag.clear() }
-        guard let dragged = drag.dragging else { return false }
+        // `accepts` and not `drag.dragging != nil`: a drop can arrive at an area whose validate said
+        // no (see `entered`), and this is the one path that writes to the household document.
+        guard accepts, let dragged = drag.dragging else { return false }
         let moved = TileOrder.moving(dragged, before: isEnd ? nil : target, in: visibleIds)
         // A tile dropped where it already was must not write: a no-op write churns the shared
         // record's version, which the rest of the household reads as somebody rearranging the room.
