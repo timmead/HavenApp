@@ -46,11 +46,13 @@ import Testing
     #expect(SubsectionKind.cameras.availableSpans == TileSpan.available(for: .camera))
 }
 
-/// The config sheet's picker (`TileSizePicker(options: kind.availableSpans, selection: $span)`)
-/// seeds `span` from `defaultSpan(on:)` when nothing is stored — see
-/// `SubsectionConfigView.span`'s `onAppear`. If a kind's default ever fell outside its own offered
-/// sizes, that seed would select nothing the picker can show a checkmark against: the sheet would
-/// open with no chip selected for a household that has configured nothing at all.
+/// The config sheet's picker (`TileSizePicker(options: kind.availableSpans, selection:
+/// sizeSelection)`) seeds `span` from `defaultSpan(on:)` when nothing is stored — see
+/// `SubsectionConfigView.span`'s `onAppear`. `sizeSelection` reads `nil` — no chip checked — as
+/// the picker's own legitimate value for "Follow" (follow-up 4), so if a kind's default ever fell
+/// outside its own offered sizes, the seed would not read as visibly broken: a `span` no chip
+/// matches renders identically to `nil`, so the sheet would open *masquerading as Follow chosen*
+/// for a household that has configured nothing and never touched that row.
 @Test func defaultSpanIsAlwaysAnOfferedSize() {
     for kind in SubsectionKind.allCases {
         for surface in HavenSurface.allCases {

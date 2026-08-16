@@ -74,7 +74,7 @@ struct RoomDetailView: View {
                 // but the only door to it was the floor's tappable room heading. Room detail had no
                 // heading of its own to wrap the same way (the name lives in `.navigationTitle`, a
                 // system-drawn view this file cannot make tappable), so it gets a toolbar button
-                // instead, matching the icon and hint the floor's own reason for opening this sheet
+                // instead, matching the icon and label the floor's own reason for opening this sheet
                 // already gives.
                 ToolbarItem(id: "room-configuration-readings", placement: .topBarTrailing) {
                     Button {

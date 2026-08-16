@@ -82,7 +82,7 @@ struct RoomConfigView: View {
                     Button("Reset arrangement") { Task { await resetArrangement() } }
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(HavenColor.domain(.cover))
-                    Text("Puts this room's tiles back in their default order, here and in the room's own view.")
+                    Text("Puts this room's tiles back in their default order, on the dashboard and in the room's own view.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

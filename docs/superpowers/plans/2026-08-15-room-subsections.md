@@ -402,7 +402,7 @@ final review; none blocks anything, all are real.
 
 1. ~~**`HomeStore.rollups(_:)` hardcodes `refs(for: .overview)`** — a room-detail Lights heading
    counts the *dashboard's* lights, and "All Off" acts on that set.~~ **Fixed in Group A**
-   (2026-08-16, `docs/superpowers/plans/2026-08-15-room-subsections.md` follow-ups, report at
+   (2026-08-16, report at
    `.superpowers/sdd/2026-08-16-subsection-followups/groupA-report.md`): `rollups(_:on:)` now takes
    the surface and derives both the count and the bulk action's target ids from that surface's own
    `refs(for:)`. The comment naming the hardcode at `SubsectionView.rollup` is gone — its job was
@@ -457,17 +457,18 @@ final review; none blocks anything, all are real.
    comment loss.
 7. ~~**DEBUG-only gallery residue**: silent missing-section arm; page-6 configure flag in
    `.onAppear` (init-time fix demonstrated by `SubsectionDragPreviewHost`); `AppModel()` touching
-   real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.~~ **Fixed in
-   Group C** (2026-08-16, report at
+   real UserDefaults.~~ **Fixed in Group C** (2026-08-16, report at
    `.superpowers/sdd/2026-08-16-subsection-followups/groupC-report.md`), with one drift correction
    per this plan's own rule: the flag was never on an ordinal "page 6" — it is the named
    `.configuring` case, and this entry is corrected to say so. `TileGallery.subsectionCase`'s `if
    let` now has an `else` naming which case failed to resolve rather than rendering nothing;
    `navigation.isConfiguring` is seeded in a new `TileGallery.init(page:)` rather than
-   `.onAppear`, matching `SubsectionDragPreviewHost`; `AppModel()`'s doc comment now says "no
-   connection is made" rather than implying the value is otherwise inert — its `init` runs a real
-   `UserDefaults` migration. The duplicated `#Preview` block in `RoomGridPreviews` was left alone,
-   as scoped: inherited, tracked, out of scope for this pass.
+   `.onAppear`, matching `SubsectionDragPreviewHost` (a first pass left the old `.onAppear` in
+   place alongside the new seeding — caught by review as a duplicate, not a move, and deleted);
+   `AppModel()`'s doc comment now says "no connection is made" rather than implying the value is
+   otherwise inert — its `init` runs a real `UserDefaults` migration. The inherited duplicated
+   `#Preview` block in `RoomGridPreviews` was deliberately **not** included in this item's scope —
+   see item 10, which this strike no longer hides it inside of.
 8. ~~**Known soft assertion**: `theLiveSessionIsNeverMistakenForAStaleOne`'s live-accepts half
    stayed green under the mutations tried; the stale-refusal half is mutation-proven.~~ **Resolved
    in Group C** (2026-08-16, report at
@@ -484,6 +485,12 @@ final review; none blocks anything, all are real.
    one surface synchronously zeroes the other surface's standing failure warning. Fixing it means
    threading `surface` through `allOff`/`closeAll`/`bulkFlip` and into the runner's key — the API
    the per-surface rollup change deliberately froze. Real, visible, bounded; wants its own pass.
+10. **`RoomGridPreviews.swift:274-302` duplicates `:224-252` verbatim** *(named by Group C's review,
+    2026-08-16)*: two `#Preview` blocks with the same content, inherited rather than introduced by
+    this branch. DEBUG-only, no production surface, no test coverage lost — a one-line-diff deletion
+    for whoever is next in the file. Left alone here, deliberately, both at Group C's own scoping
+    and by the review that promoted it to this list: item 7's strike had been the only tracker for
+    it, which would have read as fixed once item 7 was struck.
 
 ## Execution notes
 

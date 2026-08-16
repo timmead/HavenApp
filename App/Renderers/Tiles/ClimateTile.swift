@@ -207,11 +207,11 @@ struct ClimateTile: View {
                         // see; the sheet is where that belongs. Off, the row is the power button
                         // alone — which is the one control an off thermostat does need.
                         //
-                        // There is room for all three because this tile is **two columns wide** on
-                        // every surface that draws it — `SubsectionView`, the one container both
-                        // surfaces render, sizes the whole Climate subsection from
-                        // `SubsectionKind.climate.defaultSpan(on:)` — roughly 172pt rather than the
-                        // 83 a 1×1 gets.
+                        // There is room for all three because this tile is **never narrower than two
+                        // columns**, on either surface, however the household sizes it —
+                        // `SubsectionKind.climate.availableSpans` (`TileSpan.available(for:
+                        // .climate)`) offers only 2×1 or 4×2, with no 1-column option to fall back
+                        // to. Roughly 172pt is the floor, not just today's default.
                         if on {
                             stepper("minus", label: "Decrease target temperature",
                                     unavailable: unavailable, unreachable: e?.state == "unavailable",
