@@ -349,10 +349,16 @@ extension DashboardConfigWriteBackTests {
         #expect(living?["temperature"] != nil)
     }
 
-    /// Choosing the size a tile already had is not an edit, and must not write. The sheet decides
-    /// this — see `TileConfigView.sizeEdit` — but the store must not write for a nil size either,
-    /// or every Done on an unresized tile would churn the household's document.
-    @Test func aSheetThatChangedNothingButTheNameLeavesTheSizeAlone() async throws {
+}
+
+// MARK: - The subsection sheet's write, and the global default
+
+extension DashboardConfigWriteBackTests {
+
+    /// **A chosen span reaches the wire under its kind, not an entity id.** Per-entity sizing left
+    /// with `TileConfigView`'s size card (decision 5); this is what replaced it, and the assertion
+    /// that matters is the key it lands under — `subsections.<kind>.size`, not `entities.<id>.sizes`.
+    @Test func aSubsectionSpanRoundTripsToTheWirePayload() async throws {
         let (store, socket) = try await boot { id, type, _ in
             switch type {
             case "havenapp/config/get": return absent(id)
@@ -360,12 +366,104 @@ extension DashboardConfigWriteBackTests {
             default: return nil
             }
         }
-        _ = await store.applyTileConfig("sensor.lr_temp", name: "Lounge", size: nil, on: .overview)
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applySubsectionConfig(
+            .cameras, span: .some(TileSpan(columns: 4, rows: 2)), mode: nil)
+        #expect(outcome == .written)
 
         let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
-        let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
-        let entity = entities?["sensor.lr_temp"] as? [String: Any]
-        #expect(entity?["name"] as? String == "Lounge")
-        #expect(entity?["sizes"] == nil)
+        #expect(writes.count == before + 1)
+        let subsections = (writes.last?["payload"] as? [String: Any])?["subsections"] as? [String: Any]
+        let cameras = subsections?["cameras"] as? [String: Any]
+        #expect(cameras?["size"] as? String == "4x2")
+        // `mode: nil` means "the sheet's mode control was untouched" — passing it through must not
+        // manufacture a `mode` key next to the `size` one that *was* chosen.
+        #expect(cameras?["mode"] == nil)
+    }
+
+    /// **A chosen mode override reaches the wire the same way.** Span and mode are independent
+    /// mutators sharing one kind-scoped object (`SubsectionConfig.storeSection`); this is the sibling
+    /// of the span test above, exercised because the two write through the same `applySubsectionConfig`
+    /// closure and one passing does not prove the other does.
+    @Test func aSubsectionModeOverrideRoundTripsToTheWirePayload() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(.wrap))
+        #expect(outcome == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let subsections = (writes.last?["payload"] as? [String: Any])?["subsections"] as? [String: Any]
+        let lights = subsections?["lights"] as? [String: Any]
+        #expect(lights?["mode"] as? String == "wrap")
+        #expect(lights?["size"] == nil)
+    }
+
+    /// **The overflow menu's global default lands under `display.mode`**, a sibling of
+    /// `subsections` rather than a pseudo-kind inside it (schema section of the design doc) — the
+    /// assertion that would catch a mutator wired to the wrong key.
+    @Test func theHouseholdDefaultModeWritesUnderDisplayMode() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        #expect(await store.setDisplayMode(.wrap) == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let payload = writes.last?["payload"] as? [String: Any]
+        #expect((payload?["display"] as? [String: Any])?["mode"] as? String == "wrap")
+    }
+
+    /// **Choosing "Household default" clears the override — the key leaves the wire, it does not
+    /// turn into a null.** Booted from a document that already holds `subsections.lights.mode`,
+    /// because writing `nil` over an *absent* record is a no-op (`HavenConfig.update` refuses to
+    /// send an unchanged document at all) and would leave nothing on the wire to assert against.
+    ///
+    /// `subsections` here holds exactly one kind's exactly one key, so clearing it removes the whole
+    /// subtree — the same "no empty husk" discipline `resettingAnArrangementClearsBothSurfacesInOneWrite`
+    /// holds for `order`.
+    @Test func householdDefaultWritesTheKeyAbsentRatherThanNull() async throws {
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,
+           "rooms":{"living":{"temperature":{"entity_id":"sensor.lr_temp","source":"state"}}},
+           "subsections":{"lights":{"mode":"wrap"}}},
+         "updated":"2026-08-15T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(nil))
+        #expect(outcome == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let payload = writes.last?["payload"] as? [String: Any]
+        // Not `payload?["subsections"] as? [String: Any] == [:]` — an empty object is a husk every
+        // future read has to tolerate for no reason. The key must be gone outright.
+        #expect(payload?["subsections"] == nil)
+        // And the room the document also carries survives the write untouched, as the merge
+        // discipline requires of every mutator here.
+        #expect((payload?["rooms"] as? [String: Any])?["living"] != nil)
     }
 }

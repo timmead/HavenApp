@@ -8,9 +8,11 @@ import HavenCore
 /// codebase writes one and the request that prompted this feature wrote the other. A rectangle in
 /// the shape of the tile cannot be read the wrong way round.
 ///
-/// Shown only where there is a choice. A domain with one rendering gets no picker at all rather than
-/// a picker holding a single selected chip, which is a control that cannot act — see
-/// `TileSpan.isResizable`.
+/// Shown only where there is a choice. Its one caller, `SubsectionConfigView`, hides the whole card
+/// when `kind.availableSpans` holds a single entry rather than draw a picker holding one selected
+/// chip — a control that cannot act. Per-entity sizing (and with it `TileConfigView`'s own copy of
+/// this gate, `TileSpan.isResizable`) left the app in the same change that made `kind.availableSpans`
+/// this component's only source of options — see decision 5 in the room-subsections design.
 struct TileSizePicker: View {
     let options: [TileSpan]
     @Binding var selection: TileSpan
@@ -78,13 +80,16 @@ private struct TileSizeChip: View {
 #if DEBUG
 /// Every option set that exists, so the chips can be compared as sets rather than one at a time —
 /// which is the only way to see whether a 2×2 reads as different from a 2×1 at this size.
+///
+/// Over the kinds with more than one option — `SubsectionConfigView`'s own gate — rather than every
+/// kind, so this shows exactly the option sets a picker can actually appear with.
 #Preview("Tile size picker") {
     VStack(alignment: .leading, spacing: 18) {
-        ForEach([Domain.sensor, .mediaPlayer, .camera], id: \.self) { domain in
+        ForEach(SubsectionKind.allCases.filter { $0.availableSpans.count > 1 }, id: \.self) { kind in
             VStack(alignment: .leading, spacing: 7) {
-                Text(domain.rawValue).font(.system(size: 12, weight: .bold))
+                Text(kind.displayName).font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
-                StatefulPicker(options: TileSpan.available(for: domain))
+                StatefulPicker(options: kind.availableSpans)
             }
         }
     }

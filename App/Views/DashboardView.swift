@@ -36,6 +36,18 @@ struct DashboardView: View {
     @State private var navigation = Navigation()
 
     private var floors: [ResolvedFloor] { store.home.floors }
+    /// The overflow menu's "Subsections" submenu reads and writes the household default directly,
+    /// with no draft and no Done — unlike the per-kind sheet, there is nothing else on this control
+    /// to batch it with, so deferring a single write here would only add a step.
+    ///
+    /// **Fire-and-forget, like `TileConfigView.onDisappear`.** A menu row has nowhere to put a
+    /// failure any more than a dismissed sheet does; the write is simply retried the next time the
+    /// menu is opened and a different option tapped.
+    private var displayModeBinding: Binding<SubsectionMode> {
+        Binding(
+            get: { store.config.document.displayMode ?? .scroll },
+            set: { newValue in Task { await store.setDisplayMode(newValue) } })
+    }
     /// What the bar highlights and the title names. Falls back to the first floor so neither is
     /// blank on the first render, before the scroll view has reported anything.
     private var selectedFloorId: String? { scrolledFloorId ?? floors.first?.id }
@@ -124,6 +136,16 @@ struct DashboardView: View {
                                 Button("Edit Dashboard", systemImage: "slider.horizontal.3") {
                                     navigation.isConfiguring = true
                                 }
+                                // The global default mode — the household-wide fallback every
+                                // subsection without its own override follows (`Subsections.resolve`).
+                                // A `Picker` inside a `Menu` renders as a submenu with a checkmark on
+                                // the current choice, which says what is chosen without a second
+                                // sheet for two options. Gated with Edit Dashboard: it is the same
+                                // admin-only write to the same shared document.
+                                Picker("Subsections", selection: displayModeBinding) {
+                                    Label("Scroll", systemImage: "arrow.left.and.right").tag(SubsectionMode.scroll)
+                                    Label("Wrap", systemImage: "square.grid.2x2").tag(SubsectionMode.wrap)
+                                }
                             }
                             Button("Connection", systemImage: "wifi") {
                                 showingConnectionSettings = true
@@ -168,16 +190,8 @@ struct DashboardView: View {
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
             case .addTile(let areaId, let surface):
                 AddTileView(areaId: areaId, surface: surface).fittedSheet()
-            // **Reachable, and therefore no longer an `EmptyView`.** Both surfaces render
-            // `SubsectionView` now, so a heading tapped in configuration mode presents this — and an
-            // `EmptyView` in a sheet is a blank panel the user has to dismiss without being told
-            // anything, which is worse than a control that is missing. Task 6 replaces this with
-            // `SubsectionConfigView(kind:)`; until then it says so, naming the subsection it was
-            // opened from so the tap is at least legibly connected to the heading that made it.
             case .subsectionConfig(let kind):
-                ContentUnavailableView(kind.displayName, systemImage: "slider.horizontal.3",
-                                       description: Text("Size and layout for this subsection are coming soon."))
-                    .fittedSheet()
+                SubsectionConfigView(kind: kind).fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as

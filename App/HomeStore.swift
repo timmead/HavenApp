@@ -265,7 +265,12 @@ final class HomeStore {
     /// `size` is `.some(nil)` to clear a chosen size back to the surface's default, and `nil` to
     /// leave whatever is stored alone — the distinction matters for a sheet that shows no size
     /// control at all for a domain with one rendering.
-    func applyTileConfig(_ entityId: String, name: String?, size: TileSpan??,
+    ///
+    /// **Defaulted to `nil` rather than dropped.** Per-entity sizing moved to the subsection sheet —
+    /// see `applySubsectionConfig` — and `TileConfigView` no longer has a size control to pass one
+    /// from. The parameter itself survives this task because `settingSize` does too; Core deletes
+    /// both together in Task 7, and this signature changes with it then rather than twice.
+    func applyTileConfig(_ entityId: String, name: String?, size: TileSpan?? = nil,
                          stateStyle: TileStateStyle?? = nil,
                          bindings: [DeviceRole: String?]? = nil,
                          on surface: HavenSurface) async -> HavenConfig.Outcome {
@@ -320,6 +325,30 @@ final class HomeStore {
     /// register a dependency on `config.document`.
     func subsections(_ room: RoomSection, on surface: HavenSurface) -> [RoomSubsection] {
         Subsections.resolve(room: room, surface: surface, document: config.document)
+    }
+
+    /// Commits one subsection's size and mode in a single write — `applyTileConfig`'s reasoning
+    /// applies unchanged: two settings, one closure, one version, one conflict window.
+    ///
+    /// Both are `??`, like `applyTileConfig`'s `size`: `.some(nil)` writes an explicit "follow the
+    /// default", `nil` leaves whatever is stored alone. `SubsectionConfigView` never has a reason to
+    /// pass `nil` for span — its picker always holds a concrete choice — but the shape matches its
+    /// sibling mutator rather than special-casing the one that happens not to use it yet.
+    func applySubsectionConfig(_ kind: SubsectionKind, span: TileSpan??,
+                               mode: SubsectionMode??) async -> HavenConfig.Outcome {
+        await config.update { document in
+            var next = document
+            if let span { next = next.settingSubsectionSpan(span, kind: kind) }
+            if let mode { next = next.settingSubsectionMode(mode, kind: kind) }
+            return next
+        }
+    }
+
+    /// The household's default subsection display mode — the middle link in the fallback chain: a
+    /// per-kind override, then this, then the built-in `scroll` (see `Subsections.resolve`). `nil`
+    /// clears it back to that built-in.
+    func setDisplayMode(_ mode: SubsectionMode?) async -> HavenConfig.Outcome {
+        await config.update { $0.settingDisplayMode(mode) }
     }
 
     /// Creates a composite: a device of `type` whose primary is `primary`, in `primary`'s room.
