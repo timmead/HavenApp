@@ -355,9 +355,12 @@ extension DashboardConfigWriteBackTests {
 
 extension DashboardConfigWriteBackTests {
 
-    /// **A chosen span reaches the wire under its kind, not an entity id.** Per-entity sizing left
-    /// with `TileConfigView`'s size card (decision 5); this is what replaced it, and the assertion
-    /// that matters is the key it lands under — `subsections.<kind>.size`, not `entities.<id>.sizes`.
+    /// **A chosen span reaches the wire under its kind and its surface, not an entity id.**
+    /// Per-entity sizing left with `TileConfigView`'s size card (decision 5); this is what replaced
+    /// it. **Updated with intent for decision 10** (subsection size became per-surface, from this
+    /// task's own review — the schema section of the design doc): `size` was a flat string and is
+    /// now an object keyed by surface, the same shape decision 9 gave `order`, so the assertion that
+    /// matters moved from `subsections.<kind>.size` to `subsections.<kind>.size.<surface>`.
     @Test func aSubsectionSpanRoundTripsToTheWirePayload() async throws {
         let (store, socket) = try await boot { id, type, _ in
             switch type {
@@ -369,23 +372,81 @@ extension DashboardConfigWriteBackTests {
         let before = await socket.frameTexts(ofType: "havenapp/config/set").count
 
         let outcome = await store.applySubsectionConfig(
-            .cameras, span: .some(TileSpan(columns: 4, rows: 2)), mode: nil)
+            .cameras, span: .some(TileSpan(columns: 4, rows: 2)), mode: nil, on: .overview)
         #expect(outcome == .written)
 
         let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
         #expect(writes.count == before + 1)
         let subsections = (writes.last?["payload"] as? [String: Any])?["subsections"] as? [String: Any]
         let cameras = subsections?["cameras"] as? [String: Any]
-        #expect(cameras?["size"] as? String == "4x2")
+        #expect((cameras?["size"] as? [String: Any])?["overview"] as? String == "4x2")
         // `mode: nil` means "the sheet's mode control was untouched" — passing it through must not
         // manufacture a `mode` key next to the `size` one that *was* chosen.
         #expect(cameras?["mode"] == nil)
     }
 
+    /// **Decision 10's merge discipline, driven end to end.** Writing a span on one surface must
+    /// leave whatever the *other* surface already had standing — on the wire another phone in the
+    /// household would actually read, not just in the in-memory document — mirrors
+    /// `arrangingOneSurfaceLeavesTheOthersStoredOrderAlone` for order.
+    @Test func aSubsectionSpanWriteLandsOnlyUnderItsOwnSurface() async throws {
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,
+           "rooms":{"living":{"temperature":{"entity_id":"sensor.lr_temp","source":"state"}}},
+           "subsections":{"cameras":{"size":{"room_detail":"4x2"}}}},
+         "updated":"2026-08-15T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        #expect(await store.applySubsectionConfig(
+            .cameras, span: .some(TileSpan(columns: 2, rows: 2)), mode: nil, on: .overview) == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        let subsections = (writes.last?["payload"] as? [String: Any])?["subsections"] as? [String: Any]
+        let size = (subsections?["cameras"] as? [String: Any])?["size"] as? [String: Any]
+        #expect(size?["overview"] as? String == "2x2")
+        // The assertion this test exists for.
+        #expect(size?["room_detail"] as? String == "4x2")
+    }
+
+    /// The write-side mirror of the test above: **clearing** one surface's span removes only that
+    /// surface's key on the wire, leaving the other surface's stored value standing.
+    @Test func clearingOneSurfacesSpanLeavesTheOtherStoredOnTheWire() async throws {
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,
+           "rooms":{"living":{"temperature":{"entity_id":"sensor.lr_temp","source":"state"}}},
+           "subsections":{"cameras":{"size":{"overview":"2x2","room_detail":"4x2"}}}},
+         "updated":"2026-08-15T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        #expect(await store.applySubsectionConfig(.cameras, span: .some(nil), mode: nil, on: .overview) == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        let subsections = (writes.last?["payload"] as? [String: Any])?["subsections"] as? [String: Any]
+        let size = (subsections?["cameras"] as? [String: Any])?["size"] as? [String: Any]
+        #expect(size?["overview"] == nil)
+        #expect(size?["room_detail"] as? String == "4x2")
+    }
+
     /// **A chosen mode override reaches the wire the same way.** Span and mode are independent
     /// mutators sharing one kind-scoped object (`SubsectionConfig.storeSection`); this is the sibling
     /// of the span test above, exercised because the two write through the same `applySubsectionConfig`
-    /// closure and one passing does not prove the other does.
+    /// closure and one passing does not prove the other does. Mode stayed per-kind under decision
+    /// 10 — only span became per-surface — so this one still needs no surface-keyed assertion, only
+    /// the `on:` parameter every call site now carries.
     @Test func aSubsectionModeOverrideRoundTripsToTheWirePayload() async throws {
         let (store, socket) = try await boot { id, type, _ in
             switch type {
@@ -396,7 +457,7 @@ extension DashboardConfigWriteBackTests {
         }
         let before = await socket.frameTexts(ofType: "havenapp/config/set").count
 
-        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(.wrap))
+        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(.wrap), on: .overview)
         #expect(outcome == .written)
 
         let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
@@ -428,7 +489,7 @@ extension DashboardConfigWriteBackTests {
         }
         let before = await socket.frameTexts(ofType: "havenapp/config/set").count
 
-        #expect(await store.applySubsectionConfig(.cameras, span: nil, mode: nil) == .unchanged)
+        #expect(await store.applySubsectionConfig(.cameras, span: nil, mode: nil, on: .overview) == .unchanged)
 
         let writes = await socket.frameTexts(ofType: "havenapp/config/set").count
         #expect(writes == before)
@@ -480,7 +541,7 @@ extension DashboardConfigWriteBackTests {
         }
         let before = await socket.frameTexts(ofType: "havenapp/config/set").count
 
-        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(nil))
+        let outcome = await store.applySubsectionConfig(.lights, span: nil, mode: .some(nil), on: .overview)
         #expect(outcome == .written)
 
         let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)

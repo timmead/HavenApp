@@ -190,8 +190,8 @@ struct DashboardView: View {
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
             case .addTile(let areaId, let surface):
                 AddTileView(areaId: areaId, surface: surface).fittedSheet()
-            case .subsectionConfig(let kind):
-                SubsectionConfigView(kind: kind).fittedSheet()
+            case .subsectionConfig(let kind, let surface):
+                SubsectionConfigView(kind: kind, surface: surface).fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as

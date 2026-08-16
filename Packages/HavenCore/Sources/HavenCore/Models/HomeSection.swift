@@ -59,16 +59,12 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// exist only in room detail — are newcomers appended in `defaultOrder`, which is rule 2 doing
     /// exactly the job it was written for.
     ///
-    /// The `other` switch is meaningful **only because there are exactly two surfaces**, and is
-    /// exhaustive with no `default` so a third has to decide here what it borrows from rather than
-    /// inheriting an answer that would be wrong.
+    /// `HavenSurface.other` is meaningful **only because there are exactly two surfaces** — see its
+    /// own doc comment, which is also where decision 10's identical fallback for subsection span
+    /// (`Subsections.resolve`) shares this same switch rather than keeping a second copy.
     private func storedOrder(for surface: HavenSurface) -> [String] {
         if let own = orders[surface], !own.isEmpty { return own }
-        let other: HavenSurface = switch surface {
-        case .overview: .roomDetail
-        case .roomDetail: .overview
-        }
-        return orders[other] ?? []
+        return orders[surface.other] ?? []
     }
 
     private func visibleRefs(for surface: HavenSurface) -> [DeviceRef] {

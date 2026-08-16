@@ -19,6 +19,21 @@ public enum HavenSurface: String, Sendable, Codable, CaseIterable {
         case .roomDetail: return [.primary, .secondary]
         }
     }
+
+    /// The surface that is not this one — meaningful only because there are exactly two.
+    ///
+    /// Promoted here, internal rather than public, so `RoomSection.storedOrder(for:)` (decision 9's
+    /// own-then-other-then-none fallback for tile order) and `Subsections.resolve` (decision 10's
+    /// identical shape for subsection span) can share one switch instead of each keeping its own —
+    /// they are the two call sites within this module, and neither is a reason for `HavenApp` to be
+    /// able to ask a surface what its opposite is. Exhaustive with no `default`, so a third surface
+    /// has to decide here what it is the opposite of, rather than inheriting a wrong answer.
+    var other: HavenSurface {
+        switch self {
+        case .overview: return .roomDetail
+        case .roomDetail: return .overview
+        }
+    }
 }
 
 /// What a user decided about one entity on one surface.

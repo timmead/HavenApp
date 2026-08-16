@@ -29,9 +29,12 @@ private struct RoomGridPreviews: View {
             store.config.seedForTesting(
                 store.config.document.settingOrder(order, forRoom: areaId, on: .overview))
         }
+        // `.overview` for the same reason `arranged` above is: every preview in this file is a
+        // floor-view host, and decision 10 made span per-surface the same way decision 9 made order
+        // per-surface.
         for (kind, span) in spans {
             store.config.seedForTesting(
-                store.config.document.settingSubsectionSpan(span, kind: kind))
+                store.config.document.settingSubsectionSpan(span, kind: kind, on: .overview))
         }
         _store = State(initialValue: store)
         rooms = store.rooms().filter { areaIds.contains($0.areaId) }

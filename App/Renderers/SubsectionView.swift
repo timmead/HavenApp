@@ -111,7 +111,7 @@ struct SubsectionView: View {
             // happen and says nothing about not happening. The room-level roll-up row this replaced
             // was kept outside `RoomSectionView`'s heading button for the same reason.
             if navigation.isConfiguring {
-                Button { navigation.presented = .subsectionConfig(kind: subsection.kind) } label: { title }
+                Button { navigation.presented = .subsectionConfig(kind: subsection.kind, surface: surface) } label: { title }
                     .buttonStyle(.plain)
                     .accessibilityHint("Configures this subsection's tile size and layout")
             } else {

@@ -59,15 +59,25 @@ extension DashboardDocument {
 
     // MARK: - Per-subsection size and mode
 
-    /// This kind's chosen tile span, or `nil` when the household hasn't set one — the default from
-    /// `SubsectionKind.defaultSpan(on:)` applies instead.
+    /// This kind's chosen tile span **on one surface**, or `nil` when the household hasn't set one
+    /// for it there. The caller resolves the rest of the chain — own surface → other surface →
+    /// `SubsectionKind.defaultSpan(on:)` — at read time, in `Subsections.resolve`; this accessor
+    /// only ever answers for the one surface it was asked about.
     ///
-    /// **A garbage or unreadable stored size reads as `nil`, not a crash or a guess** — the same
-    /// discipline `tileSizes` already holds for per-entity sizes: a build that knows a shape this
-    /// one does not must leave this one working rather than claim the household chose something it
-    /// cannot draw.
-    public func subsectionSpan(_ kind: SubsectionKind) -> TileSpan? {
-        guard let stored = raw.asObject?[Self.subsectionsKey]?.asObject?[kind.rawValue]?.asObject?[Self.sizeKey]?.asString
+    /// **Decision 10** (Task 6's review): `size` was one string per kind, and that flattened the
+    /// per-surface defaults the schema itself declares — cameras and media render differently sized
+    /// on the two surfaces by default, and any explicit choice erased that distinction on both at
+    /// once. `size` is now an object keyed by `HavenSurface.rawValue`, the same shape decision 9
+    /// gave `order`.
+    ///
+    /// **A document still carrying the old single-string `size` reads as `nil` here** — `.asObject`
+    /// simply does not match a `.string`, so the legacy shape falls out the same way a garbage or
+    /// unreadable value would, the discipline `tileSizes` already holds for per-entity sizes.
+    /// Nothing has shipped, so nothing migrates: a development document reverts to the per-surface
+    /// default once, silently, and that is a smaller cost than a migration nobody will need again.
+    public func subsectionSpan(_ kind: SubsectionKind, on surface: HavenSurface) -> TileSpan? {
+        guard let stored = raw.asObject?[Self.subsectionsKey]?.asObject?[kind.rawValue]?.asObject?[Self.sizeKey]?
+            .asObject?[surface.rawValue]?.asString
         else { return nil }
         return TileSpan(stored: stored)
     }
@@ -78,19 +88,40 @@ extension DashboardDocument {
             .flatMap(SubsectionMode.init(rawValue:))
     }
 
-    /// This document with one kind's tile span set, or — for `nil` — cleared back to its default.
+    /// This document with one kind's tile span **on one surface** set, or — for `nil` — cleared back
+    /// to unset on that surface.
     ///
-    /// Merges at every level so a sibling kind's settings, and this kind's own `mode`, survive a
-    /// span write untouched — modelled line-for-line on `settingDevice`/`settingSize`.
-    public func settingSubsectionSpan(_ span: TileSpan?, kind: SubsectionKind) -> DashboardDocument {
+    /// **The sibling surface's span is untouched**, the same merge discipline `settingOrder` holds
+    /// for decision 9 and for the identical reason: the two surfaces are sized independently, so a
+    /// write that replaced the whole `size` object would make choosing a camera size on the floor
+    /// silently discard whatever room detail had chosen. Merges at every other level too, so a
+    /// sibling *kind*'s settings and this kind's own `mode` also survive untouched — modelled on
+    /// `settingDevice`/`settingSize`, the way the single-surface version of this function was.
+    ///
+    /// A surface key holding nothing is removed, and a `size` holding no surfaces is removed with
+    /// it — no `"size": {}` husk left for `storeSection` below to trip over, mirroring
+    /// `settingOrder`'s identical cleanup for `order`.
+    ///
+    /// `section[Self.sizeKey]?.asObject` also swallows the legacy single-string shape: a document
+    /// still carrying the old `size` reads as unset here on the write side too, so the first
+    /// per-surface write after this change replaces it outright rather than merging into a shape it
+    /// cannot understand.
+    public func settingSubsectionSpan(_ span: TileSpan?, kind: SubsectionKind,
+                                      on surface: HavenSurface) -> DashboardDocument {
         var root = raw.asObject ?? [:]
         root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
         var subsections = root[Self.subsectionsKey]?.asObject ?? [:]
         var section = subsections[kind.rawValue]?.asObject ?? [:]
+        var bySurface = section[Self.sizeKey]?.asObject ?? [:]
         if let span {
-            section[Self.sizeKey] = .string(span.stored)
+            bySurface[surface.rawValue] = .string(span.stored)
         } else {
+            bySurface.removeValue(forKey: surface.rawValue)
+        }
+        if bySurface.isEmpty {
             section.removeValue(forKey: Self.sizeKey)
+        } else {
+            section[Self.sizeKey] = .object(bySurface)
         }
         Self.storeSection(section, forKind: kind, into: &subsections)
         Self.storeSubsections(subsections, into: &root)

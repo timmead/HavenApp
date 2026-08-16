@@ -327,18 +327,24 @@ final class HomeStore {
         Subsections.resolve(room: room, surface: surface, document: config.document)
     }
 
-    /// Commits one subsection's size and mode in a single write — `applyTileConfig`'s reasoning
-    /// applies unchanged: two settings, one closure, one version, one conflict window.
+    /// Commits one subsection's size **on one surface**, and its mode, in a single write —
+    /// `applyTileConfig`'s reasoning applies unchanged: two settings, one closure, one version, one
+    /// conflict window.
+    ///
+    /// `span` is on `surface` alone (decision 10) — the sheet is always opened from a surface and
+    /// edits that surface's size, never the other one's, so this has no reason to take a second
+    /// surface for the span it does not touch. `mode` stays per-kind, unaffected by which surface
+    /// the sheet opened from.
     ///
     /// Both are `??`, like `applyTileConfig`'s `size`: `.some(nil)` writes an explicit "follow the
     /// default", `nil` leaves whatever is stored alone. `SubsectionConfigView` never has a reason to
     /// pass `nil` for span — its picker always holds a concrete choice — but the shape matches its
     /// sibling mutator rather than special-casing the one that happens not to use it yet.
-    func applySubsectionConfig(_ kind: SubsectionKind, span: TileSpan??,
-                               mode: SubsectionMode??) async -> HavenConfig.Outcome {
+    func applySubsectionConfig(_ kind: SubsectionKind, span: TileSpan??, mode: SubsectionMode??,
+                               on surface: HavenSurface) async -> HavenConfig.Outcome {
         await config.update { document in
             var next = document
-            if let span { next = next.settingSubsectionSpan(span, kind: kind) }
+            if let span { next = next.settingSubsectionSpan(span, kind: kind, on: surface) }
             if let mode { next = next.settingSubsectionMode(mode, kind: kind) }
             return next
         }

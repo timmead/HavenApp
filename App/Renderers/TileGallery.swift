@@ -394,7 +394,9 @@ struct TileGallery: View {
                                    surface: HavenSurface, span: TileSpan?,
                                    room: RoomSection) -> RoomSubsection? {
         var document = store.config.document.settingSubsectionMode(mode, kind: kind)
-        if let span { document = document.settingSubsectionSpan(span, kind: kind) }
+        // `on: surface` — decision 10 made span per-surface, and this fixture already knows which
+        // surface it is building a page for.
+        if let span { document = document.settingSubsectionSpan(span, kind: kind, on: surface) }
         return Subsections.resolve(room: room, surface: surface, document: document)
             .first { $0.kind == kind }
     }

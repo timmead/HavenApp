@@ -38,11 +38,14 @@ final class Navigation {
         case addTile(areaId: String, surface: HavenSurface)
         /// A subsection's size and display mode, from its heading in configuration mode.
         ///
-        /// **Carries the kind and nothing else** — no room, no surface. A subsection's size and mode
-        /// are household-wide settings on the kind (see the schema's `subsections.<kind>`), so a
-        /// sheet opened from the Lights of one room is editing the same two values as one opened
-        /// from another. Naming a room here would say otherwise.
-        case subsectionConfig(kind: SubsectionKind)
+        /// **Carries the kind and the surface, no room.** Mode is still household-wide on the kind
+        /// alone (see the schema's `subsections.<kind>.mode`), so a sheet opened from the Lights of
+        /// one room edits the same mode as one opened from another — naming a room would say
+        /// otherwise. Size stopped being that (design decision 10, from this task's own review): it
+        /// is per-surface, the same shape decision 9 gave tile order, so the sheet needs to know
+        /// *which* surface it was opened from to edit that surface's size — and, per decision 10,
+        /// does not offer a picker to change which one. `SubsectionView` supplies its own `surface`.
+        case subsectionConfig(kind: SubsectionKind, surface: HavenSurface)
     }
 
     var presented: Presentation?
@@ -72,7 +75,7 @@ extension Navigation.Presentation: Identifiable {
         case .tileConfig(let entityId, let surface): return "tileConfig:\(surface.rawValue):\(entityId)"
         case .roomConfig(let areaId): return "roomConfig:\(areaId)"
         case .addTile(let areaId, let surface): return "addTile:\(surface.rawValue):\(areaId)"
-        case .subsectionConfig(let kind): return "subsectionConfig:\(kind.rawValue)"
+        case .subsectionConfig(let kind, let surface): return "subsectionConfig:\(surface.rawValue):\(kind.rawValue)"
         }
     }
 }

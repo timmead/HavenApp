@@ -132,12 +132,65 @@ struct SubsectionResolverTests {
         #expect(result.first { $0.kind == .lights }!.mode == .scroll)
     }
 
-    // MARK: - Span fallback chain: subsection override -> kind.defaultSpan(on:)
+    // MARK: - Span fallback chain (decision 10): own surface -> other surface -> kind.defaultSpan(on:)
+
+    /// (a) A surface's own span wins over everything, including the other surface's — mirrors
+    /// `HomeSectionTests.aSurfacesOwnOrderWinsOverTheOthers`.
+    @Test func aSurfacesOwnSpanWinsOverTheOthers() {
+        let doc = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 2, rows: 1), kind: .lights, on: .overview)
+            .settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .lights, on: .roomDetail)
+        let overview = Subsections.resolve(room: room(), surface: .overview, document: doc)
+        let detail = Subsections.resolve(room: room(), surface: .roomDetail, document: doc)
+        #expect(overview.first { $0.kind == .lights }!.span == TileSpan(columns: 2, rows: 1))
+        #expect(detail.first { $0.kind == .lights }!.span == TileSpan(columns: 4, rows: 2))
+    }
 
     @Test func aSubsectionSpanOverrideWinsOverTheDefault() {
-        let doc = DashboardDocument().settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .lights)
+        let doc = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .lights, on: .overview)
         let result = Subsections.resolve(room: room(), surface: .overview, document: doc)
         #expect(result.first { $0.kind == .lights }!.span == TileSpan(columns: 4, rows: 2))
+    }
+
+    /// (b) An unset surface follows the other surface's span rather than the kind's default — which
+    /// is what makes a camera sized on the floor look sized when room detail is opened, before room
+    /// detail has ever been sized for itself. Mirrors
+    /// `HomeSectionTests.anUnarrangedSurfaceFollowsTheOtherSurfacesOrder`.
+    ///
+    /// **Deliberately `2x2` on `.overview`, not `4x2`.** Room detail's own built-in default for a
+    /// camera is `4x2` (see `TileSpan.default(for:on:)`) — writing overview to `4x2` and checking
+    /// detail resolves to `4x2` would pass even if the fallback chain skipped the other-surface link
+    /// entirely and fell straight to detail's own default, which is exactly the bug this test exists
+    /// to catch. `2x2` disagrees with detail's default, so the only way this test passes is if the
+    /// resolver actually read `.overview`'s stored span.
+    @Test func anUnsetSpanFollowsTheOtherSurfacesSpan() {
+        let doc = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 2, rows: 2), kind: .cameras, on: .overview)
+        let detail = Subsections.resolve(room: room(), surface: .roomDetail, document: doc)
+        #expect(detail.first { $0.kind == .cameras }!.span == TileSpan(columns: 2, rows: 2))
+    }
+
+    /// (b, the half that discriminates) **It keeps following.** The fallback is resolved fresh on
+    /// every call to `resolve`, from whichever document was actually passed in — never cached,
+    /// memoised, or otherwise answered from a value some earlier call happened to compute. Two
+    /// documents differing *only* in what `.overview` holds, both with `.roomDetail` unset, must
+    /// resolve room detail to two different spans. Mirrors
+    /// `anUnarrangedSurfaceKeepsFollowingRatherThanSnapshotting`'s discriminating-pair shape: `first`
+    /// alone already catches "always fall to my own default" (as in the test above); the pair
+    /// together catches "answered from whatever the *previous* call resolved" — a resolver that
+    /// remembered `first`'s followed value and reused it regardless of input would pass `first` and
+    /// fail `second`.
+    @Test func anUnsetSpanKeepsFollowingRatherThanSnapshotting() {
+        let first = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 2, rows: 2), kind: .cameras, on: .overview)
+        let second = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 4, rows: 2), kind: .cameras, on: .overview)
+        let firstDetail = Subsections.resolve(room: room(), surface: .roomDetail, document: first)
+        let secondDetail = Subsections.resolve(room: room(), surface: .roomDetail, document: second)
+        #expect(firstDetail.first { $0.kind == .cameras }!.span == TileSpan(columns: 2, rows: 2))
+        #expect(secondDetail.first { $0.kind == .cameras }!.span == TileSpan(columns: 4, rows: 2))
+        #expect(firstDetail.first { $0.kind == .cameras }!.span != secondDetail.first { $0.kind == .cameras }!.span)
     }
 
     @Test func spanFallsBackToTheKindsDefaultWhenNoOverride() {
@@ -145,9 +198,10 @@ struct SubsectionResolverTests {
         #expect(result.first { $0.kind == .lights }!.span == SubsectionKind.lights.defaultSpan(on: .overview))
     }
 
-    /// Media and cameras disagree with themselves across surfaces — the reason `defaultSpan` takes a
-    /// surface parameter at all. Exercised on both surfaces so a resolver that hard-coded one
-    /// surface's default would be caught.
+    /// (c) Neither surface set: both fall through to `SubsectionKind.defaultSpan(on:)`, which is
+    /// where media and cameras disagree with *themselves* across surfaces — the reason `defaultSpan`
+    /// takes a surface parameter at all, and the whole point decision 10 exists to preserve. Mirrors
+    /// `HomeSectionTests.withNeitherSurfaceArrangedBothTakeTheDefaultOrder`.
     @Test func mediaAndCameraDefaultSpansFollowTheSurface() {
         let overview = Subsections.resolve(room: room(), surface: .overview, document: DashboardDocument())
         let detail = Subsections.resolve(room: room(), surface: .roomDetail, document: DashboardDocument())
@@ -156,5 +210,24 @@ struct SubsectionResolverTests {
         #expect(detail.first { $0.kind == .media }!.span == TileSpan(columns: 4, rows: 2))
         #expect(overview.first { $0.kind == .cameras }!.span == TileSpan(columns: 2, rows: 2))
         #expect(detail.first { $0.kind == .cameras }!.span == TileSpan(columns: 4, rows: 2))
+    }
+
+    // MARK: - `resolvedSpan`, standalone
+
+    /// `resolvedSpan` is `resolve`'s per-kind span logic, factored out so `SubsectionConfigView` can
+    /// call it directly — it has a kind and a surface but no room to resolve a whole `RoomSubsection`
+    /// through. Every case above exercises this same logic *through* `resolve`, on a kind that has
+    /// refs; this pins its contract standalone, including for a kind with none at all, which
+    /// `resolve` never even asks about (empty kinds are dropped before `resolvedSpan` is called).
+    @Test func resolvedSpanAnswersTheFullFallbackChainWithNoRoomAtAll() {
+        let doc = DashboardDocument()
+            .settingSubsectionSpan(TileSpan(columns: 2, rows: 2), kind: .cameras, on: .overview)
+        #expect(Subsections.resolvedSpan(.cameras, on: .overview, document: doc) == TileSpan(columns: 2, rows: 2))
+        // Room detail follows overview, exactly as `resolve` does for a kind that has refs.
+        #expect(Subsections.resolvedSpan(.cameras, on: .roomDetail, document: doc) == TileSpan(columns: 2, rows: 2))
+        // A kind nobody has touched at all, and that this room may not even contain, still gets an
+        // answer — the per-surface built-in default.
+        #expect(Subsections.resolvedSpan(.lights, on: .overview, document: doc)
+                == SubsectionKind.lights.defaultSpan(on: .overview))
     }
 }
