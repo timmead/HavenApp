@@ -77,6 +77,19 @@ final class TileDragState {
     ///
     /// Called from `RearrangeableTile`'s `onDrag`, and by tests, so that what a test calls a lift and
     /// what the app calls a lift cannot drift apart.
+    ///
+    /// **Residual risk, named rather than left to a report.** SwiftUI may re-invoke `onDrag`'s
+    /// closure at moments of its own choosing (see `isOver`) — including, undocumented, on a tile
+    /// other than the one actually lifted. A re-invocation on a *different* subsection's tile mid-drag
+    /// would call this method there, claiming session currency for that subsection and superseding
+    /// whatever drag is actually live.
+    ///
+    /// This creates no new wrong-write exposure: the old, session-less code would also have set that
+    /// other subsection's `dragging` wrongly on the same spurious call. What is new is a fail-safe
+    /// failure mode the old code lacked: the live drag's own session goes stale,
+    /// `TileDropDelegate.discardIfSuperseded` refuses it mid-gesture, and the drag self-heals rather
+    /// than writes — the user retries, and nothing was written. I have no evidence this re-invocation
+    /// happens; it is named because it is the one place this mechanism could be wrong.
     func begin(_ entityId: String) {
         dragging = entityId
         session = TileDragSession.begin()

@@ -242,18 +242,30 @@ import HavenCore
         #expect(delegate(abandoned, target: "light.a").drop() == false)
     }
 
-    /// The other side of the same line: a *live* session's own state is not mistaken for stale, however
-    /// far the finger has strayed. Without this the fix for straying would be undone.
+    /// The other side of the same line: a *live* session's own state is not mistaken for stale —
+    /// even with an older, abandoned session sitting nearby and demonstrably discarded, and however
+    /// far the live drag's finger has strayed. Without this the fix for straying would be undone.
+    ///
+    /// Two sessions, not one: the abandoned lift comes first, so `live` is the *second* — proof that
+    /// currency is decided against `TileDragSession.current` rather than against a state that merely
+    /// looks live in isolation. `theOriginSubsectionStillAcceptsAfterAStray` covers the one-session
+    /// case; this is the case beside it, where a second, superseded session exists and must not drag
+    /// the live one down with it.
     @Test func theLiveSessionIsNeverMistakenForAStaleOne() async throws {
-        let drag = TileDragState()
-        lift("light.a", in: drag)
-        let overC = delegate(drag, target: "light.c")
+        let abandoned = TileDragState()
+        lift("light.a", in: abandoned)              // an older session, left behind…
 
-        overC.entered()
-        overC.exited()
+        let live = TileDragState()
+        lift("light.c", in: live)                   // …a second, later lift, which supersedes it
+        #expect(delegate(abandoned, target: "light.b").accepts == false)   // now stale, discarded
+
+        let overB = delegate(live, target: "light.b")
+
+        overB.entered()
+        overB.exited()
         try await awaitHandoffTimer()
 
-        #expect(overC.accepts)
+        #expect(overB.accepts)
     }
 
     // MARK: - The end position

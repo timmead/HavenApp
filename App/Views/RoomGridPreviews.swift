@@ -260,7 +260,7 @@ private struct RoomDetailPreviewHost: View {
 /// `light.b1` over `climate.b` is a state the app cannot reach.
 #Preview("Subsection — mid-drag") {
     let drag = TileDragState()
-    drag.dragging = "light.b1"
+    drag.begin("light.b1")
     drag.target = "light.b3"
     drag.entered()
     return SubsectionDragPreviewHost(areaId: "gap", kind: .lights, drag: drag)
