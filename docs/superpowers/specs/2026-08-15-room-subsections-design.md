@@ -40,6 +40,18 @@ Settled in the design discussion, recorded here so the plan doesn't re-litigate 
    scroll row: entering edit mode temporarily renders each subsection in wrap mode regardless of
    its configured display mode, which lets the existing drag-to-reorder machinery be reused
    unchanged. Leaving edit mode restores the configured mode.
+9. **Each surface keeps its own order** *(added 2026-08-15, during Task 5 — supersedes "order
+   untouched" below).* Task 5's review proved one shared per-room list cannot survive two
+   arrangeable surfaces: a drag persists only the ids visible on the surface it happened on, so an
+   overview drag silently reset every room-detail-only tile's position. Rather than merge
+   semantics, the order becomes per-surface: `rooms.<areaId>.order` changes from one array to
+   `{"overview": [...], "room_detail": [...]}`, a drag on a surface writes only that surface's
+   list, and resolution falls back **surface → other surface → default order** — read-time
+   fallback, not a copy, so arrangements start shared and diverge on the first touch of the second
+   surface. Both surfaces are draggable; room-detail-only tiles (demoted sensors, hidden-from-
+   dashboard devices) become genuinely arrangeable. A development document carrying the old array
+   shape reads as unset and falls back to default order once; nothing has shipped, so nothing
+   migrates.
 
 ## Schema
 
