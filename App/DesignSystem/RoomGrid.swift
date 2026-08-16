@@ -23,9 +23,12 @@ struct RoomGrid: Layout {
     /// `CameraTile` records what assuming the floor cost — a hard-coded 141 that made every camera
     /// shorter than the two rows it claimed to occupy.
     ///
-    /// A grid with nothing single-row in it is not hypothetical: room detail groups by domain, so
-    /// its Cameras group is *all* 2-row tiles and has nothing to measure. Falling back to the floor
-    /// there would have quietly rebuilt the same bug on the other surface.
+    /// A grid with nothing single-row in it is not hypothetical: both surfaces group by domain now
+    /// — `SubsectionView` is the one container either renders — so any subsection whose kind is
+    /// entirely 2-row, Cameras being the standing example, has nothing to measure. Falling back to
+    /// the floor there would quietly rebuild the same bug wherever it turned up. `SubsectionView
+    /// .tileHeight` documents the same fallback for the scroll body, which has no subviews for this
+    /// grid to measure at all.
     static let fallbackRowHeight: CGFloat = 82
 
     struct Cache {

@@ -2,9 +2,10 @@ import SwiftUI
 import HavenCore
 
 /// The three approved media-player tile renderings. Which one a surface uses is a per-surface
-/// constant, never a function of state: a tile that changed size when playback started would have
-/// to migrate between two different `LazyVGrid`s — `.gridCellColumns` is inert inside one (D spec
-/// §10a) — so the entity would visibly jump between grid sections every time a song began.
+/// constant, never a function of state: `RoomGrid` places every tile in a subsection at that
+/// subsection's one span (`RoomSubsection.span`, the household's own choice for Media), so a tile
+/// that changed size when playback started would be a tile resizing itself out from under the grid
+/// mid-render — the entity would visibly reflow its subsection every time a song began.
 enum MediaTileSize {
     /// 1×1. A centred play/pause and the name beneath it.
     case small

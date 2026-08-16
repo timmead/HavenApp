@@ -407,10 +407,17 @@ final review; none blocks anything, all are real.
    the surface and derives both the count and the bulk action's target ids from that surface's own
    `refs(for:)`. The comment naming the hardcode at `SubsectionView.rollup` is gone — its job was
    done — replaced by a pointer to `HomeStore.rollups(_:on:)`, which now carries the household rule.
-2. **`RearrangeableTile` receives `ref.primaryEntityId` while `roomOrder` holds `ref.id`** — they
+2. ~~**`RearrangeableTile` receives `ref.primaryEntityId` while `roomOrder` holds `ref.id`** — they
    coincide by the tested re-keying rule in `DashboardDocument.devices`, not by the same
    expression. One-expression fix; a divergence would write a wrong order to the household
-   document with only `moved != visibleIds` as the guard.
+   document with only `moved != visibleIds` as the guard.~~ **Fixed in Group C** (2026-08-16,
+   report at `.superpowers/sdd/2026-08-16-subsection-followups/groupC-report.md`):
+   `SubsectionView.wrapBody`'s `RearrangeableTile` call now takes `ref.id`, the expression
+   `roomOrder`/`TileOrder` are both written in; `DeviceTileView` keeps `ref.primaryEntityId`, the
+   rendering identity, which is a different fact from the order one and was never the thing at
+   risk. `TileDragTests.aCompositeDragsByItsStoredIdNotItsPrimary` pins it with a hand-built
+   `DeviceRef.composite` whose id and primary deliberately disagree — a fixture built through
+   `DashboardDocument.devices` would re-key them back together and prove nothing.
 3. ~~**Reset-order is reachable only from the floor** while both surfaces are arrangeable
    (branch-introduced discoverability gap; the reset itself correctly clears both surfaces).~~
    **Fixed in Group B** (2026-08-16, report at
@@ -430,10 +437,17 @@ final review; none blocks anything, all are real.
    `TileSpan?`, `nil` meaning Follow chosen; a new `storedSpan` field decides whether choosing it has
    anything to clear. `settingSubsectionSpan(nil, kind:, on:)` — plumbed through
    `applySubsectionConfig` since Task 6 but never called in production — gained that caller.
-5. **Stale tile comments** naming the pre-subsection hosts: `ClimateTile.swift` ~:211
+5. ~~**Stale tile comments** naming the pre-subsection hosts: `ClimateTile.swift` ~:211
    (RoomSectionView/RoomDetailView as the drawers), `MediaPlayerTile.swift` :4-7 ("per-surface
    constant" + LazyVGrid-era justification), `RoomGrid.swift` :26-28 (room-detail-specific phrasing
-   that now understates).
+   that now understates).~~ **Fixed in Group C** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupC-report.md`): `ClimateTile.swift` now
+   names `SubsectionView` as the container that gives it two columns; `MediaPlayerTile.swift` keeps
+   "never a function of state" and replaces the LazyVGrid-era reasoning under it with `RoomGrid`'s
+   own — a tile resizing mid-render would reflow its subsection under the finger; `RoomGrid.swift`
+   generalizes its "nothing single-row to measure" example from room-detail-only to both surfaces
+   and cross-references `SubsectionView.tileHeight`, which documents the same fallback for the
+   scroll body.
 6. ~~**The `+` affordance is built differently per surface** (RoomGrid on the floor, LazyVGrid in
    detail) on a branch whose thesis is one construct.~~ **Fixed in Group B** (2026-08-16, report at
    `.superpowers/sdd/2026-08-16-subsection-followups/groupB-report.md`): `RoomDetailView`'s `+` now
@@ -441,11 +455,29 @@ final review; none blocks anything, all are real.
    `columns` `[GridItem]` property that fed it are gone; the `.gridCellColumns`-inertness rationale
    they carried already lives on `RoomGrid` itself (lines 6-10), so this is consolidation, not
    comment loss.
-7. **DEBUG-only gallery residue**: silent missing-section arm; page-6 configure flag in
+7. ~~**DEBUG-only gallery residue**: silent missing-section arm; page-6 configure flag in
    `.onAppear` (init-time fix demonstrated by `SubsectionDragPreviewHost`); `AppModel()` touching
-   real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.
-8. **Known soft assertion**: `theLiveSessionIsNeverMistakenForAStaleOne`'s live-accepts half stayed
-   green under the mutations tried; the stale-refusal half is mutation-proven.
+   real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.~~ **Fixed in
+   Group C** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupC-report.md`), with one drift correction
+   per this plan's own rule: the flag was never on an ordinal "page 6" — it is the named
+   `.configuring` case, and this entry is corrected to say so. `TileGallery.subsectionCase`'s `if
+   let` now has an `else` naming which case failed to resolve rather than rendering nothing;
+   `navigation.isConfiguring` is seeded in a new `TileGallery.init(page:)` rather than
+   `.onAppear`, matching `SubsectionDragPreviewHost`; `AppModel()`'s doc comment now says "no
+   connection is made" rather than implying the value is otherwise inert — its `init` runs a real
+   `UserDefaults` migration. The duplicated `#Preview` block in `RoomGridPreviews` was left alone,
+   as scoped: inherited, tracked, out of scope for this pass.
+8. ~~**Known soft assertion**: `theLiveSessionIsNeverMistakenForAStaleOne`'s live-accepts half
+   stayed green under the mutations tried; the stale-refusal half is mutation-proven.~~ **Resolved
+   in Group C** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupC-report.md`): no mutation exists that
+   reddens the live-accepts half without also reddening `theOriginSubsectionStillAcceptsAfterAStray`
+   — `isLive` reads only `dragging`, `session` and the shared `TileDragSession.current`, none of
+   which an unrelated `TileDragState`'s discard touches, so the two tests evaluated the identical
+   predicate on identical inputs. Confirmed by mutating `isLive` to `false` (cp-backed, restored):
+   both tests reddened together. `theLiveSessionIsNeverMistakenForAStaleOne` is deleted; the
+   analysis lives as a comment on the assertion that survives it and is mutation-proven.
 9. **Bulk-failure tallies are not surface-keyed** *(found by Group A's review, 2026-08-16)*:
    `BulkActionRunner.Key` is `(areaId, kind)`, so a failed room-detail "All Off" can badge the
    floor's heading with a count larger than that heading's own target set, and a successful run on

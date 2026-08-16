@@ -78,6 +78,21 @@ import HavenCore
 
     /// The same fact where it bites: the origin subsection goes on accepting the drop however long
     /// the finger has been away. `accepts` is `validateDrop`.
+    ///
+    /// **Formerly two tests.** A second, `theLiveSessionIsNeverMistakenForAStaleOne`, ran this same
+    /// sequence beside an older, abandoned `TileDragState` — lifted first, so its lift became stale
+    /// the moment this one's `lift` ran — to check that the live session's own accept was not caught
+    /// up in the sibling's staleness. It never could be: `isLive` reads only `dragging`, `session`
+    /// and `TileDragSession.current`, and nothing the abandoned state's discard path touches
+    /// (`accepts → discardIfSuperseded → clear → endDrawing`) writes any of the three on a
+    /// *different* `TileDragState` instance, nor on the shared `TileDragSession.current` itself —
+    /// only `begin()` advances that. So the sibling test evaluated the identical predicate on the
+    /// identical inputs as this one, under a strictly redundant precondition: proven by mutating
+    /// `isLive` to `false` (cp-backed, restored), which reddened both tests together and nothing the
+    /// sibling's own first half didn't already cover on its own
+    /// (`aStaleDragFromAnAbandonedSessionIsRefused` pins that half verbatim). No mutation was found
+    /// that reddened the sibling and left this one green — deleted rather than kept as a soft
+    /// assertion nothing could fail.
     @Test func theOriginSubsectionStillAcceptsAfterAStray() async throws {
         let drag = TileDragState()
         lift("light.a", in: drag)
@@ -181,6 +196,49 @@ import HavenCore
         #expect(origin.dragging == "light.a")
     }
 
+    // MARK: - A composite's drag identity
+
+    /// **`SubsectionView.wrapBody` lifts and targets a tile by `ref.id`, never by
+    /// `ref.primaryEntityId`** — see the comment on the `RearrangeableTile` call there. Today the
+    /// two always agree for a stored composite, because `DashboardDocument.devices` re-keys every
+    /// record to its primary entity on read — so this builds a `DeviceRef.composite` by hand,
+    /// bypassing that accessor on purpose, to give the two ids something to disagree about. Going
+    /// through `SectionBuilder`/a real document here would re-key them back together and this test
+    /// would pass no matter which expression the call site used.
+    ///
+    /// `visibleIds` stands in for `SubsectionView.roomOrder` (`room.refs(for:
+    /// surface).map(\.id)`), which is `DeviceRef.id` vocabulary throughout `TileOrder`. Dragging by
+    /// the composite's stored id finds it in that list and moves it. Dragging by its primary does
+    /// not — the primary is not a member of `visibleIds` at all, so `TileOrder.moving` returns the
+    /// list unchanged, trips the `moved != visibleIds` guard, and `drop()` reports no write. That is
+    /// what an id mismatch degrades to here: not a crash, a drag that is silently discarded.
+    @Test func aCompositeDragsByItsStoredIdNotItsPrimary() {
+        let composite = DeviceRef.composite(id: "device.hall-shades", type: "shade_group",
+                                            inputs: [.primary: ["cover.hall_shade_master"]])
+        let visibleIds = ["light.a", composite.id, "light.c"]
+        let store = HomeStore()
+
+        let byStoredId = TileDragState()
+        lift(composite.id, in: byStoredId)
+        byStoredId.entered()
+        let dropOnStoredId = TileDropDelegate(target: "light.a", isEnd: false, room: room(),
+                                              visibleIds: visibleIds, surface: .overview,
+                                              drag: byStoredId, store: store)
+        #expect(dropOnStoredId.drop())
+        #expect(TileOrder.moving(composite.id, before: "light.a", in: visibleIds)
+                == ["device.hall-shades", "light.a", "light.c"])
+
+        let byPrimary = TileDragState()
+        lift(composite.primaryEntityId!, in: byPrimary)
+        byPrimary.entered()
+        let dropOnPrimary = TileDropDelegate(target: "light.a", isEnd: false, room: room(),
+                                             visibleIds: visibleIds, surface: .overview,
+                                             drag: byPrimary, store: store)
+        #expect(dropOnPrimary.drop() == false)
+        #expect(TileOrder.moving(composite.primaryEntityId!, before: "light.a", in: visibleIds)
+                == visibleIds)
+    }
+
     // MARK: - State left behind by a drag that never finished
 
     /// **A drag abandoned over empty space must not arm the subsection it started in.**
@@ -240,32 +298,6 @@ import HavenCore
 
         #expect(TileOrder.moving("light.c", before: "light.a", in: ids) != ids)   // it would write
         #expect(delegate(abandoned, target: "light.a").drop() == false)
-    }
-
-    /// The other side of the same line: a *live* session's own state is not mistaken for stale —
-    /// even with an older, abandoned session sitting nearby and demonstrably discarded, and however
-    /// far the live drag's finger has strayed. Without this the fix for straying would be undone.
-    ///
-    /// Two sessions, not one: the abandoned lift comes first, so `live` is the *second* — proof that
-    /// currency is decided against `TileDragSession.current` rather than against a state that merely
-    /// looks live in isolation. `theOriginSubsectionStillAcceptsAfterAStray` covers the one-session
-    /// case; this is the case beside it, where a second, superseded session exists and must not drag
-    /// the live one down with it.
-    @Test func theLiveSessionIsNeverMistakenForAStaleOne() async throws {
-        let abandoned = TileDragState()
-        lift("light.a", in: abandoned)              // an older session, left behind…
-
-        let live = TileDragState()
-        lift("light.c", in: live)                   // …a second, later lift, which supersedes it
-        #expect(delegate(abandoned, target: "light.b").accepts == false)   // now stale, discarded
-
-        let overB = delegate(live, target: "light.b")
-
-        overB.entered()
-        overB.exited()
-        try await awaitHandoffTimer()
-
-        #expect(overB.accepts)
     }
 
     // MARK: - The end position

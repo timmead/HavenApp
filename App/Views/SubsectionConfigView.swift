@@ -262,11 +262,24 @@ struct SubsectionConfigView: View {
     /// surface first (see `Subsections.resolvedSpan`), so it would show the very value being given
     /// up. Clearing first and resolving after is what the commit actually does; this just does it a
     /// step early, on a document that never leaves this property.
+    ///
+    /// **Says "Follow" only when there is something to follow.** `resolvedSpan`'s chain is this
+    /// surface, then the other surface, then `kind.defaultSpan(on: surface)` — *this* surface's own
+    /// default, not the other one's. When the other surface carries nothing explicit either, that
+    /// chain lands on the default with no relationship to the other surface in it at all, and a row
+    /// reading "Follow the room (2×2)" would claim one anyway: the number would be right, the verb
+    /// would not. `HavenSurface.other` is `internal` to HavenCore, so this repeats the surface's own
+    /// two-case switch rather than reach for it — the same shape `target`, below, already uses.
     private var followLabel: String {
         let cleared = store.config.document.settingSubsectionSpan(nil, kind: kind, on: surface)
         let resolved = Subsections.resolvedSpan(kind, on: surface, document: cleared)
+        let size = "\(resolved.columns)×\(resolved.rows)"
+        let otherSurface: HavenSurface = surface == .overview ? .roomDetail : .overview
+        guard store.config.document.subsectionSpan(kind, on: otherSurface) != nil else {
+            return "Default (\(size))"
+        }
         let target = surface == .overview ? "the room" : "the dashboard"
-        return "Follow \(target) (\(resolved.columns)×\(resolved.rows))"
+        return "Follow \(target) (\(size))"
     }
 
     /// `TileSizePicker`'s binding. Reads as `nil` — no chip checked — whenever Follow is the current

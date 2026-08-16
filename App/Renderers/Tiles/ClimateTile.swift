@@ -208,8 +208,10 @@ struct ClimateTile: View {
                         // alone — which is the one control an off thermostat does need.
                         //
                         // There is room for all three because this tile is **two columns wide** on
-                        // every surface that draws it (`RoomSectionView`, `RoomDetailView`), roughly
-                        // 172pt rather than the 83 a 1×1 gets.
+                        // every surface that draws it — `SubsectionView`, the one container both
+                        // surfaces render, sizes the whole Climate subsection from
+                        // `SubsectionKind.climate.defaultSpan(on:)` — roughly 172pt rather than the
+                        // 83 a 1×1 gets.
                         if on {
                             stepper("minus", label: "Decrease target temperature",
                                     unavailable: unavailable, unreachable: e?.state == "unavailable",

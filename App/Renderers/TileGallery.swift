@@ -43,13 +43,30 @@ struct TileGallery: View {
     @State private var store = TileGallery.populatedStore()
     /// The tiles write their long-press target into this. Nothing here presents a modal, but the
     /// environment has to hold one or every tile traps on a missing value.
-    @State private var navigation = Navigation()
+    ///
+    /// **Seeded from `page` at `init`, not flipped in `.onAppear`** — the in-repo model is
+    /// `SubsectionDragPreviewHost`. A flag flipped on appearance renders one frame of the
+    /// unconfigured body before the update lands, which for the `.configuring` page is a frame of
+    /// scroll mode with none of the placeholders it exists to show. Seeding it here also drops the
+    /// old cross-page contamination risk outright rather than guarding against it: each
+    /// `TileGallery(page:)` value now builds its own `Navigation`, so there is no shared instance
+    /// left for one page's setting to leak into another's.
+    @State private var navigation: Navigation
     /// `AuthenticatedImage` reads it for the base URL, which `CameraTile` needs to exist at all.
-    /// Session-less on purpose: no request is ever made, so the cameras page renders the same
-    /// placeholder every time rather than depending on what a server happened to return.
+    /// **No connection is made** — no request is ever sent, so the cameras page renders the same
+    /// placeholder every time rather than depending on what a server happened to return — but the
+    /// value is not otherwise inert: `AppModel.init` runs a real `UserDefaults` migration
+    /// (`DiscoveredURLMigration`) against the default `.standard` domain on construction.
     @State private var app = AppModel()
 
     private static let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
+
+    init(page: Page) {
+        self.page = page
+        let navigation = Navigation()
+        navigation.isConfiguring = page == .configuring
+        _navigation = State(initialValue: navigation)
+    }
 
     var body: some View {
         ScrollView {
@@ -380,6 +397,19 @@ struct TileGallery: View {
            let resolved = subsectionFixture(kind, mode: mode, surface: surface, span: span, room: room) {
             section(subsectionLabel(kind, mode, density, span)) {
                 SubsectionView(room: room, subsection: resolved, surface: surface, density: density)
+            }
+        } else {
+            // **A page that quietly renders nothing on a broken fixture is the bug this file exists
+            // to catch** — see the type's own doc comment on "the sweep that dimmed unreachable
+            // tiles was applied by hand". Every kind this gallery drives (`Self
+            // .subsectionEntityIds`) sits in the "Every Kind" room at `.primary` tier on both
+            // surfaces, so nothing here is an expected empty state — a nil is always the room
+            // fixture missing or `Subsections.resolve` no longer producing this kind, and it should
+            // read as a defect on the canvas rather than a gap nobody notices.
+            section(subsectionLabel(kind, mode, density, span)) {
+                Text("Unresolved — no fixture for this case")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HavenColor.warning)
             }
         }
     }

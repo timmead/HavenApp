@@ -308,10 +308,21 @@ struct SubsectionView: View {
                 // renderings still ahead of it. A nil `primaryEntityId` is a stored device whose
                 // primary vanished; the resolver already drops those, so this is belt and braces
                 // exactly as it is in `scrollBody`.
-                if let id = ref.primaryEntityId {
-                    DeviceTileView(entityId: id, surface: surface, span: subsection.span)
+                if let primary = ref.primaryEntityId {
+                    // **Two different ids, on purpose, not the same one reused.** `DeviceTileView`
+                    // reads `primary` because that is the entity with state to show — a composite
+                    // has none of its own. `RearrangeableTile` is given `ref.id` because that is the
+                    // vocabulary `ids` (`roomOrder`, below) and `TileOrder.moving` are both written
+                    // in: `room.refs(for:)` orders and looks itself up by `DeviceRef.id`, never by
+                    // `primaryEntityId`. The two happen to be equal for every composite today —
+                    // `DashboardDocument.devices` re-keys every stored record to its primary entity
+                    // on read — but that equality is a fact about that accessor, not about
+                    // `RearrangeableTile`, so this reaches for the expression that is *always*
+                    // correct rather than the one that is correct because of where it is called
+                    // from. `aCompositeDragsByItsStoredIdNotItsPrimary` in `TileDragTests` pins it.
+                    DeviceTileView(entityId: primary, surface: surface, span: subsection.span)
                         .tileSpan(subsection.span)
-                        .modifier(RearrangeableTile(entityId: id, room: room,
+                        .modifier(RearrangeableTile(entityId: ref.id, room: room,
                                                     visibleIds: ids, surface: surface,
                                                     drag: drag))
                 }
