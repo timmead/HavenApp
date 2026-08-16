@@ -339,6 +339,16 @@ struct TileConfigView: View {
     /// Whether committing would change anything. Compared against the stored override rather than
     /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
     /// an edit — and so a sheet merely opened and closed writes nothing at all.
+    ///
+    /// **This and `stateStyleEdit`/`bindingEdits` above are private computed properties on a `View`,
+    /// unreachable by any test — the same shape `SubsectionConfigView`'s `spanEdit`/`modeEdit`/
+    /// `hasChanges` were before `SubsectionConfigEdit` pulled them into a plain, testable value type.
+    /// Nothing here is known to be wrong; this is a precedent note, not a defect report. If one of
+    /// these three ever needs pinning — a regression like the opened-but-untouched span bug
+    /// `SubsectionConfigEdit`'s own doc comment records — the same extraction is the fix: a
+    /// `TileConfigEdit` (or similar) taking the drafts and the stored values as plain arguments,
+    /// answering `nameEdit`/`stateStyleEdit`/`bindingEdits`/`hasChanges`, with this view's properties
+    /// reduced to one-line calls into it.
     private var hasChanges: Bool {
         DisplayName.override(from: draft) != storedOverride
             || stateStyleEdit != nil || bindingEdits != nil

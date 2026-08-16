@@ -1,6 +1,65 @@
 import SwiftUI
 import HavenCore
 
+/// The decision `SubsectionConfigView`'s Done button and swipe-to-dismiss both need answered: what
+/// changed, and what `HomeStore.applySubsectionConfig` should be told to write for it.
+///
+/// **Extracted from the view because a `private` computed property on a `View` cannot be reached by
+/// anything outside that view's own `body`.** `spanEdit`/`modeEdit`/`hasChanges` used to live there,
+/// unreachably, which is how the opened-but-untouched span bug (see `SubsectionConfigView
+/// .seededSpan`) escaped both suites the first time and needed an advisor pass to catch by
+/// inspection rather than a red test. Same rules, same comments, just a value a test can construct
+/// and call directly now.
+struct SubsectionConfigEdit: Equatable {
+    /// Whether the sheet's Size card is on screen at all — `kind.availableSpans.count > 1`. A kind
+    /// with one size has no card, so it never has a span to write, whatever the draft holds — the
+    /// `TileConfigView.sizeEdit`-equivalent guard this sheet also needs.
+    let spanIsEditable: Bool
+    let draftSpan: TileSpan
+    /// What `draftSpan` was seeded to when the sheet opened — **not** what `subsectionSpan(kind, on:
+    /// surface)` returns.
+    ///
+    /// The two disagree by design, and comparing against the stored value directly is exactly the
+    /// regression this type exists to keep out: `subsectionSpan` is `nil` for any surface the
+    /// household has not sized *directly*, but under decision 10's own-then-other-then-default
+    /// fallback that does not mean unsized — a camera opened in room detail before room detail has
+    /// ever been sized for itself is currently rendering whatever the floor chose, and its seed is
+    /// that resolved value, not `nil`. Comparing `draftSpan` against `nil` would make every
+    /// untouched sheet on a *following* surface look edited, and closing it would write the followed
+    /// value as an explicit choice — silently ending the following relationship nobody asked to end,
+    /// and, for an unconfigured kind on either surface, churning the shared record's version on a
+    /// mere open-and-close. Comparing against what was actually seeded makes "opened and closed" a
+    /// no-op regardless of whether, or through what path, a value was already showing.
+    let seededSpan: TileSpan
+    let draftMode: SubsectionMode?
+    let storedMode: SubsectionMode?
+
+    /// What to write for span, or `nil` for "the sheet's span control was untouched".
+    ///
+    /// Unlike `TileConfigView.sizeEdit`, a value *changed to* something matching this surface's
+    /// default is still written explicitly rather than collapsed to `nil` — there is no default
+    /// *chip* to choose here, only the sizes `kind.availableSpans` offers. Decision 10 gave this
+    /// sheet a single surface to test "is this the default" against, unlike its predecessor, but
+    /// collapsing was not reinstated even so: doing it well would mean distinguishing "the household
+    /// picked this surface's own default on purpose" from "the household picked whatever this
+    /// surface happens to be following right now", and only the write path knows which, not this
+    /// comparison. Writing explicitly either way is the simpler, correct answer.
+    var spanEdit: TileSpan?? {
+        guard spanIsEditable, draftSpan != seededSpan else { return nil }
+        return .some(draftSpan)
+    }
+
+    /// What to write for mode, or `nil` for "untouched". `nil` is also a value the draft can hold —
+    /// "Household default", chosen deliberately — so this only reports "no edit" when the draft and
+    /// the stored value already agree, never merely because the draft holds `nil`.
+    var modeEdit: SubsectionMode?? {
+        guard draftMode != storedMode else { return nil }
+        return .some(draftMode)
+    }
+
+    var hasChanges: Bool { spanEdit != nil || modeEdit != nil }
+}
+
 /// One subsection kind's size and display mode — reached from its heading in configuration mode.
 ///
 /// **Carries a kind and the surface it was opened from, no room.** Mode is still household-wide on
@@ -29,23 +88,9 @@ struct SubsectionConfigView: View {
     /// rendering whatever the floor chose. Seeding from the resolved value is what makes the picker
     /// agree with the tile behind the sheet.
     @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
-    /// What `span` was seeded to — see `spanEdit`, which dirty-checks against this rather than
-    /// against what is stored.
-    ///
-    /// **Exists to close an opened-but-untouched bug, precisely named because "unopened" is not a
-    /// state this view can reach: `onDisappear` cannot fire without `onAppear` firing first, so the
-    /// failure was never about a sheet nobody opened.** The bug was a comparison across an
-    /// optional/non-optional asymmetry: `span` is a non-optional `TileSpan` — it always holds a
-    /// concrete value, because the picker always has something selected — while
-    /// `subsectionSpan(kind, on:)` is `TileSpan?`, `nil` for any surface the household has never set
-    /// directly. `spanEdit` used to compare the two directly, so an unset surface's seeded value
-    /// always disagreed with the stored `nil`, and a sheet opened and closed with nothing touched
-    /// dirty-checked as edited. Seeding `seededSpan` from the same value `span` gets and comparing
-    /// draft-to-seed rather than draft-to-stored closes both halves of that: the unset-surface case
-    /// stops writing on a mere open-and-close (no more spurious churn of the shared record's
-    /// version), and — since decision 10 — opening a sheet whose surface is *following* the other
-    /// one stops silently locking in that followed value as an explicit choice the instant the sheet
-    /// renders, which would otherwise end the following relationship nobody asked to end.
+    /// What `span` was seeded to, fed to `SubsectionConfigEdit` as `seededSpan` — see that type's
+    /// own doc comment for why this is compared against rather than what is stored, which is the
+    /// whole of the reasoning and lives in exactly one place now.
     @State private var seededSpan: TileSpan = TileSpan(columns: 1, rows: 1)
     /// The chosen mode override, or `nil` to keep following the household default. A draft, like
     /// `span`.
@@ -141,35 +186,20 @@ struct SubsectionConfigView: View {
         return "Household default (\(resolved == .scroll ? "Scroll" : "Wrap"))"
     }
 
-    /// Whether the span differs from what the sheet opened with.
-    ///
-    /// **Against `seededSpan`, not against `store.config.document.subsectionSpan(kind, on:
-    /// surface)`** — see `seededSpan`'s own doc comment for why the two disagree and what comparing
-    /// against the stored value directly used to cost.
-    ///
-    /// Unlike `TileConfigView.sizeEdit`, a value that is *changed to* something matching this
-    /// surface's default is still written explicitly rather than collapsed to `nil` — there is no
-    /// default *chip* to choose here, only the sizes `kind.availableSpans` offers. Decision 10 gave
-    /// this sheet a single surface to test "is this the default" against, unlike its predecessor —
-    /// but collapsing was not reinstated even so: doing it well would mean distinguishing "the
-    /// household picked this surface's own default on purpose" from "the household picked whatever
-    /// this surface happens to be following right now", and only the write path knows which, not
-    /// this comparison. Writing explicitly either way is the simpler, correct answer.
-    private var spanEdit: TileSpan?? {
-        guard kind.availableSpans.count > 1, span != seededSpan else { return nil }
-        return .some(span)
+    /// The one decision this sheet's Done and swipe-to-dismiss both need — see `SubsectionConfigEdit`,
+    /// the testable type this delegates to. Built fresh on every access rather than cached in
+    /// `@State`: it is a pure function of state this view already owns (`span`, `seededSpan`,
+    /// `mode`) plus one document read, cheap enough that recomputing it is simpler than keeping a
+    /// sixth piece of state in step with the other five.
+    private var edit: SubsectionConfigEdit {
+        SubsectionConfigEdit(spanIsEditable: kind.availableSpans.count > 1, draftSpan: span,
+                             seededSpan: seededSpan, draftMode: mode,
+                             storedMode: store.config.document.subsectionMode(kind))
     }
 
-    /// Whether the mode differs from what is stored. `nil` is a value here, not "no edit" — it is
-    /// "Household default", chosen deliberately — so this reads `mode` against the *stored* override
-    /// and only reports "no edit" when the two already agree.
-    private var modeEdit: SubsectionMode?? {
-        let stored = store.config.document.subsectionMode(kind)
-        guard mode != stored else { return nil }
-        return .some(mode)
-    }
-
-    private var hasChanges: Bool { spanEdit != nil || modeEdit != nil }
+    private var spanEdit: TileSpan?? { edit.spanEdit }
+    private var modeEdit: SubsectionMode?? { edit.modeEdit }
+    private var hasChanges: Bool { edit.hasChanges }
 
     /// The one write this sheet performs. Returns whether the sheet may close. See
     /// `TileConfigView.commit` — identical shape, one fewer setting.
