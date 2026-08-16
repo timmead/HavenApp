@@ -298,7 +298,13 @@ struct SubsectionView: View {
     /// size is `RoomSubsection.span`, one number for the whole container, rather than four separate
     /// hand-agreements with a layout.
     private var wrapBody: some View {
-        Self.grid {
+        // Read once for the whole body rather than once per tile — `roomOrder` maps `room.refs(for:
+        // surface)`, and every tile in this subsection reorders against the identical list.
+        // `endDropCell`, below, still reads `roomOrder` itself rather than taking `ids` as a
+        // parameter — it is a separate computed property, and turning it into a function for one
+        // more avoided recomputation was judged not worth the shape change.
+        let ids = roomOrder
+        return Self.grid {
             ForEach(subsection.refs) { ref in
                 // **Every ref renders, composites included.** A composite draws as its primary for
                 // now — a shade group looks like its master shade — with the type-specific
@@ -309,7 +315,7 @@ struct SubsectionView: View {
                     DeviceTileView(entityId: id, surface: surface, span: subsection.span)
                         .tileSpan(subsection.span)
                         .modifier(RearrangeableTile(entityId: id, room: room,
-                                                    visibleIds: roomOrder, surface: surface,
+                                                    visibleIds: ids, surface: surface,
                                                     drag: drag))
                 }
             }

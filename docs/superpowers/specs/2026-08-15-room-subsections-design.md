@@ -67,29 +67,45 @@ Settled in the design discussion, recorded here so the plan doesn't re-litigate 
 
 ## Schema
 
-Two additions to the dashboard document, one deletion. Schema stays at 1.
+Two additions to the dashboard document, one deletion, and one shape change to an existing key
+(decision 9). Schema stays at 1.
 
 ```json
 {
   "schema": 1,
   "display": { "mode": "scroll" },
+  "rooms": {
+    "living_room": {
+      "order": { "overview": ["light.lamp", "cover.blinds"], "room_detail": ["cover.blinds", "light.lamp"] }
+    }
+  },
   "subsections": {
-    "climate":  { "size": "4x2", "mode": "wrap" },
-    "cameras":  { "size": "2x2" }
+    "climate":  { "size": { "room_detail": "4x2" }, "mode": "wrap" },
+    "cameras":  { "size": { "overview": "2x2", "room_detail": "4x2" } }
   }
 }
 ```
 
 - `subsections.<kind>` — one object per kind, every key optional, absent kinds meaning "all
   defaults". Kinds are the closed set `climate`, `lights`, `shades`, `media`, `cameras`, `other`,
-  `sensors`. `size` uses the existing `"CxR"` span vocabulary; `mode` is `"scroll"` or `"wrap"`.
+  `sensors`. `size` is `{"overview": "CxR", "room_detail": "CxR"}` in the existing `"CxR"` span
+  vocabulary, each surface key optional and independent; a missing surface falls back to the other
+  surface, then to `SubsectionKind.defaultSpan(on:)`. `mode` is one `"scroll"` or `"wrap"` for the
+  whole kind — no per-surface split.
+- `rooms.<areaId>.order` — also `{"overview": [...], "room_detail": [...]}`, one id array per
+  surface; a missing surface means that surface has never been arranged and falls back to the
+  other surface, then to default order.
 - `display.mode` — the household's global default mode. A separate top-level object rather than a
   pseudo-kind inside `subsections`, so kind keys stay a closed enum.
 - **Deleted:** `entities.<id>.sizes`, `settingSize`, the `sizes` accessor, and every read of
   per-entity spans. No migration — nothing has shipped, and merge-don't-overwrite means a dev
   document still carrying `sizes` keys ignores them harmlessly.
-- Untouched: membership, order, names, `devices`, room nominations, the schema write-gate, and the
+- Untouched: membership, names, `devices`, room nominations, the schema write-gate, and the
   merge-only mutator discipline. New mutators follow it exactly.
+- `size` and `order` split by surface for the same reason and in the same shape (decisions 9 and
+  10): a household's choice on one surface must never silently flatten or overwrite the other.
+  `mode` stays one value per kind rather than growing the same split — it is a layout choice, not a
+  per-surface fact.
 
 Built-in default spans per kind are today's `TileSpan.default(for:on:)` values (lights 1×1,
 climate 2×1, cameras 2×2, …), so an unconfigured document renders exactly today's proportions.

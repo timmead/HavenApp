@@ -94,6 +94,18 @@ struct SubsectionConfigView: View {
     @State private var seededSpan: TileSpan = TileSpan(columns: 1, rows: 1)
     /// The chosen mode override, or `nil` to keep following the household default. A draft, like
     /// `span`.
+    ///
+    /// **Seeded only in `onAppear`, with no `seededSpan`-style twin to fall back on.** The span half
+    /// of this sheet survives an unseeded `onDisappear` for free: `span` and `seededSpan` both
+    /// declare the same default, `TileSpan(columns: 1, rows: 1)`, so if `onAppear` never ran they
+    /// are still trivially equal to each other, `spanEdit` sees no change, and nothing is written.
+    /// `mode` has no such twin — `edit`'s `storedMode` is read fresh from the document on every
+    /// access, not from a seed captured at open — so the only thing standing between an unseeded
+    /// `mode` and a spurious write is SwiftUI's own ordering guarantee: **`onDisappear` cannot fire
+    /// without `onAppear` having fired first.** If that ever stopped holding, `mode` would still be
+    /// sitting at its declared default, `nil`, while `storedMode` could be anything the household
+    /// had already chosen; `modeEdit` would see them disagree and write `.some(nil)`, clearing a
+    /// mode override for a sheet nobody ever opened.
     @State private var mode: SubsectionMode?
     @State private var failure: String?
     /// True once this sheet has written, so a dismissal cannot write a second time.

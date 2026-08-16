@@ -46,6 +46,19 @@ import Testing
     #expect(SubsectionKind.cameras.availableSpans == TileSpan.available(for: .camera))
 }
 
+/// The config sheet's picker (`TileSizePicker(options: kind.availableSpans, selection: $span)`)
+/// seeds `span` from `defaultSpan(on:)` when nothing is stored — see
+/// `SubsectionConfigView.span`'s `onAppear`. If a kind's default ever fell outside its own offered
+/// sizes, that seed would select nothing the picker can show a checkmark against: the sheet would
+/// open with no chip selected for a household that has configured nothing at all.
+@Test func defaultSpanIsAlwaysAnOfferedSize() {
+    for kind in SubsectionKind.allCases {
+        for surface in HavenSurface.allCases {
+            #expect(kind.availableSpans.contains(kind.defaultSpan(on: surface)))
+        }
+    }
+}
+
 @Test func storedRawValuesAreTheSchemaVocabulary() {
     #expect(SubsectionKind.allCases.map(\.rawValue)
             == ["climate", "lights", "shades", "media", "cameras", "other", "sensors"])
