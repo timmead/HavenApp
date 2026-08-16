@@ -256,6 +256,9 @@ struct SubsectionView: View {
     let density: SubsectionDensity
     /// Configure mode forces wrap (spec decision 8); the view reads Navigation.isConfiguring
     /// itself and derives the effective mode.
+    /// **Added in Task 5:** `@State private var drag: TileDragState`, with a memberwise-shaped
+    /// `init(room:subsection:surface:density:drag:)` whose `drag` defaults — the injectability
+    /// `RoomSectionView` had, moved down with the state. Existing call sites are unaffected.
 }
 ```
 
@@ -315,6 +318,26 @@ carrying `.tileSpan(subsection.span)`).
   covers looks, not feel — scroll a row, long-press a tile, enter configure mode and watch scroll
   rows become grids, drag within a subsection, confirm nothing drags across). Commit:
   `feat(app): a room is its subsections, on both surfaces`
+
+**Written from the repo during Task 5** — three things this plan did not anticipate, recorded per
+the plan's own "the code in the repo wins" rule:
+
+1. **`visibleIds` stays room-scoped while the drag state goes per-subsection.** `TileDropDelegate`
+   writes through `store.setOrder(_:areaId:)`, whose key is the room's *whole* arrangement, so
+   handing it one subsection's ids would store those as the room's entire order and let
+   `TileOrder.resolve` re-derive every other subsection from `defaultOrder`. `SubsectionView`
+   therefore computes `room.refs(for: surface).map(\.id)`. Bucketing preserves sequence, so a move
+   within the room's list is exactly a move within one bucket.
+2. **The `+`'s second job as the "put it last" drop target is gone**, because the `+` now sits
+   outside every `SubsectionView` and the drag state it consulted is inside one. Not replaced with a
+   per-subsection end cell: insert-before alone generates every permutation, so this is a
+   convenience loss rather than a capability loss. `isEnd`/`targetIsEnd` stay in the machinery,
+   currently unexercised. Named on the hands-on checklist.
+3. **Room detail gains drag-to-rearrange**, which it never had — the consequence of both surfaces
+   rendering the one container, and not gated on surface (a `surface ==` check would be exactly the
+   special case decision 2 rejects). Its `visibleIds` is `refs(for: .roomDetail)`, a superset;
+   overview reads the same key and `TileOrder.resolve` filters to what it shows, so relative order
+   survives. Also on the hands-on checklist.
 
 ### Task 6: Configuration — the subsection sheet, the global default, and the picker that leaves
 

@@ -35,7 +35,7 @@ public enum Subsections {
     /// reads each surviving kind's span and mode.
     ///
     /// A ref whose `primaryEntityId` is `nil` is skipped rather than bucketed — mirrors
-    /// `RoomSectionView`'s existing handling of the same case (a stored composite whose primary
+    /// `SubsectionView`'s own handling of the same case (a stored composite whose primary
     /// vanished; `DashboardDocument.devices` already drops those in practice, but the resolver does
     /// not assume it).
     public static func resolve(room: RoomSection, surface: HavenSurface,

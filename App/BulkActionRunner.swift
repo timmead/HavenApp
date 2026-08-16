@@ -9,13 +9,15 @@ import HavenCore
 /// flips over `states`.
 ///
 /// **`@Observable`, and that is load-bearing.** `bulkFailureCount` is read from inside
-/// `RoomSectionView`/`RoomDetailView`'s `body`, so the tally has to be observable *through*
+/// `SubsectionView`'s `body` — on both surfaces, since both render that container — so the tally
+/// has to be observable *through*
 /// `HomeStore`'s reference to this object or those rows stop redrawing when a bulk action fails —
 /// a failure no test that renders nothing could see. `ObservationTests` pins exactly that read.
 @MainActor @Observable
 final class BulkActionRunner {
-    /// Identifies one room's roll-up of one kind. `Rollup.Kind` alone is not enough:
-    /// `RoomSectionView`/`RoomDetailView` render one roll-up row *per room*, and a kind-only key
+    /// Identifies one room's roll-up of one kind. `Rollup.Kind` alone is not enough: a roll-up is
+    /// rendered once per room and kind — in that room's Lights or Shades heading, wherever the room
+    /// is drawn — and a kind-only key
     /// would make a failure in the Kitchen's lights show up on the Living Room's lights row too —
     /// worse than the silent rollback this feature replaced, because it is affirmatively false
     /// about a room nobody touched.

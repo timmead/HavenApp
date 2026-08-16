@@ -125,8 +125,8 @@ struct TileGallery: View {
                 case .configuring: configuringSubsections
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
-                    // Both surfaces hoist climate into a 2-column grid of its own
-                    // (`RoomSectionView`, `RoomDetailView`), so rendering it here through the
+                    // The Climate subsection is two columns wide on both surfaces
+                    // (`SubsectionKind.climate.defaultSpan(on:)`), so rendering it here through the
                     // 4-column `ids(...)` was the gallery lying about the one thing it exists to
                     // show. It cost something real: judgements about what fits beside the target
                     // temperature were made against half the width the tile actually has.

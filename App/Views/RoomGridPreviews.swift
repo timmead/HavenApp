@@ -16,20 +16,18 @@ private struct RoomGridPreviews: View {
     let rooms: [RoomSection]
     let configuring: Bool
 
-    /// Seeded drag state, so the mid-gesture appearance can be rendered at all.
-    var drag = TileDragState()
-
+    /// `spans` seeds *subsection* spans, not per-entity ones: a tile's size is its subsection's
+    /// now, so seeding an entity's would change nothing a room renders.
     init(only areaIds: [String], configuring: Bool = false, arranged: [String: [String]] = [:],
-         sized: [String: TileSpan] = [:], drag: TileDragState = TileDragState()) {
-        self.drag = drag
+         spans: [SubsectionKind: TileSpan] = [:]) {
         self.configuring = configuring
         let store = RoomGridPreviews.populatedStore()
         for (areaId, order) in arranged {
             store.config.seedForTesting(store.config.document.settingOrder(order, forRoom: areaId))
         }
-        for (entityId, span) in sized {
+        for (kind, span) in spans {
             store.config.seedForTesting(
-                store.config.document.settingSize(span, for: entityId, on: .overview))
+                store.config.document.settingSubsectionSpan(span, kind: kind))
         }
         _store = State(initialValue: store)
         rooms = store.rooms().filter { areaIds.contains($0.areaId) }
@@ -38,7 +36,7 @@ private struct RoomGridPreviews: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                ForEach(rooms) { room in RoomSectionView(room: room, drag: drag) }
+                ForEach(rooms) { room in RoomSectionView(room: room) }
             }
             .padding()
         }
@@ -128,6 +126,48 @@ private struct RoomGridPreviews: View {
     }
 }
 
+/// One subsection, in configuration mode, with its drag state seeded.
+///
+/// **Hosted at the subsection rather than the room**, because that is where a drag now lives: each
+/// `SubsectionView` owns its own `TileDragState` so a lifted tile has no representation in any other
+/// container. A room-level host could not seed one if it wanted to.
+///
+/// `isConfiguring` is set when `Navigation` is constructed rather than in `.onAppear`, so the first
+/// frame is already the configured one — a flag flipped on appearance renders one frame of scroll
+/// mode with no placeholders in it, which is exactly what this is meant to show.
+private struct SubsectionDragPreviewHost: View {
+    @State private var store = RoomGridPreviews.populatedStore()
+    @State private var navigation: Navigation
+    @State private var app = AppModel()
+    let areaId: String
+    let kind: SubsectionKind
+    let drag: TileDragState
+
+    init(areaId: String, kind: SubsectionKind, drag: TileDragState) {
+        self.areaId = areaId
+        self.kind = kind
+        self.drag = drag
+        let navigation = Navigation()
+        navigation.isConfiguring = true
+        _navigation = State(initialValue: navigation)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            if let room = store.rooms().first(where: { $0.areaId == areaId }),
+               let subsection = store.subsections(room, on: .overview).first(where: { $0.kind == kind }) {
+                SubsectionView(room: room, subsection: subsection, surface: .overview,
+                               density: .compact, drag: drag)
+            }
+            Spacer()
+        }
+        .padding()
+        .environment(store)
+        .environment(navigation)
+        .environment(app)
+    }
+}
+
 /// **Room detail, which is a different set of sizes for the same rooms.** Media and cameras go
 /// full-bleed here where the dashboard gives them half a row, and this is what checks that the one
 /// dispatcher draws both — the groups used to be three hand-built stacks precisely because a
@@ -161,8 +201,15 @@ private struct RoomDetailPreviewHost: View {
     }
 }
 
+/// **A wide sensor beside 1×1 tiles**, which is the case that decides whether a tile's *measured*
+/// size and its *drawn* size agree: `RoomGrid` takes its row height from the tallest single-row tile,
+/// and a 2×1 sensor is single-row — so anything inside it that reports a large ideal height silently
+/// makes every row that tall.
+///
+/// Sized through the Sensors *subsection* rather than the entity, which is the only place a size is
+/// chosen now.
 #Preview("Room grid — a wide sensor") {
-    RoomGridPreviews(only: ["gap"], sized: ["sensor.b_temp": TileSpan(columns: 2, rows: 1)])
+    RoomGridPreviews(only: ["gap"], spans: [.sensors: TileSpan(columns: 2, rows: 1)])
 }
 
 /// **The room-level edit control**, which is how a room gets arranged at all — and the only way to
@@ -204,12 +251,15 @@ private struct RoomDetailPreviewHost: View {
 /// `entered()` is what a drop delegate calls when the finger arrives over a tile, and seeding it is
 /// not ceremony: the slot and the caret are drawn only while a drag is demonstrably live, so a state
 /// that merely names a dragged tile now — correctly — renders nothing at all.
-#Preview("Room grid — mid-drag") {
+///
+/// Both tiles are lights, and they have to be: a drag is confined to one subsection now, so
+/// `light.b1` over `climate.b` is a state the app cannot reach.
+#Preview("Subsection — mid-drag") {
     let drag = TileDragState()
     drag.dragging = "light.b1"
     drag.target = "light.b3"
     drag.entered()
-    return RoomGridPreviews(only: ["gap"], configuring: true, drag: drag)
+    return SubsectionDragPreviewHost(areaId: "gap", kind: .lights, drag: drag)
 }
 
 /// **The room-level edit control**, which is how a room gets arranged at all — and the only way to
@@ -244,20 +294,6 @@ private struct RoomDetailPreviewHost: View {
 /// 1×1 at the end of the sequence rather than a special case in whichever grid used to exist.
 #Preview("Room grid — configuring") { RoomGridPreviews(only: ["gap", "cams"], configuring: true) }
 
-/// **Mid-drag**, which no gesture in a preview can produce: `light.b1` has been lifted — its slot
-/// left behind as a dashed hole rather than closing up — and the caret on `light.b3`'s leading edge
-/// marks the seam it would drop into.
-///
-/// `entered()` is what a drop delegate calls when the finger arrives over a tile, and seeding it is
-/// not ceremony: the slot and the caret are drawn only while a drag is demonstrably live, so a state
-/// that merely names a dragged tile now — correctly — renders nothing at all.
-#Preview("Room grid — mid-drag") {
-    let drag = TileDragState()
-    drag.dragging = "light.b1"
-    drag.target = "light.b3"
-    drag.entered()
-    return RoomGridPreviews(only: ["gap"], configuring: true, drag: drag)
-}
 
 /// **A wide sensor beside 1×1 tiles**, which is the case that decides whether a tile's *measured*
 /// size and its *drawn* size agree. `RoomGrid` takes its row height from the tallest single-row tile,

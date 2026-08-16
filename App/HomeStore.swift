@@ -520,8 +520,8 @@ final class HomeStore {
     /// are recorded against this room.
     ///
     /// The `expecting` check is an internal-consistency assertion, not input validation: the
-    /// callers are `RoomSectionView`/`RoomDetailView` rendering a row whose kind they already
-    /// know, so a mismatch is a programming error and `assertionFailure` names the caller
+    /// caller is `SubsectionView`, rendering a heading whose kind it already
+    /// knows, so a mismatch is a programming error and `assertionFailure` names the caller
     /// (`#function` at the call site) rather than this shared helper.
     /// Internal rather than private **so a test can call it with a predicate the shipped callers
     /// never use** — see `bulkActionsSkipUnreachableEntitiesWhateverThePredicateSays`. The

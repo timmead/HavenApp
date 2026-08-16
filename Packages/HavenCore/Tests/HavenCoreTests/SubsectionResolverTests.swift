@@ -56,7 +56,7 @@ struct SubsectionResolverTests {
     /// A composite whose `inputs` has no `.primary` entry has no primary entity id at all
     /// (`DeviceRef.primaryEntityId` is `inputs[.primary]?.first`) — `SubsectionKind.of` cannot take a
     /// value it never receives, so the resolver drops the ref rather than guess a bucket for it.
-    /// Mirrors `RoomSectionView`'s existing handling of the same case (a stored device whose primary
+    /// Mirrors `SubsectionView`'s own handling of the same case (a stored device whose primary
     /// vanished).
     ///
     /// The union of every subsection's refs is the cleanest place to assert "nowhere": checking one
@@ -77,6 +77,33 @@ struct SubsectionResolverTests {
                                          document: DashboardDocument())
         let lights = result.first { $0.kind == .lights }!
         #expect(lights.refs.map(\.id) == ["light.a", "light.b"])
+    }
+
+    // MARK: - Identity
+
+    /// **A subsection's `id` is its kind's raw value, and that is a view's identity.**
+    ///
+    /// Both surfaces render `ForEach(store.subsections(room, on:))`, so `RoomSubsection.id` is what
+    /// SwiftUI uses to decide whether the Lights container on this pass is the *same* Lights
+    /// container as on the last one. `resolve` runs afresh on every document or state change, so an
+    /// `id` that varied between runs — a UUID, an index, anything derived from the refs — would
+    /// give every subsection a new identity several times a second: state discarded, scroll
+    /// positions lost, a drag in progress torn out from under the finger.
+    ///
+    /// Asserted for every case rather than a sample, and through `allCases` rather than a literal
+    /// list, so a kind added tomorrow is covered without anybody remembering to add it here.
+    @Test func aSubsectionsIdentityIsItsKindsRawValue() {
+        for kind in SubsectionKind.allCases {
+            let subsection = RoomSubsection(kind: kind, refs: [], span: TileSpan(columns: 1, rows: 1),
+                                            mode: .scroll)
+            #expect(subsection.id == kind.rawValue)
+        }
+        // Distinct per kind, which is the half of "identity" the equality above cannot see: an `id`
+        // constant across kinds satisfies neither `ForEach` nor this.
+        let ids = SubsectionKind.allCases.map {
+            RoomSubsection(kind: $0, refs: [], span: TileSpan(columns: 1, rows: 1), mode: .scroll).id
+        }
+        #expect(Set(ids).count == SubsectionKind.allCases.count)
     }
 
     // MARK: - Mode fallback chain: subsection override -> household default -> .scroll

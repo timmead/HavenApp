@@ -35,8 +35,8 @@ public enum SubsectionKind: String, CaseIterable, Sendable {
         case .light: return .lights
         case .cover: return .shades
         case .mediaPlayer: return .media
-        // Its own bucket, not `.other`: `.other` renders in the 4-column grid, and a camera
-        // has no 1-column size — see `cameraGroup`.
+        // Its own bucket, not `.other`: `.other`'s tiles are 1×1, and a camera has no 1-column
+        // rendering — see `CameraTileSize`.
         case .camera: return .cameras
         case .scene, .script, .button, .lock, .switchOutlet, .unknown: return .other
         case .sensor, .binarySensor: return .sensors

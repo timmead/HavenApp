@@ -17,8 +17,8 @@ enum SubsectionDensity { case regular, compact }
 /// Nothing here re-derives any of it — the fields of `RoomSubsection` are the entire contract, which
 /// is what makes "a tile is the wrong size" a question with exactly one place to look.
 ///
-/// Not wired into either surface yet: Task 5 does that. Until then the only thing that constructs
-/// one is `TileGallery`, which is also the only verification this view has — see that file.
+/// A heading and no chrome around it: an earlier design round explicitly rejected wrapping a group
+/// in a card or a border, and that ruling outlived the grouped rendering it was made about.
 struct SubsectionView: View {
     /// The room this belongs to. Needed for the roll-up, which is computed per *room* (a bulk action
     /// names an area), not per subsection.
@@ -35,6 +35,31 @@ struct SubsectionView: View {
     let density: SubsectionDensity
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
+
+    /// What is being dragged in *this* subsection and where it would land — see `TileDragState`.
+    /// Owned here because a drag is a fact about the subsection: the lifted tile and the target are
+    /// different tiles that must draw differently at the same moment.
+    ///
+    /// **Per subsection, not per room, and that is what confines a drag.** A tile lifted in Lights
+    /// has no representation in the Shades container's state, so Shades' drop delegates see
+    /// `dragging == nil`, refuse the drop in `validateDrop`, and a cross-subsection move cannot be
+    /// expressed rather than being detected and rejected. Which is right: a device's subsection is a
+    /// fact about its domain, not a position anyone chose.
+    ///
+    /// Injectable, and that is not gratuitous: the two states this adds — the hole a lifted tile
+    /// leaves and the caret marking where it would land — exist only *during* a gesture, and a
+    /// gesture is the one thing a preview cannot perform. Seeding it is the only way to look at
+    /// them at all (see `RoomGridPreviews`' mid-drag previews).
+    @State private var drag: TileDragState
+
+    init(room: RoomSection, subsection: RoomSubsection, surface: HavenSurface,
+         density: SubsectionDensity, drag: TileDragState = TileDragState()) {
+        self.room = room
+        self.subsection = subsection
+        self.surface = surface
+        self.density = density
+        _drag = State(initialValue: drag)
+    }
 
     /// **One grid value, used by both modes.** The wrap body lays out with it and the scroll body
     /// asks it how wide a tile is, so the two cannot divide the width differently — which is the
@@ -55,9 +80,9 @@ struct SubsectionView: View {
     @State private var containerWidth: CGFloat = 0
 
     /// **Configuration mode forces wrap** — design decision 8. Rearranging happens on a grid, never
-    /// in a scroll row, so the drag machinery Task 5 moves in here only ever composes with
-    /// `RoomGrid`. Derived rather than stored: leaving configuration mode restores the household's
-    /// configured mode with nothing to remember to undo.
+    /// in a scroll row, so the drag machinery only ever composes with `RoomGrid` and no gesture is
+    /// ever asked to work inside a horizontal scroll. Derived rather than stored: leaving
+    /// configuration mode restores the household's configured mode with nothing to remember to undo.
     private var mode: SubsectionMode {
         navigation.isConfiguring ? .wrap : subsection.mode
     }
@@ -80,11 +105,11 @@ struct SubsectionView: View {
     private var header: some View {
         HStack(spacing: 8) {
             // Only the *name* is wrapped for navigation — **not** the roll-up beside it, which is a
-            // `Button` of its own. `RoomSectionView` keeps its roll-up row outside the room
-            // heading's button for exactly this reason: a button inside another button's label has
-            // ambiguous hit testing, and whichever way it happens to resolve, one of the two
-            // meanings is silently unreachable. "All Off" that opens a settings sheet is a bulk
-            // action that does not happen and says nothing about not happening.
+            // `Button` of its own. A button inside another button's label has ambiguous hit
+            // testing, and whichever way it happens to resolve, one of the two meanings is silently
+            // unreachable: "All Off" that opens a settings sheet is a bulk action that does not
+            // happen and says nothing about not happening. The room-level roll-up row this replaced
+            // was kept outside `RoomSectionView`'s heading button for the same reason.
             if navigation.isConfiguring {
                 Button { navigation.presented = .subsectionConfig(kind: subsection.kind) } label: { title }
                     .buttonStyle(.plain)
@@ -142,6 +167,12 @@ struct SubsectionView: View {
     /// The room's roll-up for this kind. Recomputed from the room rather than passed in: it counts
     /// live states, and a count that went stale would be a button claiming to act on lights that are
     /// already off.
+    ///
+    /// **`HomeStore.rollups(_:)` counts `refs(for: .overview)` whatever surface asks**, so a room
+    /// detail heading says how many of the *dashboard's* lights are on. Pre-existing and left
+    /// standing here deliberately: both surfaces called that one method before subsections too, so
+    /// changing it now would be this task quietly altering behaviour rather than moving it. Written
+    /// down so it stops being invisible.
     private var rollup: Rollup? {
         guard let rollupKind else { return nil }
         return store.rollups(room).first { $0.kind == rollupKind }
@@ -155,8 +186,9 @@ struct SubsectionView: View {
     /// fixed amount of space — room detail's spelt-out "3 of 5 on" with a right-aligned button
     /// assumed a heading with a whole row to itself, which a subsection heading is not.
     ///
-    /// Both originals are still in place; Task 5 deletes them as it rewires the two surfaces, so the
-    /// duplication this collapses lives on for exactly one commit.
+    /// The only implementation left: `RoomSectionView`'s and `RoomDetailView`'s both went when the
+    /// two surfaces started rendering this container, and the duplication that had been flagged for
+    /// months is gone with them.
     @ViewBuilder
     private func rollupRow(_ rollup: Rollup) -> some View {
         let accent = HavenColor.domain(rollup.kind == .lights ? .light : .cover)
@@ -256,14 +288,49 @@ struct SubsectionView: View {
 
     /// The wrapping grid — the existing `RoomGrid`, unchanged, which is also the mode configuration
     /// forces so that the drag machinery has a grid to work on.
+    ///
+    /// **One grid, and every tile declares its span.** A room used to be four stacked `LazyVGrid`s —
+    /// climate at two columns, everything else at four, media at two, cameras at two — because
+    /// `.gridCellColumns` is inert inside a `LazyVGrid`, so a 2-wide tile needed a literally 2-column
+    /// grid. That worked, and it made a room four containers nothing could move between. `RoomGrid`
+    /// places by span, so the four became one; a room is several containers again now, but by a
+    /// decision about *kinds* rather than an accident of what `LazyVGrid` can express — and a tile's
+    /// size is `RoomSubsection.span`, one number for the whole container, rather than four separate
+    /// hand-agreements with a layout.
     private var wrapBody: some View {
         Self.grid {
             ForEach(subsection.refs) { ref in
+                // **Every ref renders, composites included.** A composite draws as its primary for
+                // now — a shade group looks like its master shade — with the type-specific
+                // renderings still ahead of it. A nil `primaryEntityId` is a stored device whose
+                // primary vanished; the resolver already drops those, so this is belt and braces
+                // exactly as it is in `scrollBody`.
                 if let id = ref.primaryEntityId {
                     DeviceTileView(entityId: id, surface: surface, span: subsection.span)
                         .tileSpan(subsection.span)
+                        .modifier(RearrangeableTile(entityId: id, room: room,
+                                                    visibleIds: roomOrder, drag: drag))
                 }
             }
         }
     }
+
+    /// The ids a drag reorders: **the whole room's, on this surface, not this subsection's.**
+    ///
+    /// The asymmetry is deliberate and is the one confusable thing here. The drag *state* is per
+    /// subsection, so nothing can be dropped outside the container it was lifted in — but the list a
+    /// move is computed against has to be the room's, because `TileDropDelegate` writes its result
+    /// through `store.setOrder(_:areaId:)` and that key is the room's whole arrangement. Handing it
+    /// a subsection's three lights would store those three as the room's entire order, and
+    /// `TileOrder.resolve` would then re-derive everybody else from `defaultOrder` — one drag in
+    /// Lights silently unarranging Media, Sensors and the rest.
+    ///
+    /// It composes correctly because bucketing preserves sequence: `Subsections.resolve` walks
+    /// `refs(for:)` in order, so moving a light before another light in the room's list is exactly a
+    /// move within the Lights bucket, and no other bucket sees anything change.
+    ///
+    /// **Every ref's own id**, so a composite is dragged like any other tile — this was entity ids
+    /// only, which was right when nothing constructed composites and would now silently drop a shade
+    /// group out of the room's order.
+    private var roomOrder: [String] { room.refs(for: surface).map(\.id) }
 }

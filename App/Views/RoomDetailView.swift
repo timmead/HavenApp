@@ -1,10 +1,8 @@
 import SwiftUI
 import HavenCore
 
-/// Full room view: one room, grouped by device domain, each group a plain heading
-/// (no card/border — an earlier design round explicitly rejected wrapping groups in
-/// chrome) followed by a 4-column tile grid. Lights/Covers groups additionally carry a
-/// muted count and a right-aligned bulk action, hidden when there's nothing to act on.
+/// Full room view: one room as a vertical stack of subsections — the same containers the floor view
+/// renders, at `.regular` density because a kind's name is the only heading on this screen.
 struct RoomDetailView: View {
     let room: RoomSection
     @Environment(HomeStore.self) private var store
@@ -12,42 +10,32 @@ struct RoomDetailView: View {
     @State private var showingEnvironmentHistory = false
     /// Only the `+` still uses a `LazyVGrid`: it is a single 1×1 cell with no span to honour.
     ///
-    /// The groups themselves moved to `RoomGrid`. The Climate group used to need a second, 2-column
-    /// `[GridItem]` to get a half-width tile — `.gridCellColumns(2)` being inert inside a
-    /// `LazyVGrid` — and that workaround is what a real span-aware layout removes.
+    /// The tiles themselves are `RoomGrid`'s, inside each subsection. The Climate group used to need
+    /// a second, 2-column `[GridItem]` to get a half-width tile — `.gridCellColumns(2)` being inert
+    /// inside a `LazyVGrid` — and that workaround is what a real span-aware layout removes.
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
 
-    /// This room's `.entity` refs, bucketed by `SubsectionKind.of(_:)` — Core's tested copy of the
-    /// switch that used to live here as `Grouped`/`grouped`. `.composite` refs are skipped: nothing
-    /// renders them yet (see `DeviceRef`'s doc comment / `HomeStore.deviceEntityIds`, which does
-    /// the same).
-    ///
-    /// Interim scaffolding: Task 5 replaces this view's body with `SubsectionView` built on
-    /// `Subsections.resolve`, at which point this helper goes away with it.
-    private func bucket(_ kind: SubsectionKind) -> [String] {
-        // `refs(for: .roomDetail)` — the overview's controls *plus* the sensors curation demoted
-        // off the grid, which is what makes this view the place demoted entities are reachable. A
-        // device removed from the *dashboard* is still here; removal is per surface.
-        room.refs(for: .roomDetail).compactMap { ref -> String? in
-            guard let id = ref.primaryEntityId, SubsectionKind.of(id) == kind else { return nil }
-            return id
-        }
-    }
-
     var body: some View {
-        let rollups = store.rollups(room)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                group("Climate", bucket(.climate))
-                group("Lights", bucket(.lights), rollup: rollups.first { $0.kind == .lights })
-                group("Shades", bucket(.shades), rollup: rollups.first { $0.kind == .covers })
-                group("Media", bucket(.media))
-                group("Cameras", bucket(.cameras))
-                group("Scenes & more", bucket(.other))
-                group("Sensors", bucket(.sensors))
-                // One `+` for the whole screen rather than one per group: the groups here are a
-                // presentation of one list, and the picker is not scoped to a domain — an added
-                // device lands in whichever group its domain belongs to.
+                // **The same construct the floor view renders**, and the only thing this screen
+                // disagrees with it about is loudness: `.regular` density, because here a kind's
+                // name is the whole heading rather than a sub-label under a room's.
+                //
+                // `.roomDetail` is the surface, and it is what makes this the place demoted entities
+                // are reachable: `refs(for: .roomDetail)` is the overview's controls *plus* the
+                // sensors curation kept off the grid. A device removed from the *dashboard* is still
+                // here; removal is per surface. The resolver reads that list — the domain switch
+                // this view used to carry as `Grouped`/`grouped` is `SubsectionKind.of(_:)` now,
+                // tested in Core rather than living untested in a view body.
+                ForEach(store.subsections(room, on: .roomDetail)) { subsection in
+                    SubsectionView(room: room, subsection: subsection, surface: .roomDetail,
+                                   density: .regular)
+                }
+                // **One `+` for the whole screen rather than one per subsection**, matching the
+                // floor view: the subsections are a presentation of one list and the picker is not
+                // scoped to a kind — an added device lands in whichever subsection its domain
+                // belongs to. Outside the stack, so a room showing nothing still has one.
                 if navigation.isConfiguring {
                     LazyVGrid(columns: columns, spacing: 9) {
                         AddTilePlaceholder {
@@ -98,64 +86,6 @@ struct RoomDetailView: View {
         }
         .sheet(isPresented: $showingEnvironmentHistory) {
             RoomEnvironmentHistoryView(roomName: room.name, sensors: room.headerSensors)
-        }
-    }
-
-    /// One group: a heading, an optional roll-up count and action, then the group's tiles.
-    ///
-    /// **One builder for every group, where there used to be three.** Media and cameras each had
-    /// their own, for one reason: a full-bleed 4×2 tile could not be expressed in a `LazyVGrid`
-    /// whose cells are all one column, so those two groups were hand-built stacks and climate got a
-    /// second `[GridItem]` to fake a half-width span. `RoomGrid` places by span, so all three
-    /// special cases became the same code — and, more to the point, a tile's size in room detail is
-    /// now `TileSpan.default(for:on:)` rather than three separate hand-agreements with it.
-    ///
-    /// Renders nothing when `ids` is empty so an unused domain never leaves a gap.
-    @ViewBuilder
-    private func group(_ title: String, _ ids: [String], rollup: Rollup? = nil) -> some View {
-        if !ids.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(title).font(.system(size: 14, weight: .bold))
-                    if let rollup {
-                        Text(rollup.kind == .lights ? "\(rollup.activeCount) of \(rollup.total) on" : "\(rollup.activeCount) open")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if rollup.activeCount > 0 {
-                            Button(rollup.kind == .lights ? "All off" : "Close all") {
-                                if rollup.kind == .lights { store.allOff(rollup, in: room.areaId) }
-                                else { store.closeAll(rollup, in: room.areaId) }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(HavenColor.domain(rollup.kind == .lights ? .light : .cover))
-                            // Mirrors `RoomSectionView.rollupRow`: named rather than silent, and
-                            // gated on `activeCount > 0` (this block) the same way that view gates
-                            // on `hasActive` — the only way the count ever clears without another
-                            // bulk action is the button disappearing once there's nothing left to
-                            // act on. Without this, a user who taps "All off" here saw exactly the
-                            // silent half-failure this task exists to end: the count is tracked and
-                            // shown in the room-list row, but this detail view never read it at all.
-                            let failures = store.bulkFailureCount(for: rollup.kind, in: room.areaId)
-                            if failures > 0 {
-                                Text("\(failures) didn't respond")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(HavenColor.warning)
-                            }
-                        }
-                    } else {
-                        Spacer()
-                    }
-                }
-                RoomGrid(columns: 4, spacing: 9) {
-                    ForEach(ids, id: \.self) { id in
-                        let span = store.span(of: id, on: .roomDetail)
-                        DeviceTileView(entityId: id, surface: .roomDetail, span: span)
-                            .tileSpan(span)
-                    }
-                }
-            }
         }
     }
 }

@@ -6,10 +6,10 @@ import Foundation
 /// than the twelve `Domain` cases — nobody thinks of "script" and "button" as separate kinds of
 /// thing to put on a wall.
 ///
-/// The buckets and their order match what `RoomDetailView` already groups by. That view keeps its
-/// own private grouping for now because it also threads roll-ups through each section; this type is
-/// the shared vocabulary for it to adopt when it is next opened, and the two are deliberately the
-/// same list so they cannot drift into disagreeing about what a "sensor" is.
+/// The buckets and their order match `SubsectionKind`, which is what a room is actually rendered
+/// as. Two types rather than one because they answer different questions — a picker's filter is not
+/// a room's layout — but deliberately the same list, so they cannot drift into disagreeing about
+/// what a "sensor" is.
 public enum TileCategory: String, Sendable, Codable, CaseIterable, Hashable {
     case climate, lights, shades, media, cameras, scenesAndMore, sensors
 
