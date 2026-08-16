@@ -53,6 +53,18 @@ Settled in the design discussion, recorded here so the plan doesn't re-litigate 
    shape reads as unset and falls back to default order once; nothing has shipped, so nothing
    migrates.
 
+10. **Subsection size is also per-surface** *(added 2026-08-16, during Task 6 — supersedes the
+    single-span shape below).* One span per kind silently flattened the per-surface defaults the
+    schema itself declares: cameras and media default to 2×2 / half-row on the floor and full-bleed
+    in room detail, and any explicit choice erased that distinction on both surfaces at once.
+    `subsections.<kind>.size` becomes `{"overview": "2x2", "room_detail": "4x2"}`, resolving
+    **surface → other surface → per-surface default** — the same read-time-fallback shape as
+    decision 9's order, for the same reason, with the same start-shared-diverge-on-first-touch
+    behaviour. The configuration sheet does not grow a surface picker: it is always opened *from* a
+    surface, and it edits that surface's size — "configured where it is seen" made literal. Mode
+    stays per-kind. A document carrying the old single-string `size` reads as unset; nothing has
+    shipped, nothing migrates.
+
 ## Schema
 
 Two additions to the dashboard document, one deletion. Schema stays at 1.
