@@ -806,8 +806,8 @@ struct TileGallery: View {
     TileGallery(page: .eighth)
 }
 
-/// **The subsection container, which nothing else in the app renders yet** — Task 5 wires it into
-/// the two surfaces. Six pages rather than one: seven kinds in two modes at two densities is
+/// **The subsection container, which both surfaces now render** — this is where its looks are
+/// checked, away from a real home's contents. Six pages rather than one: seven kinds in two modes at two densities is
 /// twenty-eight renderings, and this file's standing rule is that a page which overflows has stopped
 /// being a baseline.
 ///

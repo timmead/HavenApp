@@ -22,8 +22,12 @@ private struct RoomGridPreviews: View {
          spans: [SubsectionKind: TileSpan] = [:]) {
         self.configuring = configuring
         let store = RoomGridPreviews.populatedStore()
+        // `.overview` because every preview here is a floor-view host. Orders are per surface now
+        // (decision 9); a DEBUG fixture that let each preview pick one would be generality nothing
+        // in this file needs.
         for (areaId, order) in arranged {
-            store.config.seedForTesting(store.config.document.settingOrder(order, forRoom: areaId))
+            store.config.seedForTesting(
+                store.config.document.settingOrder(order, forRoom: areaId, on: .overview))
         }
         for (kind, span) in spans {
             store.config.seedForTesting(

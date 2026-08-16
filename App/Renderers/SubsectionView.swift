@@ -309,7 +309,8 @@ struct SubsectionView: View {
                     DeviceTileView(entityId: id, surface: surface, span: subsection.span)
                         .tileSpan(subsection.span)
                         .modifier(RearrangeableTile(entityId: id, room: room,
-                                                    visibleIds: roomOrder, drag: drag))
+                                                    visibleIds: roomOrder, surface: surface,
+                                                    drag: drag))
                 }
             }
         }
@@ -320,10 +321,14 @@ struct SubsectionView: View {
     /// The asymmetry is deliberate and is the one confusable thing here. The drag *state* is per
     /// subsection, so nothing can be dropped outside the container it was lifted in — but the list a
     /// move is computed against has to be the room's, because `TileDropDelegate` writes its result
-    /// through `store.setOrder(_:areaId:)` and that key is the room's whole arrangement. Handing it
-    /// a subsection's three lights would store those three as the room's entire order, and
-    /// `TileOrder.resolve` would then re-derive everybody else from `defaultOrder` — one drag in
-    /// Lights silently unarranging Media, Sensors and the rest.
+    /// through `store.setOrder(_:areaId:on:)` and that key is this surface's whole arrangement of
+    /// the room. Handing it a subsection's three lights would store those three as the surface's
+    /// entire order, and `TileOrder.resolve` would then re-derive everybody else from
+    /// `defaultOrder` — one drag in Lights silently unarranging Media, Sensors and the rest.
+    ///
+    /// **`for: surface`, and the surface is also what the write is keyed by** (design decision 9).
+    /// The two surfaces show different tiles, so each keeps its own list: this cannot be the union
+    /// of both, or an overview drag would again be writing a list about tiles it cannot see.
     ///
     /// It composes correctly because bucketing preserves sequence: `Subsections.resolve` walks
     /// `refs(for:)` in order, so moving a light before another light in the room's list is exactly a

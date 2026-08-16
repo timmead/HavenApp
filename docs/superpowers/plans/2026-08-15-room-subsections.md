@@ -310,10 +310,12 @@ carrying `.tileSpan(subsection.span)`).
 - [ ] **Step 3: Rewire `RoomDetailView`** the same way with `surface: .roomDetail`/`.regular`; delete its
   `group(_:_:rollup:)` and Task 1's interim `bucket(_:)`. Both duplicated rollup implementations
   are now gone; `SubsectionView` holds the only one.
-- [ ] **Step 4: Order write-back sanity.** Reordering within a subsection writes the same per-room
-  `order` key it does today (the drag machinery already writes through `store.setOrder`). Confirm
-  `DashboardConfigWriteBackTests` still passes unmodified — if it needed changes, the wiring is
-  wrong, stop and re-read.
+- [ ] **Step 4: Order write-back sanity.** ~~Reordering within a subsection writes the same per-room
+  `order` key it does today~~ — **superseded by spec decision 9**, added during this task's review.
+  Reordering writes that *surface's* order key. `DashboardConfigWriteBackTests`' "must pass
+  unmodified" tripwire was deliberately lifted with the schema change; those tests were updated to
+  the per-surface write path and extended to pin that a write on one surface preserves the other's
+  stored list.
 - [ ] **Step 5: Both suites; hands-on pass on device/simulator** (spec's testing section: gallery
   covers looks, not feel — scroll a row, long-press a tile, enter configure mode and watch scroll
   rows become grids, drag within a subsection, confirm nothing drags across). Commit:
@@ -321,6 +323,18 @@ carrying `.tileSpan(subsection.span)`).
 
 **Written from the repo during Task 5** — three things this plan did not anticipate, recorded per
 the plan's own "the code in the repo wins" rule:
+
+0. **Superseded: order is per surface** (spec decision 9, added mid-task from this task's review).
+   `rooms.<areaId>.order` is now `{"overview": [...], "room_detail": [...]}`; `DashboardDocument`
+   gained `orders(forRoom:)` / `order(forRoom:on:)` / `settingOrder(_:forRoom:on:)`;
+   `RoomSection.order` became `orders: [HavenSurface: [String]]` and `refs(for:)` resolves
+   **surface → other surface → none** at read time, with `TileOrder` itself untouched. Two
+   implementation calls not in the fix brief, both disclosed in the fix report: the fallback switch
+   is a private helper on `RoomSection` rather than a public `other` on `HavenSurface` (it is
+   meaningful only for exactly two surfaces and should not become a general concept), and
+   `HomeStore.resetOrder(areaId:)` clears **both** surfaces rather than taking a surface — clearing
+   one alone makes it *follow* its sibling, so a "reset to default" that cleared only the overview
+   would make the dashboard adopt room detail's arrangement.
 
 1. **`visibleIds` stays room-scoped while the drag state goes per-subsection.** `TileDropDelegate`
    writes through `store.setOrder(_:areaId:)`, whose key is the room's *whole* arrangement, so

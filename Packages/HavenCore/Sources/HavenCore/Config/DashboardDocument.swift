@@ -159,31 +159,77 @@ public struct DashboardDocument: Sendable, Equatable {
 
     // MARK: - Tile order
 
-    /// The order this room's tiles were arranged into, or an empty list when nobody has arranged it.
+    /// Every order this room has been arranged into, keyed by the surface it was arranged on.
+    ///
+    /// **One list per surface** — design decision 9. It was a single array, and that could not
+    /// survive two arrangeable surfaces: a drag persists only the ids visible where it happened, so
+    /// an overview drag wrote a list with no room-detail-only tile in it and silently reset every
+    /// one of their positions.
     ///
     /// Stored under the room rather than per entity, because an order is a fact about the *room* —
     /// the same reason the temperature and humidity nominations live here.
-    public func order(forRoom areaId: String) -> [String] {
+    ///
+    /// **A document still carrying the old array shape reads as unset**, here, by falling out of
+    /// `asObject`. Nothing migrates: nothing has shipped, and a development document that reverts to
+    /// the default order once is a smaller cost than a migration nobody will ever need again.
+    /// Unknown surface keys are dropped rather than defaulted, exactly as `tileSizes` and
+    /// `surfaceOverrides` drop what they cannot read.
+    public func orders(forRoom areaId: String) -> [HavenSurface: [String]] {
         guard let room = raw.asObject?[Self.roomsKey]?.asObject?[areaId]?.asObject,
-              let ids = room[Self.orderKey]?.asArray else { return [] }
-        return ids.compactMap { $0.asString }
+              let bySurface = room[Self.orderKey]?.asObject else { return [:] }
+        return bySurface.reduce(into: [:]) { out, pair in
+            guard let surface = HavenSurface(rawValue: pair.key), let ids = pair.value.asArray
+            else { return }
+            out[surface] = ids.compactMap { $0.asString }
+        }
     }
 
-    /// This document with one room's order set, or — for an empty list — cleared back to the default
-    /// arrangement.
+    /// The order this room's tiles were arranged into **on one surface**, or an empty list when that
+    /// surface has never been arranged.
     ///
-    /// Written whole rather than as a delta. A reorder is not something two people would want merged:
-    /// concurrent rearrangements of one room should end with the last one winning, which is what
-    /// `HavenConfig`'s version-conflict retry already provides.
-    public func settingOrder(_ ids: [String], forRoom areaId: String) -> DashboardDocument {
+    /// Empty means *unset*, not *default*: what an unarranged surface actually renders is the other
+    /// surface's arrangement, then the default — a fallback resolved at read time in
+    /// `RoomSection.refs(for:)`, not here, because it is a fact about a room's contents rather than
+    /// about the document.
+    public func order(forRoom areaId: String, on surface: HavenSurface) -> [String] {
+        orders(forRoom: areaId)[surface] ?? []
+    }
+
+    /// This document with one room's order **on one surface** set, or — for an empty list — cleared
+    /// back to unset.
+    ///
+    /// Each surface's list is written whole rather than as a delta. A reorder is not something two
+    /// people would want merged: concurrent rearrangements of one room should end with the last one
+    /// winning, which is what `HavenConfig`'s version-conflict retry already provides.
+    ///
+    /// **The sibling surface's list is untouched**, which is the merge discipline every mutator here
+    /// follows and is load-bearing rather than tidy: the two surfaces are arranged independently, so
+    /// a write that replaced the whole `order` object would make arranging the dashboard silently
+    /// discard the arrangement of the room you had opened. Pinned by
+    /// `arrangingOneSurfaceLeavesTheOthersListAlone`.
+    ///
+    /// A surface key holding nothing is removed, and an `order` holding no surfaces is removed with
+    /// it, so clearing both surfaces leaves no `"order": {}` husk behind for the room-record cleanup
+    /// below to trip over.
+    public func settingOrder(_ ids: [String], forRoom areaId: String,
+                             on surface: HavenSurface) -> DashboardDocument {
         var root = raw.asObject ?? [:]
         root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
         var rooms = root[Self.roomsKey]?.asObject ?? [:]
         var room = rooms[areaId]?.asObject ?? [:]
+        // `?? [:]` also swallows the legacy array shape, which is what "reads as unset" means on the
+        // write side: the first arrangement after this change replaces it rather than merging into
+        // something it cannot understand.
+        var bySurface = room[Self.orderKey]?.asObject ?? [:]
         if ids.isEmpty {
+            bySurface.removeValue(forKey: surface.rawValue)
+        } else {
+            bySurface[surface.rawValue] = .array(ids.map { .string($0) })
+        }
+        if bySurface.isEmpty {
             room.removeValue(forKey: Self.orderKey)
         } else {
-            room[Self.orderKey] = .array(ids.map { .string($0) })
+            room[Self.orderKey] = .object(bySurface)
         }
         // A room record holding nothing is removed, so resetting an arrangement in a room with no
         // nominations leaves the document exactly as it started.

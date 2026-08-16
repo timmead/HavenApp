@@ -73,13 +73,16 @@ struct RoomConfigView: View {
     /// least appealing.
     @ViewBuilder
     private var arrangement: some View {
-        if !store.config.document.order(forRoom: areaId).isEmpty {
+        // Either surface having an arrangement is enough to offer the reset, and the reset clears
+        // both — see `HomeStore.resetOrder`, which records why clearing one alone would not restore
+        // the default at all.
+        if !store.config.document.orders(forRoom: areaId).isEmpty {
             FacetCard(title: "Arrangement") {
                 VStack(alignment: .leading, spacing: 6) {
                     Button("Reset arrangement") { Task { await resetArrangement() } }
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(HavenColor.domain(.cover))
-                    Text("Puts this room's tiles back in their default order.")
+                    Text("Puts this room's tiles back in their default order, here and in the room's own view.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

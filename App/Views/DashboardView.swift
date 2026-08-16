@@ -168,12 +168,16 @@ struct DashboardView: View {
             case .roomConfig(let areaId): RoomConfigView(areaId: areaId).fittedSheet()
             case .addTile(let areaId, let surface):
                 AddTileView(areaId: areaId, surface: surface).fittedSheet()
-            // **Unreachable in this commit, not merely unbuilt.** Only a `SubsectionView` heading
-            // presents this, and nothing in the app constructs one until Task 5 wires the surfaces
-            // — so no empty sheet can appear. The arm exists because `Presentation` gained the case
-            // here, with the view that references it, and this `switch` is exhaustive. Task 6
-            // replaces it with `SubsectionConfigView(kind:).fittedSheet()`.
-            case .subsectionConfig: EmptyView()
+            // **Reachable, and therefore no longer an `EmptyView`.** Both surfaces render
+            // `SubsectionView` now, so a heading tapped in configuration mode presents this — and an
+            // `EmptyView` in a sheet is a blank panel the user has to dismiss without being told
+            // anything, which is worse than a control that is missing. Task 6 replaces this with
+            // `SubsectionConfigView(kind:)`; until then it says so, naming the subsection it was
+            // opened from so the tap is at least legibly connected to the heading that made it.
+            case .subsectionConfig(let kind):
+                ContentUnavailableView(kind.displayName, systemImage: "slider.horizontal.3",
+                                       description: Text("Size and layout for this subsection are coming soon."))
+                    .fittedSheet()
             }
         }
         // On the outermost view, so it reaches the pushed `RoomDetailView` and the sheet above as

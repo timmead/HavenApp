@@ -10,7 +10,11 @@ struct SubsectionResolverTests {
     /// composite whose primary is a cover — bucketed with the shades, exactly as a plain shade is —
     /// plus a composite with no `.primary` entry at all, whose `primaryEntityId` is therefore `nil`
     /// and which `aCompositeWithNoPrimaryIsDroppedFromEveryBucket` asserts lands nowhere.
-    private func room(order: [String] = [], overrides: [String: [HavenSurface: SurfaceMembership]] = [:]) -> RoomSection {
+    /// `overviewOrder` seeds the *overview's own* list, and every test here resolves on
+    /// `.overview` — so what they exercise is the surface's own arrangement, never the fallback to
+    /// the other surface. That chain is `HomeSectionTests`' subject; conflating the two would let a
+    /// resolver that read the wrong surface pass here.
+    private func room(overviewOrder: [String] = [], overrides: [String: [HavenSurface: SurfaceMembership]] = [:]) -> RoomSection {
         let refs: [DeviceRef] = [
             .entity("climate.lr"),
             .entity("light.b"),
@@ -24,14 +28,15 @@ struct SubsectionResolverTests {
             .composite(id: "orphan", type: "mystery", inputs: [:]),
         ]
         return RoomSection(id: "lounge", name: "Lounge", areaId: "lounge", headerSensors: [],
-                           deviceRefs: refs, tiers: [:], overrides: overrides, order: order)
+                           deviceRefs: refs, tiers: [:], overrides: overrides,
+                           orders: overviewOrder.isEmpty ? [:] : [.overview: overviewOrder])
     }
 
     // MARK: - Bucketing and empty-kind dropping
 
     @Test func emptyKindsAreDropped() {
         let bare = RoomSection(id: "empty", name: "Empty", areaId: "empty", headerSensors: [],
-                               deviceRefs: [.entity("light.a")], tiers: [:], overrides: [:], order: [])
+                               deviceRefs: [.entity("light.a")], tiers: [:], overrides: [:], orders: [:])
         let result = Subsections.resolve(room: bare, surface: .overview, document: DashboardDocument())
         #expect(result.map(\.kind) == [.lights])
     }
@@ -73,7 +78,7 @@ struct SubsectionResolverTests {
     /// Two refs land in the same kind's bucket in the order `refs(for:)` produced them — the
     /// per-room `order` the household arranged, not source or alphabetical order.
     @Test func refsWithinAKindKeepRoomsOrderSequence() {
-        let result = Subsections.resolve(room: room(order: ["light.a", "light.b"]), surface: .overview,
+        let result = Subsections.resolve(room: room(overviewOrder: ["light.a", "light.b"]), surface: .overview,
                                          document: DashboardDocument())
         let lights = result.first { $0.kind == .lights }!
         #expect(lights.refs.map(\.id) == ["light.a", "light.b"])

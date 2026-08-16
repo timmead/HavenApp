@@ -14,8 +14,9 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
     /// id — read from the dashboard document, and absent for nearly everything. See
     /// `SurfaceMembership`.
     public let overrides: [String: [HavenSurface: SurfaceMembership]]
-    /// The order the household arranged this room into, or empty when nobody has — see `TileOrder`.
-    public let order: [String]
+    /// The orders the household arranged this room into, keyed by the surface each was arranged on,
+    /// and absent for a surface nobody has arranged — see `TileOrder` and `refs(for:)`.
+    public let orders: [HavenSurface: [String]]
 
     public func tier(of entityId: String) -> CurationTier { tiers[entityId] ?? .primary }
 
@@ -37,9 +38,37 @@ public struct RoomSection: Sendable, Equatable, Identifiable {
         // anything else. This used to sort composites to the end on the grounds that they carried no
         // single entity id — true when nothing constructed them, and wrong now that a composite's id
         // is its own rather than derived from its inputs.
-        let ordered = TileOrder.resolve(stored: order, present: visible.map(\.id))
+        let ordered = TileOrder.resolve(stored: storedOrder(for: surface), present: visible.map(\.id))
         let position = Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($0.element, $0.offset) })
         return visible.sorted { (position[$0.id] ?? 0) < (position[$1.id] ?? 0) }
+    }
+
+    /// The list `surface`'s arrangement is resolved against: **this surface's own, then the other
+    /// surface's, then none** — design decision 9.
+    ///
+    /// **Resolved on every read rather than copied on first use**, and the difference is the whole
+    /// behaviour. A surface nobody has arranged does not get a snapshot of its sibling; it *follows*
+    /// it, so arranging the dashboard keeps rearranging an untouched room-detail view too. The two
+    /// diverge at the moment somebody drags on the second surface, which writes what it resolved and
+    /// stops following. Copying instead would fork them on first render, which is a fork nobody
+    /// asked for and nobody can see happening.
+    ///
+    /// Falling back to the *other* surface rather than straight to the default is what makes a room
+    /// somebody arranged on the dashboard look arranged when they open it. `TileOrder.resolve` then
+    /// does the rest untouched: ids the borrowed list does not mention — the demoted sensors that
+    /// exist only in room detail — are newcomers appended in `defaultOrder`, which is rule 2 doing
+    /// exactly the job it was written for.
+    ///
+    /// The `other` switch is meaningful **only because there are exactly two surfaces**, and is
+    /// exhaustive with no `default` so a third has to decide here what it borrows from rather than
+    /// inheriting an answer that would be wrong.
+    private func storedOrder(for surface: HavenSurface) -> [String] {
+        if let own = orders[surface], !own.isEmpty { return own }
+        let other: HavenSurface = switch surface {
+        case .overview: .roomDetail
+        case .roomDetail: .overview
+        }
+        return orders[other] ?? []
     }
 
     private func visibleRefs(for surface: HavenSurface) -> [DeviceRef] {
@@ -64,9 +93,10 @@ public enum SectionBuilder {
     ///   id — see `RoomEnvironmentResolver`. Required rather than defaulted: an omitted environment
     ///   means every room silently loses its pills, which is precisely the failure this parameter
     ///   exists to make impossible to introduce by accident.
-    /// - Parameter orders: each room's arranged tile order, keyed by area id — see `TileOrder`.
-    ///   Required for the same reason as the two below: an omitted map silently discards every
-    ///   arrangement the household has made.
+    /// - Parameter orders: each room's arranged tile orders, keyed by area id and then by the
+    ///   surface each was arranged on — see `TileOrder` and `RoomSection.refs(for:)`. Required for
+    ///   the same reason as the two below: an omitted map silently discards every arrangement the
+    ///   household has made.
     /// - Parameter overrides: each entity's per-surface membership — see `SurfaceMembership`.
     ///   Required for the same reason, and the failure is worse: an omitted map means every removal
     ///   the household has ever made silently reverts, and nothing at the call site would say so.
@@ -77,7 +107,7 @@ public enum SectionBuilder {
                              environment: [String: RoomEnvironment],
                              devices: [String: DashboardDocument.StoredDevice],
                              overrides: [String: [HavenSurface: SurfaceMembership]],
-                             orders: [String: [String]]) -> [RoomSection] {
+                             orders: [String: [HavenSurface: [String]]]) -> [RoomSection] {
         home.floors.flatMap(\.areas).map { area in
             let header = environment[area.id]?.headerSensors ?? []
             // An uplifted reading is shown in the heading instead of as a tile — but only when the
@@ -106,7 +136,7 @@ public enum SectionBuilder {
             let devices = composites + plain
             return RoomSection(id: area.id, name: area.name, areaId: area.id, headerSensors: header,
                                deviceRefs: devices, tiers: area.tiers, overrides: overrides,
-                               order: orders[area.id] ?? [])
+                               orders: orders[area.id] ?? [:])
         }
     }
 }

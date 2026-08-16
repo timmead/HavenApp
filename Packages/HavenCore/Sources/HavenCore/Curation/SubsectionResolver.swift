@@ -2,7 +2,7 @@ import Foundation
 
 /// One subsection, fully decided: which devices it holds, in what order, at what size, laid out how.
 ///
-/// What a container renders — `SubsectionView` (Task 5) reads this and nothing else, so a rendering
+/// What a container renders — `SubsectionView` reads this and nothing else, so a rendering
 /// bug in a container can never be "the resolver forgot something": the fields here are the whole
 /// contract.
 public struct RoomSubsection: Sendable, Equatable, Identifiable {

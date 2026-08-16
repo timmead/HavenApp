@@ -352,3 +352,97 @@ private func json(_ text: String) -> JSONValue {
             "state_style": .string("interpretive-dance")])])]))
     #expect(doc.tileStateStyles["binary_sensor.front"] == nil)
 }
+
+// MARK: - Per-surface tile order (design decision 9)
+
+/// **Arranging one surface must leave the other's list exactly as it was.**
+///
+/// This is the merge discipline every mutator here follows, and here it is load-bearing rather than
+/// tidy: the two surfaces are arranged independently, so a write that replaced the whole `order`
+/// object would make arranging the dashboard silently discard the arrangement of the room you had
+/// opened — the very defect per-surface order exists to end, reintroduced one level down.
+///
+/// Both surfaces are written and *both* are read back. Reading only the second would pass against a
+/// mutator that replaces the object wholesale, which is precisely the implementation this guards.
+@Test func arrangingOneSurfaceLeavesTheOthersListAlone() {
+    let doc = DashboardDocument()
+        .settingOrder(["light.a", "light.b"], forRoom: "living", on: .overview)
+        .settingOrder(["sensor.x", "light.a"], forRoom: "living", on: .roomDetail)
+
+    #expect(doc.order(forRoom: "living", on: .overview) == ["light.a", "light.b"])
+    #expect(doc.order(forRoom: "living", on: .roomDetail) == ["sensor.x", "light.a"])
+
+    // And re-writing one still does not disturb the other.
+    let again = doc.settingOrder(["light.b", "light.a"], forRoom: "living", on: .overview)
+    #expect(again.order(forRoom: "living", on: .overview) == ["light.b", "light.a"])
+    #expect(again.order(forRoom: "living", on: .roomDetail) == ["sensor.x", "light.a"])
+}
+
+/// The stored shape, asserted directly: an object keyed by `HavenSurface`'s raw values, `room_detail`
+/// spelled as it is on the wire. Other builds read this JSON, so the shape is part of the contract
+/// and not an implementation detail the accessors happen to agree on.
+@Test func anOrderIsStoredAsAnObjectKeyedBySurface() {
+    let doc = DashboardDocument().settingOrder(["light.a"], forRoom: "living", on: .roomDetail)
+    let order = doc.raw.asObject?["rooms"]?.asObject?["living"]?.asObject?["order"]?.asObject
+    #expect(order?["room_detail"]?.asArray?.compactMap(\.asString) == ["light.a"])
+    #expect(order?["overview"] == nil)
+}
+
+/// Clearing the last surface removes `order` entirely rather than leaving an empty object behind —
+/// which is what lets the room-record cleanup fire and a reset leave the document as it started.
+@Test func clearingEverySurfaceLeavesNoOrderHusk() {
+    let doc = DashboardDocument()
+        .settingOrder(["light.a"], forRoom: "living", on: .overview)
+        .settingOrder(["light.a"], forRoom: "living", on: .roomDetail)
+        .settingOrder([], forRoom: "living", on: .overview)
+    #expect(doc.raw.asObject?["rooms"]?.asObject?["living"]?.asObject?["order"] != nil)
+
+    let cleared = doc.settingOrder([], forRoom: "living", on: .roomDetail)
+    // No `"order": {}`, and with nothing else stored for this room, no room record either.
+    #expect(cleared.raw.asObject?["rooms"] == nil)
+    #expect(cleared.orders(forRoom: "living").isEmpty)
+}
+
+/// **A development document carrying the old single-array shape reads as unset**, on both surfaces —
+/// the spec's no-migration promise (decision 9). Nothing has shipped, so a document that falls back
+/// to the default order once is cheaper than a migration nobody will need again.
+@Test func aLegacyArrayOrderReadsAsUnset() {
+    let doc = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "rooms": .object(["living": .object([
+            "order": .array([.string("light.a"), .string("light.b")])])])]))
+    #expect(doc.orders(forRoom: "living").isEmpty)
+    #expect(doc.order(forRoom: "living", on: .overview).isEmpty)
+    #expect(doc.order(forRoom: "living", on: .roomDetail).isEmpty)
+}
+
+/// A surface key this build does not recognise is dropped rather than defaulted, exactly as
+/// `tileSizes` and `surfaceOverrides` drop what they cannot read — a newer build's third surface
+/// must leave this one working, not make it claim an arrangement it cannot render.
+@Test func anUnknownSurfaceKeyInAnOrderIsDropped() {
+    let doc = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "rooms": .object(["living": .object([
+            "order": .object([
+                "overview": .array([.string("light.a")]),
+                "wall_panel": .array([.string("light.b")])])])])]))
+    #expect(doc.orders(forRoom: "living") == [.overview: ["light.a"]])
+}
+
+/// The property this type exists to defend, on the new subtree: writing one surface's order keeps
+/// every key it does not own, inside the room record and outside it.
+@Test func writingAnOrderKeepsEveryKeyItDoesNotOwn() {
+    let raw = JSONValue.object([
+        "schema": .int(1),
+        "display": .object(["mode": .string("wrap")]),
+        "rooms": .object(["living": .object([
+            "label": .string("Lounge"),
+            "order": .object(["room_detail": .array([.string("sensor.x")])])])])])
+    let doc = DashboardDocument(raw: raw).settingOrder(["light.a"], forRoom: "living", on: .overview)
+    let root = doc.raw.asObject
+    #expect(root?["display"] != nil)
+    let living = root?["rooms"]?.asObject?["living"]?.asObject
+    #expect(living?["label"]?.asString == "Lounge")
+    #expect(doc.order(forRoom: "living", on: .roomDetail) == ["sensor.x"])
+    #expect(doc.order(forRoom: "living", on: .overview) == ["light.a"])
+}

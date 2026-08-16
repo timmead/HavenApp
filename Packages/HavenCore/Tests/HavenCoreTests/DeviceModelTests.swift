@@ -141,7 +141,7 @@ private func home(_ entityIds: [String]) -> ResolvedHome {
                                                inputs: [.primary: ["cover.a"]])
     let rooms = SectionBuilder.rooms(from: home(["cover.a", "light.x"]), environment: [:],
                                      devices: ["cover.a": group], overrides: [:],
-                                     orders: ["living": ["light.x", "cover.a"]])
+                                     orders: ["living": [.overview: ["light.x", "cover.a"]]])
     let living = rooms.first { $0.areaId == "living" }!
     #expect(living.refs(for: .overview).map(\.id) == ["light.x", "cover.a"])
 }

@@ -150,20 +150,39 @@ final class HomeStore {
         return outcome
     }
 
-    /// Stores the order a room's tiles were arranged into.
+    /// Stores the order a room's tiles were arranged into **on one surface** — design decision 9.
     ///
     /// Written whole: a reorder is not a delta anyone would want merged, and two people rearranging
     /// one room should end with the last one winning — which the conflict retry already gives.
-    func setOrder(_ ids: [String], areaId: String) async -> HavenConfig.Outcome {
-        await config.update { $0.settingOrder(ids, forRoom: areaId) }
+    ///
+    /// The surface is the one the drag happened on, and it is the whole point: a drag can only
+    /// persist the ids it can see, so an overview drag writing the room's single shared list used to
+    /// destroy the arranged position of every tile that lives only in room detail. Now it writes
+    /// `overview` and room detail's list is not its business.
+    func setOrder(_ ids: [String], areaId: String,
+                  on surface: HavenSurface) async -> HavenConfig.Outcome {
+        await config.update { $0.settingOrder(ids, forRoom: areaId, on: surface) }
     }
 
-    /// Forgets a room's arrangement, so it falls back to the default order.
+    /// Forgets a room's arrangement **on both surfaces**, so it falls back to the default order.
     ///
     /// The only way out of an arrangement you dislike other than dragging your way out of it, which
     /// is exactly when dragging is least appealing.
+    ///
+    /// **Both, not the one you happened to be looking at**, and that is not laziness about plumbing
+    /// a surface through. Clearing one surface alone does not restore the default: an unset surface
+    /// *follows its sibling* (see `RoomSection.refs(for:)`), so a "reset" that cleared only the
+    /// overview would make the dashboard adopt room detail's arrangement — a button labelled "Puts
+    /// this room's tiles back in their default order" doing something else entirely. Clearing both
+    /// is the only spelling under which that sentence is true. `RoomConfigView` carries an area and
+    /// no surface, which is the same fact from the other end.
+    ///
+    /// One `update`, two mutations: two writes would be two conflict windows for one user action.
     func resetOrder(areaId: String) async -> HavenConfig.Outcome {
-        await config.update { $0.settingOrder([], forRoom: areaId) }
+        await config.update {
+            $0.settingOrder([], forRoom: areaId, on: .overview)
+                .settingOrder([], forRoom: areaId, on: .roomDetail)
+        }
     }
 
     /// What a device is called: Haven's override if the user set one, otherwise Home Assistant's
@@ -460,9 +479,13 @@ final class HomeStore {
         SectionBuilder.rooms(from: home, environment: environment,
                              devices: config.document.devices,
                              overrides: config.document.surfaceOverrides,
+                             // Per surface now — see `RoomSection.refs(for:)` for the fallback
+                             // chain that turns these into what each surface actually renders. A
+                             // room with nothing stored, and one still carrying the pre-decision-9
+                             // array shape, both arrive here as `[:]`.
                              orders: home.floors.flatMap(\.areas).reduce(into: [:]) { out, area in
-                                 let order = config.document.order(forRoom: area.id)
-                                 if !order.isEmpty { out[area.id] = order }
+                                 let orders = config.document.orders(forRoom: area.id)
+                                 if !orders.isEmpty { out[area.id] = orders }
                              })
     }
 

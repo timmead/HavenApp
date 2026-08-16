@@ -284,8 +284,12 @@ private final class LockedBox: @unchecked Sendable {
         #expect(store.config.document.surfaceOverrides["sensor.lr_temp"]?[.roomDetail] == nil)
     }
 
-    /// An arrangement round-trips, and resetting it leaves the document exactly as it started rather
-    /// than a room record holding an empty list.
+    /// An arrangement round-trips **per surface**, and resetting it leaves the document exactly as
+    /// it started rather than a room record holding an empty list.
+    ///
+    /// Reset clears *both* surfaces, which is the only spelling that makes its label true: an unset
+    /// surface follows its sibling rather than taking the default, so clearing one alone would make
+    /// that surface adopt the other's arrangement. See `HomeStore.resetOrder`.
     @Test func anArrangementIsStoredAndCanBeReset() async throws {
         let (store, _) = try await boot { id, type, _ in
             switch type {
@@ -294,11 +298,14 @@ private final class LockedBox: @unchecked Sendable {
             default: return nil
             }
         }
-        #expect(await store.setOrder(["light.b", "light.a"], areaId: "living") == .written)
-        #expect(store.config.document.order(forRoom: "living") == ["light.b", "light.a"])
+        #expect(await store.setOrder(["light.b", "light.a"], areaId: "living", on: .overview) == .written)
+        #expect(await store.setOrder(["light.a", "light.b"], areaId: "living", on: .roomDetail) == .written)
+        #expect(store.config.document.order(forRoom: "living", on: .overview) == ["light.b", "light.a"])
+        // The second write did not disturb the first, through the real store and the real socket.
+        #expect(store.config.document.order(forRoom: "living", on: .roomDetail) == ["light.a", "light.b"])
 
         #expect(await store.resetOrder(areaId: "living") == .written)
-        #expect(store.config.document.order(forRoom: "living").isEmpty)
+        #expect(store.config.document.orders(forRoom: "living").isEmpty)
         // The room still holds the nomination bootstrap wrote, so the record survives — but nothing
         // of the arrangement is left behind.
         #expect(store.config.document.nominations["living"]?.temperature != nil)

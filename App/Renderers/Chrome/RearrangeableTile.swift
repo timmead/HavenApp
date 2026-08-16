@@ -100,6 +100,11 @@ struct RearrangeableTile: ViewModifier {
     let room: RoomSection
     /// The room's visible tiles in their current order — the list a move is computed against.
     let visibleIds: [String]
+    /// The surface being arranged. **Each surface keeps its own order** (design decision 9), so a
+    /// drag has to say which one it is: the same tile dragged on the dashboard and in room detail
+    /// writes two different lists, and it must, because the two surfaces do not show the same
+    /// tiles. See `HomeStore.setOrder`.
+    let surface: HavenSurface
     let drag: TileDragState
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
@@ -156,7 +161,7 @@ struct RearrangeableTile: ViewModifier {
                 }
                 .onDrop(of: [.text], delegate: TileDropDelegate(
                     target: entityId, isEnd: false, room: room, visibleIds: visibleIds,
-                    drag: drag, store: store))
+                    surface: surface, drag: drag, store: store))
         } else {
             // Outside configuration mode a tile has no drag at all — the gesture would compete with
             // the pager for nothing, since there is nothing to rearrange.
@@ -175,6 +180,8 @@ struct TileDropDelegate: DropDelegate {
     let isEnd: Bool
     let room: RoomSection
     let visibleIds: [String]
+    /// Which surface's order this drop writes — see `RearrangeableTile.surface`.
+    let surface: HavenSurface
     let drag: TileDragState
     let store: HomeStore
 
@@ -204,7 +211,7 @@ struct TileDropDelegate: DropDelegate {
         // A tile dropped where it already was must not write: a no-op write churns the shared
         // record's version, which the rest of the household reads as somebody rearranging the room.
         guard moved != visibleIds else { return false }
-        Task { _ = await store.setOrder(moved, areaId: room.areaId) }
+        Task { _ = await store.setOrder(moved, areaId: room.areaId, on: surface) }
         return true
     }
 }

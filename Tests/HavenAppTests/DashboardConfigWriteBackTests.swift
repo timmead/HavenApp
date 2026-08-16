@@ -272,6 +272,83 @@ extension DashboardConfigWriteBackTests {
         #expect(entity?["state_style"] as? String == "label")
     }
 
+    /// **A drag writes only the surface it happened on, and leaves the other surface's list
+    /// standing.**
+    ///
+    /// The regression this holds is the one design decision 9 was written for, and it is worth being
+    /// exact about because the old shape looked fine from the surface you were on: a drag can only
+    /// persist the ids it can *see*, so an overview drag storing the room's single shared list wrote
+    /// a list with no room-detail-only tile in it — and `TileOrder.resolve`, correctly, then treated
+    /// every demoted sensor as a newcomer and swept it to the end. Arranging the dashboard silently
+    /// destroyed the arrangement of the room you had opened.
+    ///
+    /// Driven end to end rather than through the document alone: the write path is `HomeStore` →
+    /// `HavenConfig.update` → the socket, and it is the *payload on the wire* that another phone in
+    /// the household reads. Asserting on the frame is the only way to see what they would get.
+    @Test func arrangingOneSurfaceLeavesTheOthersStoredOrderAlone() async throws {
+        // A document that already holds a room-detail arrangement — the thing an overview drag used
+        // to destroy. Version 4 so the write has a real base version to build on.
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,"rooms":{"living":{
+           "temperature":{"entity_id":"sensor.lr_temp","source":"state"},
+           "order":{"room_detail":["sensor.demoted","sensor.lr_temp"]}}}},
+         "updated":"2026-08-15T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        #expect(await store.setOrder(["sensor.lr_temp"], areaId: "living", on: .overview) == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        let rooms = (writes.last?["payload"] as? [String: Any])?["rooms"] as? [String: Any]
+        let order = (rooms?["living"] as? [String: Any])?["order"] as? [String: Any]
+        #expect(order?["overview"] as? [String] == ["sensor.lr_temp"])
+        // The assertion this test exists for.
+        #expect(order?["room_detail"] as? [String] == ["sensor.demoted", "sensor.lr_temp"])
+        // And the room's other keys are still there, as the merge discipline requires.
+        #expect((rooms?["living"] as? [String: Any])?["temperature"] != nil)
+    }
+
+    /// Resetting an arrangement clears **both** surfaces in **one** write.
+    ///
+    /// Both, because an unset surface follows its sibling rather than taking the default — so
+    /// clearing one alone would make it adopt the other's arrangement instead of forgetting one.
+    /// One write, for the reason `applyTileConfig` exists: two would be two conflict windows and two
+    /// chances for another phone to read a half-reset room.
+    @Test func resettingAnArrangementClearsBothSurfacesInOneWrite() async throws {
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,"rooms":{"living":{
+           "temperature":{"entity_id":"sensor.lr_temp","source":"state"},
+           "order":{"overview":["sensor.lr_temp"],"room_detail":["sensor.demoted"]}}}},
+         "updated":"2026-08-15T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+        #expect(await store.resetOrder(areaId: "living") == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let rooms = (writes.last?["payload"] as? [String: Any])?["rooms"] as? [String: Any]
+        let living = rooms?["living"] as? [String: Any]
+        // No `order` at all — not an empty object, which would be a husk the next read has to
+        // tolerate for no reason.
+        #expect(living?["order"] == nil)
+        // The room record itself survives, because the nomination is still in it.
+        #expect(living?["temperature"] != nil)
+    }
+
     /// Choosing the size a tile already had is not an edit, and must not write. The sheet decides
     /// this — see `TileConfigView.sizeEdit` — but the store must not write for a nil size either,
     /// or every Done on an unresized tile would churn the household's document.
