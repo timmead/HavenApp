@@ -260,6 +260,10 @@ struct RearrangeableTile: ViewModifier {
                 .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .onDrag {
                     drag.begin(entityId)
+                    // For a composite this is `ref.id`, not an HA entity id — see the call site's
+                    // doc comment in `SubsectionView.wrapBody`. Nothing reads it back synchronously
+                    // today (`TileDropDelegate` never inspects the provider's payload, only
+                    // `drag.dragging`), but the name would mislead a future payload consumer.
                     return NSItemProvider(object: entityId as NSString)
                 }
                 .onDrop(of: [.text], delegate: TileDropDelegate(

@@ -155,9 +155,6 @@ struct TileGallery: View {
         .environment(store)
         .environment(navigation)
         .environment(app)
-        // Set on every page, not only the one that wants it: a page that leaves this alone is a page
-        // whose appearance depends on which page was looked at before it.
-        .onAppear { navigation.isConfiguring = page == .configuring }
     }
 
     @ViewBuilder
