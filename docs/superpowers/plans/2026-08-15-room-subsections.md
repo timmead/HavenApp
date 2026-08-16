@@ -395,6 +395,37 @@ the plan's own "the code in the repo wins" rule:
 
 ---
 
+## Follow-ups — from the final whole-branch review, 2026-08-16
+
+The branch merged with these named and deliberately deferred. Each was triaged FOLLOW-UP-OK by the
+final review; none blocks anything, all are real.
+
+1. **`HomeStore.rollups(_:)` hardcodes `refs(for: .overview)`** — a room-detail Lights heading
+   counts the *dashboard's* lights, and "All Off" acts on that set. Named in a comment at
+   `SubsectionView.rollup`. Pre-existing; became visible when rollups moved into subsection headers
+   on both surfaces.
+2. **`RearrangeableTile` receives `ref.primaryEntityId` while `roomOrder` holds `ref.id`** — they
+   coincide by the tested re-keying rule in `DashboardDocument.devices`, not by the same
+   expression. One-expression fix; a divergence would write a wrong order to the household
+   document with only `moved != visibleIds` as the guard.
+3. **Reset-order is reachable only from the floor** while both surfaces are arrangeable
+   (branch-introduced discoverability gap; the reset itself correctly clears both surfaces).
+4. **Span has no path back to "following"** — once a surface's size is written, no UI returns it
+   to tracking the other surface; picking a surface's own default is a visible no-op that still
+   writes, silently dropping an unset sibling surface from its own default. Candidate: a "Follow
+   the other surface" row mirroring mode's "Household default". Design decision, not a bug fix.
+5. **Stale tile comments** naming the pre-subsection hosts: `ClimateTile.swift` ~:211
+   (RoomSectionView/RoomDetailView as the drawers), `MediaPlayerTile.swift` :4-7 ("per-surface
+   constant" + LazyVGrid-era justification), `RoomGrid.swift` :26-28 (room-detail-specific phrasing
+   that now understates).
+6. **The `+` affordance is built differently per surface** (RoomGrid on the floor, LazyVGrid in
+   detail) on a branch whose thesis is one construct.
+7. **DEBUG-only gallery residue**: silent missing-section arm; page-6 configure flag in
+   `.onAppear` (init-time fix demonstrated by `SubsectionDragPreviewHost`); `AppModel()` touching
+   real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.
+8. **Known soft assertion**: `theLiveSessionIsNeverMistakenForAStaleOne`'s live-accepts half stayed
+   green under the mutations tried; the stale-refusal half is mutation-proven.
+
 ## Execution notes
 
 - Tasks 1→2→3 are strictly sequential (each consumes the previous interface). 4 depends on 3;
