@@ -27,6 +27,20 @@ struct SubsectionConfigView: View {
     @State private var span: TileSpan = TileSpan(columns: 1, rows: 1)
     /// What `span` was seeded to — see `spanEdit`, which dirty-checks against this rather than
     /// against what is stored.
+    ///
+    /// **Exists to close an opened-but-untouched bug, precisely named because "unopened" is not a
+    /// state this view can reach: `onDisappear` cannot fire without `onAppear` firing first, so the
+    /// failure was never about a sheet nobody opened.** The bug was a comparison across an
+    /// optional/non-optional asymmetry: `span` is a non-optional `TileSpan` — it always holds a
+    /// concrete value, because the picker always has something selected — while
+    /// `subsectionSpan(kind)` is `TileSpan?`, `nil` for any kind the household has never configured.
+    /// `spanEdit` used to compare the two directly, so an unconfigured kind's seeded default (`.some
+    /// (2x1)`, say) always disagreed with the stored `nil`, and a sheet opened and closed with
+    /// nothing touched dirty-checked as edited. Seeding `seededSpan` from the same value `span` gets
+    /// and comparing draft-to-seed rather than draft-to-stored closes both halves of that: the
+    /// unconfigured-kind case stops writing on a mere open-and-close (no more spurious churn of the
+    /// shared record's version), and the camera/media case stops silently converging the two
+    /// surfaces' genuinely different defaults into one stored value the instant the sheet renders.
     @State private var seededSpan: TileSpan = TileSpan(columns: 1, rows: 1)
     /// The chosen mode override, or `nil` to keep following the household default. A draft, like
     /// `span`.

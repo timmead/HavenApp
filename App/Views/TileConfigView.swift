@@ -327,9 +327,6 @@ struct TileConfigView: View {
         }
     }
 
-    /// Whether committing would change anything. Compared against the stored override rather than
-    /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
-    /// an edit — and so a sheet merely opened and closed writes nothing at all.
     /// Whether the state style differs from what is stored — `.some(nil)` to clear a stored choice
     /// back to the default rather than storing the default as though it had been chosen.
     private var stateStyleEdit: TileStateStyle?? {
@@ -339,6 +336,9 @@ struct TileConfigView: View {
         return stateStyle == .icon ? .some(nil) : .some(stateStyle)
     }
 
+    /// Whether committing would change anything. Compared against the stored override rather than
+    /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
+    /// an edit — and so a sheet merely opened and closed writes nothing at all.
     private var hasChanges: Bool {
         DisplayName.override(from: draft) != storedOverride
             || stateStyleEdit != nil || bindingEdits != nil
