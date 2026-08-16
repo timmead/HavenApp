@@ -121,25 +121,6 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         }
     }
 
-    /// Whether a domain is worth showing a size control for at all.
-    ///
-    /// One option is not a choice, and a picker holding a single selected chip is a control that
-    /// cannot act — which this app omits rather than disables.
-    public static func isResizable(_ domain: Domain) -> Bool { available(for: domain).count > 1 }
-
-    /// A stored size reconciled against what the domain can actually draw.
-    ///
-    /// Falls back to the surface's default when the stored span is not among the available ones —
-    /// the same shape as `TileOrder.resolve` and `SurfaceMembership`: what the household said,
-    /// reconciled against what is possible now, never trusted blindly. A build that withdraws a
-    /// rendering must leave every dashboard that chose it working.
-    public static func resolve(stored: TileSpan?, for domain: Domain,
-                               on surface: HavenSurface) -> TileSpan {
-        guard let stored, available(for: domain).contains(stored) else {
-            return `default`(for: domain, on: surface)
-        }
-        return stored
-    }
 }
 
 /// Where one tile sits in the grid.

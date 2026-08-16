@@ -32,7 +32,6 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let entitiesKey = "entities"
     private static let nameKey = "name"
     private static let surfacesKey = "surfaces"
-    private static let sizesKey = "sizes"
     private static let stateStyleKey = "state_style"
     private static let devicesKey = "devices"
     private static let orderKey = "order"
@@ -172,8 +171,8 @@ public struct DashboardDocument: Sendable, Equatable {
     /// **A document still carrying the old array shape reads as unset**, here, by falling out of
     /// `asObject`. Nothing migrates: nothing has shipped, and a development document that reverts to
     /// the default order once is a smaller cost than a migration nobody will ever need again.
-    /// Unknown surface keys are dropped rather than defaulted, exactly as `tileSizes` and
-    /// `surfaceOverrides` drop what they cannot read.
+    /// Unknown surface keys are dropped rather than defaulted, exactly as `surfaceOverrides` drops
+    /// what it cannot read.
     public func orders(forRoom areaId: String) -> [HavenSurface: [String]] {
         guard let room = raw.asObject?[Self.roomsKey]?.asObject?[areaId]?.asObject,
               let bySurface = room[Self.orderKey]?.asObject else { return [:] }
@@ -246,74 +245,14 @@ public struct DashboardDocument: Sendable, Equatable {
         return DashboardDocument(raw: .object(root))
     }
 
-    // MARK: - Tile sizes
-
-    /// Every user-chosen tile size, keyed by entity id and then by surface.
-    ///
-    /// Per surface, because the two surfaces genuinely differ: a media player is half a row on the
-    /// dashboard and full-bleed in a room you have opened, and a household that changes one has said
-    /// nothing about the other.
-    ///
-    /// Unknown surfaces and unreadable spans are dropped rather than defaulted, exactly as
-    /// `surfaceOverrides` drops what it cannot read — a build that adds a size must leave an older
-    /// build working rather than have it claim the household chose something it cannot draw.
-    public var tileSizes: [String: [HavenSurface: TileSpan]] {
-        guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
-        return entities.compactMapValues { entity -> [HavenSurface: TileSpan]? in
-            guard let sizes = entity.asObject?[Self.sizesKey]?.asObject else { return nil }
-            var out: [HavenSurface: TileSpan] = [:]
-            for (rawSurface, rawSpan) in sizes {
-                guard let surface = HavenSurface(rawValue: rawSurface),
-                      let value = rawSpan.asString,
-                      let span = TileSpan(stored: value) else { continue }
-                out[surface] = span
-            }
-            return out.isEmpty ? nil : out
-        }
-    }
-
-    /// This document with one entity's size on one surface set, or — for `nil` — cleared back to the
-    /// surface's default.
-    ///
-    /// Merging at every level so a size survives a rename and vice versa, and so clearing the last
-    /// one leaves no residue — the discipline `settingMembership` established and its tests hold.
-    public func settingSize(_ span: TileSpan?, for entityId: String,
-                            on surface: HavenSurface) -> DashboardDocument {
-        var root = raw.asObject ?? [:]
-        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
-        var entities = root[Self.entitiesKey]?.asObject ?? [:]
-        var entity = entities[entityId]?.asObject ?? [:]
-        var sizes = entity[Self.sizesKey]?.asObject ?? [:]
-        if let span {
-            sizes[surface.rawValue] = .string(span.stored)
-        } else {
-            sizes.removeValue(forKey: surface.rawValue)
-        }
-        if sizes.isEmpty {
-            entity.removeValue(forKey: Self.sizesKey)
-        } else {
-            entity[Self.sizesKey] = .object(sizes)
-        }
-        if entity.isEmpty {
-            entities.removeValue(forKey: entityId)
-        } else {
-            entities[entityId] = .object(entity)
-        }
-        if entities.isEmpty {
-            root.removeValue(forKey: Self.entitiesKey)
-        } else {
-            root[Self.entitiesKey] = .object(entities)
-        }
-        return DashboardDocument(raw: .object(root))
-    }
-
     // MARK: - How a two-state tile shows its state
 
     /// Whether each two-state device shows a glyph or a word, keyed by entity id.
     ///
-    /// **Not per surface**, unlike a size. A size is about how much room a tile has, and the two
-    /// surfaces genuinely differ; whether "Open" is easier to read than an open door is a fact about
-    /// the reader, and it would be strange to answer it twice for the same device.
+    /// **Not per surface**, unlike a subsection's tile size (`subsections.<kind>.size`, see
+    /// `SubsectionConfig.swift`). Size is about how much room a tile has, and the two surfaces
+    /// genuinely differ; whether "Open" is easier to read than an open door is a fact about the
+    /// reader, and it would be strange to answer it twice for the same device.
     public var tileStateStyles: [String: TileStateStyle] {
         guard let entities = raw.asObject?[Self.entitiesKey]?.asObject else { return [:] }
         return entities.compactMapValues { entity in

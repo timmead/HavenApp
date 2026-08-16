@@ -235,15 +235,20 @@ private func decode(_ text: String) -> [String: Any]? {
 
 extension DashboardConfigWriteBackTests {
 
-    /// **A sheet holding a name and a size commits once, not twice.**
+    /// **A sheet holding a name and a state style commits once, not twice.**
     ///
-    /// This is the whole reason `applyTileConfig` exists rather than `rename` followed by a size
-    /// setter. Every write bumps the shared record's version, so two writes are two conflict windows
-    /// and two chances for another phone in the household to read a half-applied edit — a device
-    /// renamed but not resized, or the reverse. Counting the frames is the only way to hold it: both
-    /// spellings produce an identical final document, so no assertion about the *result* can tell
-    /// them apart.
-    @Test func aNameAndASizeCommitInOneWrite() async throws {
+    /// This is the whole reason `applyTileConfig` exists rather than `rename` followed by a
+    /// state-style setter. Every write bumps the shared record's version, so two writes are two
+    /// conflict windows and two chances for another phone in the household to read a half-applied
+    /// edit — a device renamed but not restyled, or the reverse. Counting the frames is the only way
+    /// to hold it: both spellings produce an identical final document, so no assertion about the
+    /// *result* can tell them apart.
+    ///
+    /// Used to carry a third field, a size, proving the same invariant across three fields at once —
+    /// `applyTileConfig` no longer takes one at all: per-entity sizing left the schema in Task 7,
+    /// replaced by the subsection sheet's own single write (`aSubsectionSpanRoundTripsToTheWirePayload`
+    /// below).
+    @Test func aNameAndAStateStyleCommitInOneWrite() async throws {
         let (store, socket) = try await boot { id, type, _ in
             switch type {
             case "havenapp/config/get": return absent(id)
@@ -255,7 +260,6 @@ extension DashboardConfigWriteBackTests {
         let before = await socket.frameTexts(ofType: "havenapp/config/set").count
 
         let outcome = await store.applyTileConfig("sensor.lr_temp", name: "Lounge",
-                                                  size: .some(TileSpan(columns: 2, rows: 1)),
                                                   stateStyle: .some(.label),
                                                   on: .overview)
         #expect(outcome == .written)
@@ -266,9 +270,6 @@ extension DashboardConfigWriteBackTests {
         let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
         let entity = entities?["sensor.lr_temp"] as? [String: Any]
         #expect(entity?["name"] as? String == "Lounge")
-        #expect((entity?["sizes"] as? [String: Any])?["overview"] as? String == "2x1")
-        // The third field, for the same reason as the other two: a sheet holding a name, a size and
-        // a state style still commits once.
         #expect(entity?["state_style"] as? String == "label")
     }
 

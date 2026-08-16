@@ -72,9 +72,10 @@ extension DashboardDocument {
     ///
     /// **A document still carrying the old single-string `size` reads as `nil` here** — `.asObject`
     /// simply does not match a `.string`, so the legacy shape falls out the same way a garbage or
-    /// unreadable value would, the discipline `tileSizes` already holds for per-entity sizes.
-    /// Nothing has shipped, so nothing migrates: a development document reverts to the per-surface
-    /// default once, silently, and that is a smaller cost than a migration nobody will need again.
+    /// unreadable value would, the discipline `surfaceOverrides` already holds for values it cannot
+    /// read. Nothing has shipped, so nothing migrates: a development document reverts to the
+    /// per-surface default once, silently, and that is a smaller cost than a migration nobody will
+    /// need again.
     public func subsectionSpan(_ kind: SubsectionKind, on surface: HavenSurface) -> TileSpan? {
         guard let stored = raw.asObject?[Self.subsectionsKey]?.asObject?[kind.rawValue]?.asObject?[Self.sizeKey]?
             .asObject?[surface.rawValue]?.asString
@@ -96,7 +97,7 @@ extension DashboardDocument {
     /// write that replaced the whole `size` object would make choosing a camera size on the floor
     /// silently discard whatever room detail had chosen. Merges at every other level too, so a
     /// sibling *kind*'s settings and this kind's own `mode` also survive untouched — modelled on
-    /// `settingDevice`/`settingSize`, the way the single-surface version of this function was.
+    /// `settingDevice`/`settingMembership`, the way the single-surface version of this function was.
     ///
     /// A surface key holding nothing is removed, and a `size` holding no surfaces is removed with
     /// it — no `"size": {}` husk left for `storeSection` below to trip over, mirroring
@@ -153,12 +154,11 @@ extension DashboardDocument {
     /// document.
     ///
     /// Every sibling mutator in `DashboardDocument.swift` inlines this write-back-or-remove step
-    /// rather than factoring it out — including three-level merges of the identical shape:
-    /// `settingSize` (`:234-260`) and `settingMembership` (`:419-445`) each repeat it once per
-    /// level, three times over. This file factors it instead because both settings here
-    /// (`settingSubsectionSpan` and `settingSubsectionMode`) walk the *exact same* two-level subtree
-    /// — kind-section, then `subsections` root — so the duplication would be between them as well as
-    /// within each, not because no inlined precedent exists.
+    /// rather than factoring it out — `settingMembership` repeats it once per level, three times
+    /// over. This file factors it instead because both settings here (`settingSubsectionSpan` and
+    /// `settingSubsectionMode`) walk the *exact same* two-level subtree — kind-section, then
+    /// `subsections` root — so the duplication would be between them as well as within each, not
+    /// because no inlined precedent exists.
     private static func storeSection(_ section: [String: JSONValue], forKind kind: SubsectionKind,
                                      into subsections: inout [String: JSONValue]) {
         if section.isEmpty {

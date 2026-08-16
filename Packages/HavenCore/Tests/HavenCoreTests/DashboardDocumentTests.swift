@@ -279,44 +279,41 @@ private func json(_ text: String) -> JSONValue {
     #expect(DashboardDocument(raw: raw).surfaceOverrides.isEmpty)
 }
 
-// MARK: - Tile sizes
+// MARK: - The no-migration promise for a vocabulary that has left
 
-@Test func aSizeIsStoredPerSurface() {
-    let doc = DashboardDocument()
-        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
-    #expect(doc.tileSizes["sensor.hall"]?[.overview] == TileSpan(columns: 2, rows: 1))
-    // Saying something about the dashboard says nothing about room detail.
-    #expect(doc.tileSizes["sensor.hall"]?[.roomDetail] == nil)
-}
-
-/// A size and a name are different decisions about the same device, and neither may erase the other.
-@Test func aSizeSurvivesARenameAndViceVersa() {
-    let doc = DashboardDocument()
-        .settingDisplayName("Hallway", for: "sensor.hall")
-        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
-        .settingMembership(.shown, for: "sensor.hall", on: .overview)
-    #expect(doc.displayNames["sensor.hall"] == "Hallway")
-    #expect(doc.tileSizes["sensor.hall"]?[.overview] == TileSpan(columns: 2, rows: 1))
-    #expect(doc.surfaceOverrides["sensor.hall"]?[.overview] == .shown)
-}
-
-/// Clearing the last size leaves no shell behind, or the document fills up with empty records of
-/// decisions nobody is making any more.
-@Test func clearingTheLastSizeRemovesTheRecord() {
-    let doc = DashboardDocument()
-        .settingSize(TileSpan(columns: 2, rows: 1), for: "sensor.hall", on: .overview)
-        .settingSize(nil, for: "sensor.hall", on: .overview)
-    #expect(doc.tileSizes["sensor.hall"] == nil)
-    #expect(doc.raw.asObject?["entities"] == nil)
-}
-
-/// **A size written by a build that knows shapes this one does not is dropped, not guessed at.**
-@Test func anUnreadableStoredSizeIsIgnoredRatherThanDefaulted() {
-    let doc = DashboardDocument(raw: .object([
+/// Per-entity tile sizing (`entities.<id>.sizes`, `settingSize`, the `tileSizes` accessor) left the
+/// schema in Task 7 — decision 5, subsection sizing replaced it. Nothing in this build parses
+/// `sizes` any more, and that is exactly the risk this pins: an unrelated mutator that rebuilt an
+/// entity's record from only the keys it understands, rather than merging into what is already
+/// there, would silently drop a legacy `sizes` subtree the moment somebody edited that entity for
+/// any other reason — the spec's no-migration promise, defended the same way
+/// `mergePreservesEveryUnknownKey` defends it at the document's top level.
+///
+/// Two cases, because the promise fails two different ways:
+/// - An edit **beside** a legacy `sizes` key must not disturb it.
+/// - An edit that empties every key this build *does* understand must not conclude the record holds
+///   nothing and remove it — `sizes` is still there, unread but present, and
+///   `settingDisplayName(nil, for:)`'s own empty-record cleanup must not fire out from under it.
+///
+/// Compared as `JSONValue`, not serialized bytes — this file's own rule (see the top-level
+/// forward-compatibility test above): key ordering and number normalisation are not bugs worth a
+/// flaky test.
+@Test func aLegacyEntitySizeSurvivesAnUnrelatedMutation() {
+    let raw = JSONValue.object([
         "schema": .int(DashboardDocument.schema),
         "entities": .object(["sensor.hall": .object([
-            "sizes": .object(["overview": .string("enormous")])])])]))
-    #expect(doc.tileSizes["sensor.hall"] == nil)
+            "name": .string("Hallway"),
+            "sizes": .object(["overview": .string("2x1")])])])])
+    let sizes = JSONValue.object(["overview": .string("2x1")])
+
+    // Beside: renaming the entity leaves its legacy `sizes` subtree untouched.
+    let renamed = DashboardDocument(raw: raw).settingDisplayName("Landing", for: "sensor.hall")
+    #expect(renamed.raw.asObject?["entities"]?.asObject?["sensor.hall"]?.asObject?["sizes"] == sizes)
+
+    // Empty: clearing the only key this build understands must not delete the record out from
+    // under a legacy key it cannot read.
+    let cleared = DashboardDocument(raw: raw).settingDisplayName(nil, for: "sensor.hall")
+    #expect(cleared.raw.asObject?["entities"]?.asObject?["sensor.hall"]?.asObject?["sizes"] == sizes)
 }
 
 // MARK: - How a two-state tile shows its state
@@ -329,10 +326,8 @@ private func json(_ text: String) -> JSONValue {
 @Test func aStateStyleSurvivesTheOtherDecisionsAboutADevice() {
     let doc = DashboardDocument()
         .settingDisplayName("Front Door", for: "binary_sensor.front")
-        .settingSize(TileSpan(columns: 1, rows: 1), for: "binary_sensor.front", on: .overview)
         .settingStateStyle(.label, for: "binary_sensor.front")
     #expect(doc.displayNames["binary_sensor.front"] == "Front Door")
-    #expect(doc.tileSizes["binary_sensor.front"]?[.overview] == TileSpan(columns: 1, rows: 1))
     #expect(doc.tileStateStyles["binary_sensor.front"] == .label)
 }
 
@@ -417,8 +412,8 @@ private func json(_ text: String) -> JSONValue {
 }
 
 /// A surface key this build does not recognise is dropped rather than defaulted, exactly as
-/// `tileSizes` and `surfaceOverrides` drop what they cannot read — a newer build's third surface
-/// must leave this one working, not make it claim an arrangement it cannot render.
+/// `surfaceOverrides` drops what it cannot read — a newer build's third surface must leave this one
+/// working, not make it claim an arrangement it cannot render.
 @Test func anUnknownSurfaceKeyInAnOrderIsDropped() {
     let doc = DashboardDocument(raw: .object([
         "schema": .int(DashboardDocument.schema),

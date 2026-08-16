@@ -13,6 +13,8 @@ import HavenCore
 /// chip — a control that cannot act. Per-entity sizing (and with it `TileConfigView`'s own copy of
 /// this gate, `TileSpan.isResizable`) left the app in the same change that made `kind.availableSpans`
 /// this component's only source of options — see decision 5 in the room-subsections design.
+/// `TileSpan.isResizable` itself was deleted from `HavenCore` in Task 7, once nothing called it any
+/// more.
 struct TileSizePicker: View {
     let options: [TileSpan]
     @Binding var selection: TileSpan

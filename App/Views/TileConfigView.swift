@@ -360,8 +360,8 @@ struct TileConfigView: View {
     /// `onDisappear`, so without `committed` a tap on Done would write, dismiss, and write again.
     ///
     /// Size left this sheet for `SubsectionConfigView` (decision 5: one sizing rule per subsection,
-    /// not per entity) — `applyTileConfig` keeps a `size` parameter for `Task 7`'s sake, but nothing
-    /// here passes one any more.
+    /// not per entity) — `applyTileConfig` no longer even has a `size` parameter to pass one to,
+    /// since Task 7 deleted per-entity sizing from the schema entirely.
     private func commit() async -> Bool {
         guard !committed else { return true }
         guard hasChanges else { committed = true; return true }

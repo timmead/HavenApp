@@ -113,14 +113,6 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
                                                   TileSpan(columns: 4, rows: 2)])
 }
 
-/// One option is not a choice — the sheet shows no control at all for these.
-@Test func aDomainWithOneRenderingIsNotResizable() {
-    #expect(!TileSpan.isResizable(.light))
-    #expect(!TileSpan.isResizable(.lock))
-    #expect(TileSpan.isResizable(.sensor))
-    #expect(TileSpan.isResizable(.camera))
-}
-
 /// **A size listed here must be drawable.** If a rendering is ever withdrawn, this is what fails —
 /// rather than a household discovering it by seeing a blank tile.
 @Test func nothingIsOfferedThatTheDefaultsDoNotAlreadyContain() {
@@ -153,30 +145,4 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
     #expect(TileSpan(stored: "0x2") == nil)
     #expect(TileSpan(stored: "-1x2") == nil)
     #expect(TileSpan(stored: "2x1x3") == nil)
-}
-
-// MARK: - Resolution
-
-@Test func aStoredSizeIsHonouredWhenTheDomainCanDrawIt() {
-    #expect(TileSpan.resolve(stored: TileSpan(columns: 2, rows: 1), for: .sensor, on: .overview)
-            == TileSpan(columns: 2, rows: 1))
-}
-
-/// **The rule that survives a build withdrawing a rendering.** A camera stored as 1×1 — a size the
-/// renderer refuses on purpose — must come back as the camera's default, not vanish and not render
-/// at a size nothing draws.
-@Test func aStoredSizeTheDomainCannotDrawFallsBackToTheDefault() {
-    #expect(TileSpan.resolve(stored: TileSpan(columns: 1, rows: 1), for: .camera, on: .overview)
-            == TileSpan(columns: 2, rows: 2))
-    #expect(TileSpan.resolve(stored: TileSpan(columns: 4, rows: 2), for: .light, on: .overview)
-            == TileSpan(columns: 1, rows: 1))
-}
-
-/// Nothing stored is the surface's own default, which is how the two surfaces keep disagreeing about
-/// media and cameras until somebody says otherwise.
-@Test func nothingStoredIsTheSurfaceDefault() {
-    #expect(TileSpan.resolve(stored: nil, for: .mediaPlayer, on: .overview)
-            == TileSpan(columns: 2, rows: 1))
-    #expect(TileSpan.resolve(stored: nil, for: .mediaPlayer, on: .roomDetail)
-            == TileSpan(columns: 4, rows: 2))
 }

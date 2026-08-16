@@ -127,7 +127,7 @@ private func json(_ text: String) -> JSONValue {
 }
 
 /// A size written by a build that knows a shape this one does not is dropped, not guessed at — the
-/// same discipline `tileSizes` already holds for per-entity sizes.
+/// same discipline `surfaceOverrides` already holds for values it cannot read.
 @Test func aGarbageSizeStringReadsAsNil() {
     let doc = DashboardDocument(raw: .object([
         "schema": .int(DashboardDocument.schema),
