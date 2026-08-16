@@ -15,9 +15,15 @@ import HavenCore
 /// this component's only source of options — see decision 5 in the room-subsections design.
 /// `TileSpan.isResizable` itself was deleted from `HavenCore` in Task 7, once nothing called it any
 /// more.
+///
+/// **`selection` is optional** — `nil` means no chip is checked, which `SubsectionConfigView` uses
+/// while its "Follow" row is the current draft (follow-up 4): `TileSpan`'s own `init` floors every
+/// span at 1×1, so there is no concrete value that could stand for "none of these" on its own: `nil`
+/// is the only representation that cannot collide with a real chip. Tapping a chip always writes a
+/// concrete value — a control that can only choose sizes has no way to write `nil` itself.
 struct TileSizePicker: View {
     let options: [TileSpan]
-    @Binding var selection: TileSpan
+    @Binding var selection: TileSpan?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -100,7 +106,7 @@ private struct TileSizeChip: View {
 
 private struct StatefulPicker: View {
     let options: [TileSpan]
-    @State private var selection: TileSpan
+    @State private var selection: TileSpan?
 
     init(options: [TileSpan]) {
         self.options = options

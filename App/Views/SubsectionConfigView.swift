@@ -15,7 +15,12 @@ struct SubsectionConfigEdit: Equatable {
     /// with one size has no card, so it never has a span to write, whatever the draft holds — the
     /// `TileConfigView.sizeEdit`-equivalent guard this sheet also needs.
     let spanIsEditable: Bool
-    let draftSpan: TileSpan
+    /// The chosen size, or `nil` for "Follow" — the draft's own representation of "go back to
+    /// tracking the other surface", picked because neither `seededSpan` nor `storedSpan` can ever
+    /// hold it themselves (see below): both are concrete `TileSpan`s. A draft never confuses "no size
+    /// chosen yet" with "Follow chosen", because there is no third state — the sheet always seeds a
+    /// concrete `span` from `Subsections.resolvedSpan` before a user can touch anything.
+    let draftSpan: TileSpan?
     /// What `draftSpan` was seeded to when the sheet opened — **not** what `subsectionSpan(kind, on:
     /// surface)` returns.
     ///
@@ -31,6 +36,10 @@ struct SubsectionConfigEdit: Equatable {
     /// mere open-and-close. Comparing against what was actually seeded makes "opened and closed" a
     /// no-op regardless of whether, or through what path, a value was already showing.
     let seededSpan: TileSpan
+    /// This surface's own explicit span, straight from `subsectionSpan(kind, on: surface)` — `nil`
+    /// when the surface is already following. Distinct from `seededSpan`, which is always concrete:
+    /// this is what decides whether choosing Follow has anything to clear at all.
+    let storedSpan: TileSpan?
     let draftMode: SubsectionMode?
     let storedMode: SubsectionMode?
 
@@ -44,8 +53,18 @@ struct SubsectionConfigEdit: Equatable {
     /// picked this surface's own default on purpose" from "the household picked whatever this
     /// surface happens to be following right now", and only the write path knows which, not this
     /// comparison. Writing explicitly either way is the simpler, correct answer.
+    ///
+    /// `draftSpan == nil` is Follow, handled first and separately: it is never compared against
+    /// `seededSpan` (a concrete span can equal `nil` from neither direction), and it clears rather
+    /// than writes — `.some(nil)`, not `.some(draftSpan)`. It only does that when there is something
+    /// to clear: `storedSpan == nil` means the surface is already following, so reselecting Follow
+    /// there is a no-op, the same as picking a mode that already matches what is stored.
     var spanEdit: TileSpan?? {
-        guard spanIsEditable, draftSpan != seededSpan else { return nil }
+        guard spanIsEditable else { return nil }
+        guard let draftSpan else {
+            return storedSpan == nil ? nil : .some(nil)
+        }
+        guard draftSpan != seededSpan else { return nil }
         return .some(draftSpan)
     }
 
@@ -107,6 +126,12 @@ struct SubsectionConfigView: View {
     /// had already chosen; `modeEdit` would see them disagree and write `.some(nil)`, clearing a
     /// mode override for a sheet nobody ever opened.
     @State private var mode: SubsectionMode?
+    /// Whether the draft is "Follow" rather than a chosen size — `SubsectionConfigEdit`'s `draftSpan
+    /// == nil`. Kept apart from `span` rather than folded into it (`span: TileSpan?`) because
+    /// `TileSizePicker`'s chips still need a concrete value to seed from *if* Follow is later backed
+    /// out of — see `sizeSelection` below, where tapping a chip clears this flag rather than losing
+    /// track of the size that was showing before Follow was chosen.
+    @State private var followsOtherSurface = false
     @State private var failure: String?
     /// True once this sheet has written, so a dismissal cannot write a second time.
     @State private var committed = false
@@ -127,7 +152,16 @@ struct SubsectionConfigView: View {
             if kind.availableSpans.count > 1 {
                 FacetCard(title: "Size") {
                     VStack(alignment: .leading, spacing: 9) {
-                        TileSizePicker(options: kind.availableSpans, selection: $span)
+                        // Shown only when this surface has its own explicit span to give up — an
+                        // already-following surface has nothing to revert, so there is no unchecked
+                        // state for the row to offer switching from. The edit type's own
+                        // `storedSpan != nil` guard makes a spurious write impossible even if that
+                        // ever stopped holding (see `SubsectionConfigEdit.spanEdit`), so this gate is
+                        // about what reads sensibly, not about safety.
+                        if hasOwnSpan {
+                            followRow
+                        }
+                        TileSizePicker(options: kind.availableSpans, selection: sizeSelection)
                         // Names the surface, because decision 10 made the two independent — a
                         // household resizing a camera here has said nothing about its other surface,
                         // which is the opposite of what this sheet said before decision 10 landed.
@@ -198,14 +232,67 @@ struct SubsectionConfigView: View {
         return "Household default (\(resolved == .scroll ? "Scroll" : "Wrap"))"
     }
 
+    /// Whether this surface currently carries its own explicit span — straight from the document,
+    /// not from the draft, so tapping `followRow` cannot make it disappear mid-sheet: it reflects
+    /// what is *stored*, and nothing here writes until commit. Gates `followRow`'s visibility and
+    /// doubles as `edit`'s `storedSpan`.
+    private var hasOwnSpan: Bool {
+        store.config.document.subsectionSpan(kind, on: surface) != nil
+    }
+
+    /// Follow-up 4's row: returns this surface to tracking the other one, mirroring
+    /// `householdDefaultLabel`'s "spell out what it resolves to" — see `followLabel`.
+    private var followRow: some View {
+        HStack {
+            Text(followLabel).font(.system(size: 15, weight: .semibold))
+            Spacer(minLength: 8)
+            Image(systemName: "checkmark")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(HavenColor.domain(.cover))
+                .opacity(followsOtherSurface ? 1 : 0)
+        }
+        .padding(.vertical, 7)
+        .tapWithoutDrag { followsOtherSurface = true }
+    }
+
+    /// What Follow currently resolves to. Computed by actually clearing this surface's span from a
+    /// scratch copy of the document and resolving through the same chain the tile behind this sheet
+    /// reads — not by resolving the *other* surface directly, which would answer the wrong question
+    /// whenever that surface itself has nothing stored: its own resolution falls back to *this*
+    /// surface first (see `Subsections.resolvedSpan`), so it would show the very value being given
+    /// up. Clearing first and resolving after is what the commit actually does; this just does it a
+    /// step early, on a document that never leaves this property.
+    private var followLabel: String {
+        let cleared = store.config.document.settingSubsectionSpan(nil, kind: kind, on: surface)
+        let resolved = Subsections.resolvedSpan(kind, on: surface, document: cleared)
+        let target = surface == .overview ? "the room" : "the dashboard"
+        return "Follow \(target) (\(resolved.columns)×\(resolved.rows))"
+    }
+
+    /// `TileSizePicker`'s binding. Reads as `nil` — no chip checked — whenever Follow is the current
+    /// draft, so the row above and a chip below are never checked at once; writes always mean a chip
+    /// was tapped, which is a size chosen, so it clears `followsOtherSurface` the same motion.
+    private var sizeSelection: Binding<TileSpan?> {
+        Binding(
+            get: { followsOtherSurface ? nil : span },
+            set: { chosen in
+                guard let chosen else { return }
+                span = chosen
+                followsOtherSurface = false
+            })
+    }
+
     /// The one decision this sheet's Done and swipe-to-dismiss both need — see `SubsectionConfigEdit`,
     /// the testable type this delegates to. Built fresh on every access rather than cached in
     /// `@State`: it is a pure function of state this view already owns (`span`, `seededSpan`,
     /// `mode`) plus one document read, cheap enough that recomputing it is simpler than keeping a
     /// sixth piece of state in step with the other five.
     private var edit: SubsectionConfigEdit {
-        SubsectionConfigEdit(spanIsEditable: kind.availableSpans.count > 1, draftSpan: span,
-                             seededSpan: seededSpan, draftMode: mode,
+        SubsectionConfigEdit(spanIsEditable: kind.availableSpans.count > 1,
+                             draftSpan: followsOtherSurface ? nil : span,
+                             seededSpan: seededSpan,
+                             storedSpan: store.config.document.subsectionSpan(kind, on: surface),
+                             draftMode: mode,
                              storedMode: store.config.document.subsectionMode(kind))
     }
 

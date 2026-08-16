@@ -411,18 +411,36 @@ final review; none blocks anything, all are real.
    coincide by the tested re-keying rule in `DashboardDocument.devices`, not by the same
    expression. One-expression fix; a divergence would write a wrong order to the household
    document with only `moved != visibleIds` as the guard.
-3. **Reset-order is reachable only from the floor** while both surfaces are arrangeable
-   (branch-introduced discoverability gap; the reset itself correctly clears both surfaces).
-4. **Span has no path back to "following"** — once a surface's size is written, no UI returns it
+3. ~~**Reset-order is reachable only from the floor** while both surfaces are arrangeable
+   (branch-introduced discoverability gap; the reset itself correctly clears both surfaces).~~
+   **Fixed in Group B** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupB-report.md`): `RoomDetailView`'s toolbar
+   gains a second configure-mode item opening `.roomConfig(areaId:)` — the same sheet the floor's
+   tappable heading already opened, reset arrangement included, unchanged. A toolbar button rather
+   than a tappable heading: room detail's name lives in `.navigationTitle`, a system-drawn view this
+   file cannot wrap the way `RoomSectionView.heading` wraps its own.
+4. ~~**Span has no path back to "following"** — once a surface's size is written, no UI returns it
    to tracking the other surface; picking a surface's own default is a visible no-op that still
    writes, silently dropping an unset sibling surface from its own default. Candidate: a "Follow
-   the other surface" row mirroring mode's "Household default". Design decision, not a bug fix.
+   the other surface" row mirroring mode's "Household default". Design decision, not a bug fix.~~
+   **Fixed in Group B** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupB-report.md`): `SubsectionConfigView`'s
+   Size card gains a Follow row, shown only when the surface currently carries its own explicit
+   span, labelled with what Follow would resolve to. `SubsectionConfigEdit.draftSpan` became
+   `TileSpan?`, `nil` meaning Follow chosen; a new `storedSpan` field decides whether choosing it has
+   anything to clear. `settingSubsectionSpan(nil, kind:, on:)` — plumbed through
+   `applySubsectionConfig` since Task 6 but never called in production — gained that caller.
 5. **Stale tile comments** naming the pre-subsection hosts: `ClimateTile.swift` ~:211
    (RoomSectionView/RoomDetailView as the drawers), `MediaPlayerTile.swift` :4-7 ("per-surface
    constant" + LazyVGrid-era justification), `RoomGrid.swift` :26-28 (room-detail-specific phrasing
    that now understates).
-6. **The `+` affordance is built differently per surface** (RoomGrid on the floor, LazyVGrid in
-   detail) on a branch whose thesis is one construct.
+6. ~~**The `+` affordance is built differently per surface** (RoomGrid on the floor, LazyVGrid in
+   detail) on a branch whose thesis is one construct.~~ **Fixed in Group B** (2026-08-16, report at
+   `.superpowers/sdd/2026-08-16-subsection-followups/groupB-report.md`): `RoomDetailView`'s `+` now
+   builds through `RoomGrid`, matching the floor and every subsection body. Its `LazyVGrid` and the
+   `columns` `[GridItem]` property that fed it are gone; the `.gridCellColumns`-inertness rationale
+   they carried already lives on `RoomGrid` itself (lines 6-10), so this is consolidation, not
+   comment loss.
 7. **DEBUG-only gallery residue**: silent missing-section arm; page-6 configure flag in
    `.onAppear` (init-time fix demonstrated by `SubsectionDragPreviewHost`); `AppModel()` touching
    real UserDefaults; the inherited duplicated `#Preview` block in `RoomGridPreviews`.

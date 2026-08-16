@@ -8,12 +8,6 @@ struct RoomDetailView: View {
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
     @State private var showingEnvironmentHistory = false
-    /// Only the `+` still uses a `LazyVGrid`: it is a single 1×1 cell with no span to honour.
-    ///
-    /// The tiles themselves are `RoomGrid`'s, inside each subsection. The Climate group used to need
-    /// a second, 2-column `[GridItem]` to get a half-width tile — `.gridCellColumns(2)` being inert
-    /// inside a `LazyVGrid` — and that workaround is what a real span-aware layout removes.
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
 
     var body: some View {
         ScrollView {
@@ -36,11 +30,21 @@ struct RoomDetailView: View {
                 // floor view: the subsections are a presentation of one list and the picker is not
                 // scoped to a kind — an added device lands in whichever subsection its domain
                 // belongs to. Outside the stack, so a room showing nothing still has one.
+                //
+                // **`RoomGrid`, not the `LazyVGrid` this used to be** (follow-up 6): the branch's
+                // thesis is one construct per concept, and a `LazyVGrid` here was the last place a
+                // room's tiles still went through the grid `RoomGrid` replaced everywhere else —
+                // `RoomGrid`'s own doc comment already carries the reason (`.gridCellColumns` is inert
+                // in a `LazyVGrid`, which is what made a room four separate grids before `RoomGrid`
+                // existed), so losing this file's second copy of that reasoning is consolidation, not
+                // comment loss. A single 1×1 cell has no span to honour either way; this only changes
+                // which layout draws it.
                 if navigation.isConfiguring {
-                    LazyVGrid(columns: columns, spacing: 9) {
+                    RoomGrid(columns: 4, spacing: 9) {
                         AddTilePlaceholder {
                             navigation.presented = .addTile(areaId: room.areaId, surface: .roomDetail)
                         }
+                        .tileSpan(TileSpan(columns: 1, rows: 1))
                     }
                 }
             }
@@ -64,6 +68,21 @@ struct RoomDetailView: View {
                 ToolbarItem(id: "room-configuration-done", placement: .topBarTrailing) {
                     Button("Done") { navigation.isConfiguring = false }
                         .fontWeight(.semibold)
+                }
+                // **Reachability, not a new capability** (follow-up 3): `.roomConfig` already exists
+                // and already clears both surfaces — see `HomeStore.resetOrder`'s own doc comment —
+                // but the only door to it was the floor's tappable room heading. Room detail had no
+                // heading of its own to wrap the same way (the name lives in `.navigationTitle`, a
+                // system-drawn view this file cannot make tappable), so it gets a toolbar button
+                // instead, matching the icon and hint the floor's own reason for opening this sheet
+                // already gives.
+                ToolbarItem(id: "room-configuration-readings", placement: .topBarTrailing) {
+                    Button {
+                        navigation.presented = .roomConfig(areaId: room.areaId)
+                    } label: {
+                        Image(systemName: "thermometer.medium")
+                    }
+                    .accessibilityLabel("Configures this room's readings")
                 }
             } else if store.config.canConfigure {
                 // Shown only to a confirmed admin with a document Haven can read and write — see
