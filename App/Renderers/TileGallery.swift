@@ -31,7 +31,7 @@ import HavenCore
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
     enum Page {
-        case first, second, third, fourth, fifth, sixth, seventh, eighth, ninth
+        case first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth
         /// The subsection container, whose pages are the only thing in the app that renders it — see
         /// `subsectionPage(_:_:)`.
         ///
@@ -40,7 +40,11 @@ struct TileGallery: View {
         /// history of what overflowed. These six are one construct rendered along two axes, so they
         /// are named for the axes — a set, not a sequence.
         case narrowCompact, narrowRegular, wideCompact, wideRegular, sensors, configuring
-        case mediaRows
+        /// The same container at a 4×1, one page per kind that offers one. Named for the kind rather
+        /// than for the axes — as `sensors` above already is, and for the same reason: each exists
+        /// for a span no *default* reaches, so it is a size a household must choose before anything
+        /// in this file draws it.
+        case mediaRows, climateRows
     }
     let page: Page
 
@@ -155,12 +159,15 @@ struct TileGallery: View {
                 case .ninth:
                     mediaWide
                     mediaRow
+                case .tenth:
+                    climateRow4x1
                 case .narrowCompact: subsectionPage(Self.narrowKinds, .compact)
                 case .narrowRegular: subsectionPage(Self.narrowKinds, .regular)
                 case .wideCompact: subsectionPage(Self.wideKinds, .compact)
                 case .wideRegular: subsectionPage(Self.wideKinds, .regular)
                 case .sensors: sensorSubsections
                 case .mediaRows: mediaRowSubsections
+                case .climateRows: climateRowSubsections
                 case .configuring: configuringSubsections
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
@@ -337,7 +344,43 @@ struct TileGallery: View {
         }
     }
 
-    /// Climate at its real width: 2 of 4 columns, as both surfaces draw it.
+    /// **The 4×1, in the five states that draw it differently.** Full width, which is what this size
+    /// is: one line of icon, the room's temperature with the mode-and-fan word beside it, and the
+    /// setpoint between its own two buttons on the right.
+    ///
+    /// The five are chosen for what each one changes. `heating` and `idle` are the fill pair — same
+    /// mode, same target, one washed and one not — which is the only way to see that the wash tracks
+    /// `hvac_action` and not on/off; `cooling` is the other accent beside them. `off` is the biggest
+    /// layout change this size makes: `setpointControl` is absent entirely, so the row is a readout
+    /// and a power button with a long gap between them, and whether that gap reads as deliberate or
+    /// as a tile that failed to fill itself is a question for eyes. `unavailable` must be struck and
+    /// assert nothing — note it has a cached `temperature` and shows it nowhere, because an
+    /// unreachable thermostat is never `isOn` and so never draws a setpoint at all.
+    ///
+    /// **Every fixture here declares two `hvac_modes`, and this size draws none of them.** That is
+    /// not an omission in the fixtures — see `ClimateTile.row`, which cut the mode row because seven
+    /// declared modes will not share a line with a stepper cluster. It is recorded here because this
+    /// page is where somebody would otherwise go looking for them.
+    ///
+    /// **Not** rendered at a stated height, unlike `climateLarge` directly above it: a 4×1 is a
+    /// single-row span, and single-row is the case both hosts size by *measuring* the tile rather
+    /// than proposing to it (`RoomGrid.rowHeight`, `SubsectionView.tileHeight`). Its own ideal height
+    /// is therefore the honest thing to look at, and stating a number would be this gallery
+    /// asserting the very thing the tile is supposed to be asked. Worth reading against `mediaRow`
+    /// on page `.ninth`: they are the app's only two 4×1 renderings, and a room holding both gets
+    /// one row height for the pair.
+    private var climateRow4x1: some View {
+        section("Climate — 4×1") {
+            VStack(spacing: 10) {
+                ForEach(["heating", "cooling", "idle", "off", "unavailable"], id: \.self) { name in
+                    ClimateTile(entityId: "climate.\(name)", size: .row)
+                }
+            }
+        }
+    }
+
+    /// Climate at its default width: 2 of 4 columns, as both surfaces draw it unless a household
+    /// says otherwise.
     private var climateRow: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
             ForEach(["heating", "cooling", "drying", "fan", "idle", "off", "unknown", "unavailable"], id: \.self) { name in
@@ -549,6 +592,33 @@ struct TileGallery: View {
     private var mediaRowSubsections: some View {
         subsectionCase(.media, .scroll, .compact, span: TileSpan(columns: 4, rows: 1))
         subsectionCase(.media, .wrap, .compact, span: TileSpan(columns: 4, rows: 1))
+    }
+
+    /// **The other 4×1, inside the container that measures it** — everything `mediaRowSubsections`
+    /// above says, said about climate. Page `.tenth` renders these tiles bare in a `VStack`; the
+    /// claim worth checking is what a `RoomGrid` does when it asks one how tall it is.
+    ///
+    /// A Climate subsection is 4×1 only because a household picked it — the default is 2×1 on both
+    /// surfaces — so this is a `span:` override, for the reason `sensorSubsections` established: a
+    /// size on offer that no default reaches is a size nobody has looked at.
+    ///
+    /// **Both modes**, because single-row is exactly the case `subsectionPage(_:_:)`'s doc comment
+    /// says is *not* guaranteed to agree: wrap hands every row the tallest measured single-row ideal,
+    /// scroll gives each tile the ideal it asks for. A height difference between these two sections
+    /// is that guarantee breaking, and `ClimateTile.row`'s "it takes its own height" note is where to
+    /// start. The pair is the check; either alone is not.
+    ///
+    /// **Its own page rather than two more sections on `.mediaRows`.** Two kinds × two modes × two
+    /// full-width tiles is past a screen, and this file's standing rule is that a page which
+    /// overflows has stopped being a baseline.
+    ///
+    /// `climate.sub_b` is the off thermostat, which is the case to look at here: with no setpoint
+    /// drawn, its line is the shortest this size produces, and it still has to measure the same
+    /// height as `sub_a` above it or a Climate subsection has rows of two sizes.
+    @ViewBuilder
+    private var climateRowSubsections: some View {
+        subsectionCase(.climate, .scroll, .compact, span: TileSpan(columns: 4, rows: 1))
+        subsectionCase(.climate, .wrap, .compact, span: TileSpan(columns: 4, rows: 1))
     }
 
     /// **Configuration mode, where every subsection wraps** whatever the household configured —
@@ -788,7 +858,15 @@ struct TileGallery: View {
                                       "current_temperature": .double(20.4),
                                       "fan_mode": .string("auto"), "hvac_action": .string("heating"),
                                       "hvac_modes": .array([.string("off"), .string("heat")])])
+        // **`current_temperature` on the off thermostat too**, added when climate gained a 4×1. A
+        // real thermostat reports the room's temperature whether or not it is heating it, and the
+        // 4×1 makes that reading its largest text — so without the attribute page `.climateRows`
+        // would draw "—" where the tile's headline goes and verify half of what it renders. The
+        // same lesson `media_player.sub_b`'s comment above records. Nothing already on screen moves:
+        // `ClimateTile.compact`, which is what every other page draws this fixture at, never reads
+        // the attribute at all.
         set("climate.sub_b", "off", ["friendly_name": .string("Study"), "temperature": .double(18),
+                                     "current_temperature": .double(19.2),
                                      "hvac_modes": .array([.string("off"), .string("heat")])])
         // Five, so wrap mode actually wraps at four columns and scroll mode actually scrolls.
         for (index, name) in ["Ceiling", "Reading", "Corner", "Shelf", "Desk"].enumerated() {
@@ -1017,10 +1095,19 @@ struct TileGallery: View {
     TileGallery(page: .ninth)
 }
 
+/// Climate's second page, for the reason it got its first: page three is eight fixtures at double
+/// width and page seven is three 4×2s at a real cell height, and five full-width rows fit under
+/// neither. The 2×1 and the 4×2 are not repeated here — see `climateRow4x1` for what these five
+/// states are chosen to show.
+#Preview("Tiles 10 — climate 4×1") {
+    TileGallery(page: .tenth)
+}
+
 /// **The subsection container, which both surfaces now render** — this is where its looks are
-/// checked, away from a real home's contents. Seven pages rather than one: seven kinds in two modes
+/// checked, away from a real home's contents. Eight pages rather than one: seven kinds in two modes
 /// at two densities is twenty-eight renderings before any non-default span is looked at, and this
-/// file's standing rule is that a page which overflows has stopped being a baseline.
+/// file's standing rule is that a page which overflows has stopped being a baseline. Three of the
+/// eight exist for a non-default span alone — sensors at 2×1, and the two kinds that offer a 4×1.
 ///
 /// Each page puts a kind's two modes one above the other, because the claim being checked is that
 /// the mode changes where the tiles are and not how wide they are — see `subsectionPage(_:_:)` for
@@ -1054,7 +1141,13 @@ struct TileGallery: View {
     TileGallery(page: .mediaRows)
 }
 
-#Preview("Subsections 7 — configuring") {
+/// The 4×1 climate question — see `climateRowSubsections`. Its own page beside the media one for
+/// the reason that one is its own page: two kinds at two modes will not share a screen.
+#Preview("Subsections 7 — climate, 4×1") {
+    TileGallery(page: .climateRows)
+}
+
+#Preview("Subsections 8 — configuring") {
     TileGallery(page: .configuring)
 }
 #endif

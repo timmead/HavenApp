@@ -112,7 +112,12 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
     #expect(TileSpan.available(for: .camera) == [TileSpan(columns: 2, rows: 2),
                                                  TileSpan(columns: 4, rows: 2)])
     #expect(TileSpan.available(for: .light) == [TileSpan(columns: 1, rows: 1)])
+    // Climate gained a 4×1 (tile refinements, item 4): the 2×1's readout is the target with a mode
+    // word squeezed under it, and a full row shows the *room's* temperature and the target at once
+    // with the setpoint as a control rather than a number with steppers in a corner. Nothing was
+    // withdrawn to make room — the 2×1 and the 4×2 both still draw.
     #expect(TileSpan.available(for: .climate) == [TileSpan(columns: 2, rows: 1),
+                                                  TileSpan(columns: 4, rows: 1),
                                                   TileSpan(columns: 4, rows: 2)])
 }
 

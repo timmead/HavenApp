@@ -109,10 +109,12 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         // A reading, or a reading over a day of itself — see `SensorSparkline`.
         case .sensor:
             return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1)]
-        // A readout with two controls squeezed beside it, or the sheet's controls without the
+        // A readout with two controls squeezed beside it, that readout given the width to breathe
+        // with the setpoint as a real control beside it, or the sheet's controls without the
         // sheet — see `ClimateTile`.
         case .climate:
-            return [TileSpan(columns: 2, rows: 1), TileSpan(columns: 4, rows: 2)]
+            return [TileSpan(columns: 2, rows: 1), TileSpan(columns: 4, rows: 1),
+                    TileSpan(columns: 4, rows: 2)]
         // A scrolling title with play/pause, that title given a whole row and a real transport, or
         // the artwork-and-volume rendering — see `MediaTileSize`. **There is no 1×1 any more:** the
         // centred-play/pause tile was withdrawn because a quarter-width media tile could say what

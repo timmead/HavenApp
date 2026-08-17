@@ -1,10 +1,13 @@
 import SwiftUI
 import HavenCore
 
-/// The two approved climate tile renderings.
+/// The three approved climate tile renderings.
 enum ClimateTileSize {
     /// 2×1. A target temperature, a mode summary, and the controls that fit beside them.
     case compact
+    /// 4×1. The same readout on one line with the width it never had: the room's temperature and
+    /// what the unit is set to on the left, the setpoint between its own two buttons on the right.
+    case row
     /// 4×2. The room's actual temperature large, the setpoint as a control rather than a readout,
     /// and every mode the unit declares as its own button.
     case large
@@ -12,8 +15,27 @@ enum ClimateTileSize {
 
 extension ClimateTileSize {
     /// The rendering a span asks for. See `DeviceTileView.tile`.
+    ///
+    /// The three cases are exactly `TileSpan.available(for: .climate)`, listed in the same order, so
+    /// the two can be read against each other — that list's own rule is that nothing is offered
+    /// which cannot be drawn.
+    ///
+    /// **A tuple switch, where this used to be `span.columns >= 4 ? .large : .compact`.** That test
+    /// read the width alone, which was sound while four columns meant two rows and nothing else; the
+    /// moment a 4×1 was offered (tile refinements, item 4) it would have sent one to `.large` — a
+    /// three-row `VStack` inside a tile one row tall. The rows are half the question now.
+    ///
+    /// **The fallback is `.compact`, the smallest**, and it is the one case kept explicitly beside
+    /// its own identical `default:` so the switch reads straight down against the list above. An
+    /// unrecognised span therefore draws the rendering that fits anywhere rather than the one that
+    /// fits least often.
     init(span: TileSpan) {
-        self = span.columns >= 4 ? .large : .compact
+        switch (span.columns, span.rows) {
+        case (2, 1): self = .compact
+        case (4, 1): self = .row
+        case (4, 2): self = .large
+        default: self = .compact
+        }
     }
 }
 
@@ -28,6 +50,7 @@ struct ClimateTile: View {
     var body: some View {
         switch size {
         case .compact: compact
+        case .row: row
         case .large: large
         }
     }
@@ -41,6 +64,12 @@ struct ClimateTile: View {
     /// setpoint becomes a control with its own two buttons rather than a number with steppers in the
     /// corner, and every mode the unit declares gets a labelled button instead of a summary you
     /// have to open a sheet to change.
+    ///
+    /// **`row` now sits between the two, and it took the first two of those three.** A 4×1 has the
+    /// width for the room's temperature and for the setpoint-as-control, and this size shares both
+    /// with it through `setpointControl`. What is left as this size's own is the part that needs a
+    /// *second* row to exist at all: `modeRow` (see `row`'s note on why it cannot go on one line)
+    /// and the device's name.
     private var large: some View {
         let e = store.state(entityId)
         let s = e.map(ClimateState.init)
@@ -56,8 +85,9 @@ struct ClimateTile: View {
                         .foregroundStyle((on ? Emphasis.accent : .secondary)
                             .color(unavailable: unavailable, accent: accent))
                         .symbolRenderingMode(.hierarchical)
-                    // **The only climate rendering that shows a name at all** — `compact` (2×1)
-                    // has never had room for one, so it already satisfies "omitted when hidden"
+                    // **The only climate rendering that shows a name at all** — `compact` (2×1) has
+                    // never had room for one and `row` (4×1) has the width but not the line to
+                    // spend it on (see its own note), so both already satisfy "omitted when hidden"
                     // without a line changing. Absent from the layout rather than blanked, the
                     // same rule `TileLabel`/`StateFace` apply, so the power button gets the space
                     // back instead of a gap beside it.
@@ -78,7 +108,8 @@ struct ClimateTile: View {
                     // **The room's temperature, not the target.** The compact tile leads with the
                     // setpoint because at two columns there is room for one number and the setpoint
                     // is the one you can change. Here both fit, and what a thermostat is for is
-                    // telling you how warm the room actually is.
+                    // telling you how warm the room actually is. `row` makes the same call at 4×1,
+                    // one size down, for the same reason.
                     Text(s?.currentTemp.map { "\(String(format: "%.1f", $0))°" } ?? "—")
                         .font(.system(size: 34, weight: .bold))
                         .lineLimit(1)
@@ -86,26 +117,8 @@ struct ClimateTile: View {
                         .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
                                                                 accent: accent))
                     Spacer(minLength: 0)
-                    // The setpoint as a control: the number between its own two buttons rather
-                    // than a readout with steppers in a far corner. Only while it is on, for the
-                    // reason the compact tile records — a target for a thermostat that is off is a
-                    // setting with no visible effect.
-                    if on {
-                        HStack(spacing: 8) {
-                            stepper("minus", label: "Decrease target temperature",
-                                    unavailable: unavailable, unreachable: e?.state == "unavailable",
-                                    accent: accent, target: s?.targetTemp, delta: -1)
-                            Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—")
-                                .font(.system(size: 20, weight: .bold))
-                                .lineLimit(1)
-                                .frame(minWidth: 42)
-                                .foregroundStyle(Emphasis.accent.color(unavailable: unavailable,
-                                                                       accent: accent))
-                            stepper("plus", label: "Increase target temperature",
-                                    unavailable: unavailable, unreachable: e?.state == "unavailable",
-                                    accent: accent, target: s?.targetTemp, delta: 1)
-                        }
-                    }
+                    setpointControl(s, on: on, unavailable: unavailable,
+                                    unreachable: e?.state == "unavailable", accent: accent)
                 }
                 Spacer(minLength: 6)
                 modeRow(s, accent: accent, unavailable: unavailable,
@@ -160,6 +173,118 @@ struct ClimateTile: View {
                 }
             }
         }
+    }
+
+    /// **The 4×1: the 2×1's readout, given the width it never had.**
+    ///
+    /// `compact` has roughly 148pt of content to spend on a 24pt number, a mode word and two
+    /// controls, and it shows the *target* rather than the room because one number is all that fits
+    /// and the target is the one you can change. The tail on that mode word was once dropped
+    /// outright for not fitting; `compact` records the measurement that put it back. A whole row
+    /// removes the constraint rather than easing it — the room's temperature leads, as it does on
+    /// the 4×2 and for the same reason, and the target comes out of the corner to sit between its
+    /// own two buttons through the same `setpointControl` the 4×2 draws.
+    ///
+    /// **The mode row was cut, and the constraint that cut it is width, not height.** The design
+    /// record (tile refinements, item 4) asks for the steppers *and* the mode row inline — the
+    /// sheet's top strip as a tile — and the arithmetic does not allow it. Four columns is about
+    /// 337pt of content; the icon, the readout, `setpointControl`'s ~110pt cluster, the power button
+    /// and their gaps account for some 280 of that, leaving under 60pt for a row whose buttons each
+    /// take `maxWidth: .infinity`. Two modes would get 30pt apiece against a "Heat Cool" that runs
+    /// nearer 52 at 11pt, and a heat pump declaring five or seven gets a fifth of that. Dropping the
+    /// power button (the mode row does carry `off`) or the steppers only moves the figure to ~33pt.
+    /// It is not a layout to tune: a mode row needs a row, which is what the 4×2 gives it.
+    ///
+    /// **No fixture would have caught that**, which is why it is settled here rather than at the
+    /// canvas. Every climate fixture in `TileGallery` declares exactly two `hvac_modes`, so the
+    /// crush a real five-mode unit would take is invisible in the one place that draws this tile.
+    /// The modes stay one tap away, in the sheet this tile opens.
+    ///
+    /// **No name, matching `compact`** — climate's other single-row size — so a household that hides
+    /// a label has nothing to hide here and Task 2's rule is satisfied without a branch. The width
+    /// the cut freed is not spare: the readout's mode-and-fan tail is a real ~95pt string at 11pt
+    /// ("Fan Only · Fan High"), and a name would have to take it from there. The name belongs to the
+    /// 4×2, which is the size with a line to put it on.
+    ///
+    /// **It takes its own height, and it must keep taking it.** A 4×1 is a *single-row* span, and
+    /// single-row is the one case both hosts size by measurement rather than by proposal:
+    /// `RoomGrid.rowHeight` measures `sizeThatFits(.unspecified)` on single-row subviews and hands
+    /// the tallest one's height to every row, and `SubsectionView.tileHeight` returns nil for a
+    /// single row so each tile asks for what it wants. A `maxHeight: .infinity` here would be greedy
+    /// rather than exact — the trap `SubsectionView.tileHeight`'s comment records having fallen into
+    /// and removed — which is the exact opposite of what `large` needs. Same file, opposite rules,
+    /// because the spans differ; `MediaPlayerTile.row` carries this note for the same reason.
+    ///
+    /// Nothing on this line has an opinion about its own size. The tallest thing is a 24pt number in
+    /// a ~29pt line box against 26pt control circles, well inside `GlassTile`'s 66pt content floor,
+    /// so this tile measures what every other single-row tile measures and the steppers appearing
+    /// when the unit is switched on does not change it. That matters more here than on a 1×1: a
+    /// Climate subsection sizes all its tiles alike, so at 4×1 this tile *is* the measured row
+    /// height for its whole container, and anything added to the line that measures past the floor —
+    /// a chart, an image with an aspect ratio, a second text line — grows every row in it.
+    private var row: some View {
+        let e = store.state(entityId); let s = e.map(ClimateState.init)
+        let on = s?.isOn ?? false
+        let accent = HavenColor.climate(s?.function ?? .unspecified)
+        let unavailable = e?.isUnavailable ?? false
+        // `.leading` — horizontally leading, vertically centred. One line of content hung from the
+        // top of an 85pt tile floats above 30pt of nothing; `compact` may sit at the top because it
+        // has a second line to put there and this size deliberately does not. `MediaPlayerTile.row`
+        // is that parameter's other caller, for the identical reason.
+        return GlassTile(active: s?.isConditioning ?? false, accent: accent,
+                         unavailable: unavailable, alignment: .leading) {
+            HStack(spacing: 10) {
+                // Accent while on, `.secondary` while off — `compact`'s rule, which is the grid's
+                // rule; the long form is on that tile.
+                Image(systemName: "thermometer.medium")
+                    .font(.system(size: 20))
+                    .foregroundStyle((on ? Emphasis.accent : .secondary)
+                        .color(unavailable: unavailable, accent: accent))
+                    .symbolRenderingMode(.hierarchical)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // `Emphasis.primary`, not the on/off accent `compact` gives *its* largest
+                    // number. The two are showing different values: `compact`'s is the target, which
+                    // is a setting and so goes grey when the unit is off, while this is the room's
+                    // own temperature — a reading, true whatever the thermostat is doing. The 4×2
+                    // draws the same value the same way.
+                    //
+                    // `lineLimit(1).fixedSize()` for the reason `compact` gives: it is the largest
+                    // text on the tile and the one that must not be ambiguous, so it takes the width
+                    // it needs and the word beside it — already `lineLimit(1)` — gives way.
+                    Text(s?.currentTemp.map { "\(String(format: "%.1f", $0))°" } ?? "—")
+                        .font(.system(size: 24, weight: .bold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                accent: accent))
+                    // The same string `compact` draws, one point larger. 10pt is the size two
+                    // columns forced — that tile's history is a commit dropping the `· fan auto`
+                    // tail for not fitting — and a full row is under no such pressure, so the word
+                    // can be read from the distance the number beside it can.
+                    Text(s.map { "\(TileName.words($0.hvacMode))\($0.fanMode.map { " · Fan \(TileName.words($0))" } ?? "")" } ?? "")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                setpointControl(s, on: on, unavailable: unavailable,
+                                unreachable: e?.state == "unavailable", accent: accent)
+                // Kept even though `setpointControl` disappears when the unit is off: off, this row
+                // is the readout and this button, which is the one control an off thermostat needs.
+                // The two-questions split `compact` documents at length applies unchanged — tinted
+                // by `unavailable`, pressable by `state == "unavailable"` alone.
+                powerButton(on: on, unavailable: unavailable, unreachable: e?.state == "unavailable",
+                            accent: accent, modes: s?.modes ?? [])
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .contentShape(Rectangle())
+        // Tap alone, where `compact` also carries a long press doing the identical thing. One
+        // gesture with one meaning — and it is the gesture that reaches the modes this size cut.
+        .onTapGesture { navigation.open(entityId, on: surface) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(s.map { AccessibilitySummary.climate(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
+        .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
     }
 
     private var compact: some View {
@@ -217,8 +342,11 @@ struct ClimateTile: View {
                         // There is room for all three because this tile is **never narrower than two
                         // columns**, on either surface, however the household sizes it —
                         // `SubsectionKind.climate.availableSpans` (`TileSpan.available(for:
-                        // .climate)`) offers only 2×1 or 4×2, with no 1-column option to fall back
-                        // to. Roughly 172pt is the floor, not just today's default.
+                        // .climate)`) offers 2×1, 4×1 and 4×2, with no 1-column option to fall back
+                        // to. Roughly 172pt is the floor, not just today's default. (The list read
+                        // "only 2×1 or 4×2" until the 4×1 arrived; the claim is unchanged, since
+                        // what holds it up is the absence of a 1-column option and not the length
+                        // of the list.)
                         if on {
                             stepper("minus", label: "Decrease target temperature",
                                     unavailable: unavailable, unreachable: e?.state == "unavailable",
@@ -283,6 +411,46 @@ struct ClimateTile: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.climate(store.displayName(of: entityId), $0) } ?? store.displayName(of: entityId))
         .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
+    }
+
+    /// The setpoint as a control: the number between its own two buttons, rather than a readout
+    /// with steppers in a far corner. Drawn by the two sizes with a row to give it — the 4×1 and
+    /// the 4×2.
+    ///
+    /// **Shared for the rule, not for the `HStack`.** Both sites draw it *only while the unit is
+    /// on*, because a target temperature for a thermostat that is off is a setting with no visible
+    /// effect and `setClimateTemp` on an off unit is a command whose result the user cannot see —
+    /// the long form is on `compact`, and it is a fact about thermostats rather than about either
+    /// layout. Two copies of a three-element row would only be tedious; two copies of *when a
+    /// setpoint may be shown at all* is somewhere for that answer to fall out of step.
+    ///
+    /// **No scale parameters, deliberately.** Task 3's `transportCluster` took them because its two
+    /// call sites genuinely differ — white over an album cover against the domain accent on glass —
+    /// and here they do not: 26pt circles around a 20pt number are what fits on one line, and the
+    /// 4×2 has no reason to be larger for having more room. Parameters would be inventing a
+    /// difference. If one ever appears, this signature is where it goes.
+    ///
+    /// `compact`'s cornered pair stays inline and separate rather than becoming a third caller: it
+    /// is a deliberately cut-down control with **no number between the buttons**, because at two
+    /// columns the number is already the tile.
+    @ViewBuilder
+    private func setpointControl(_ s: ClimateState?, on: Bool, unavailable: Bool,
+                                 unreachable: Bool, accent: Color) -> some View {
+        if on {
+            HStack(spacing: 8) {
+                stepper("minus", label: "Decrease target temperature",
+                        unavailable: unavailable, unreachable: unreachable,
+                        accent: accent, target: s?.targetTemp, delta: -1)
+                Text(s?.targetTemp.map { "\(Int($0))°" } ?? "—")
+                    .font(.system(size: 20, weight: .bold))
+                    .lineLimit(1)
+                    .frame(minWidth: 42)
+                    .foregroundStyle(Emphasis.accent.color(unavailable: unavailable, accent: accent))
+                stepper("plus", label: "Increase target temperature",
+                        unavailable: unavailable, unreachable: unreachable,
+                        accent: accent, target: s?.targetTemp, delta: 1)
+            }
+        }
     }
 
     /// One degree down or up, without opening the sheet.
