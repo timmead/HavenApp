@@ -53,6 +53,14 @@ import Testing
 /// outside its own offered sizes, the seed would not read as visibly broken: a `span` no chip
 /// matches renders identically to `nil`, so the sheet would open *masquerading as Follow chosen*
 /// for a household that has configured nothing and never touched that row.
+///
+/// **The masquerade this rules out is the one reached through a *default*, which is the only road
+/// this test can close.** A stored span reaches the same unmatched state by the other road — a size
+/// Haven has since withdrawn, media's 1×1 being the standing example — and no invariant here can
+/// prevent that, because withdrawing a rendering is a decision taken later than any document
+/// already written. That case is handled where it is visible rather than by a guard: see
+/// `SubsectionConfigView.sizeSelection`, where a picker with nothing checked *anywhere* — Follow row
+/// included — is what tells the two apart, and where choosing anything overwrites the dead value.
 @Test func defaultSpanIsAlwaysAnOfferedSize() {
     for kind in SubsectionKind.allCases {
         for surface in HavenSurface.allCases {

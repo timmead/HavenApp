@@ -14,10 +14,15 @@ import HavenCore
 /// `#if DEBUG` so none of this is in a shipping build. Render it with Xcode's canvas, or via the
 /// preview tooling, on `App/Renderers/TileGallery.swift`.
 ///
-/// **Not included, deliberately:** `CameraTile` and `MediaPlayerTile`'s 4×2 `large` size, both of
-/// which fetch artwork over the network from a live Home Assistant. A gallery that renders
-/// differently depending on whether a request happened to come back is not a baseline you can
-/// compare against.
+/// **The 4×2 sizes are here after all, and the reason they once were not has since been checked.**
+/// `CameraTile` and `MediaPlayerTile`'s `large` both fetch artwork over the network, and a gallery
+/// that renders differently depending on whether a request came back is not a baseline — which is
+/// why they were originally excluded. But this file's own `AppModel` has no session, so
+/// `AuthenticatedImage` fails its load immediately and every render is the same placeholder; the
+/// subsection pages have rendered both at their real cell heights since they arrived (see
+/// `subsectionPage(_:_:)`, and `.wideRegular` in particular). That page is now also the regression
+/// picture for the two tiles that used to hard-code a height of 141 and so drew shorter than the
+/// two rows they occupy — see `CameraTile.wide` and `MediaPlayerTile.large`.
 /// Split into pages because a preview snapshot captures one screen, not a scroll view's full
 /// content — a single gallery would leave half the tiles unverified below the fold, which is
 /// precisely the "assumed rather than looked at" this exists to end. It went from two pages to
@@ -26,7 +31,7 @@ import HavenCore
 /// a baseline, so the fix is another page rather than a shorter list.
 struct TileGallery: View {
     enum Page {
-        case first, second, third, fourth, fifth, sixth, seventh, eighth
+        case first, second, third, fourth, fifth, sixth, seventh, eighth, ninth
         /// The subsection container, whose pages are the only thing in the app that renders it — see
         /// `subsectionPage(_:_:)`.
         ///
@@ -35,6 +40,7 @@ struct TileGallery: View {
         /// history of what overflowed. These six are one construct rendered along two axes, so they
         /// are named for the axes — a set, not a sequence.
         case narrowCompact, narrowRegular, wideCompact, wideRegular, sensors, configuring
+        case mediaRows
     }
     let page: Page
 
@@ -106,9 +112,13 @@ struct TileGallery: View {
                     section("Sensor") { ids("sensor", ["value", "unavailable"]) }
                     section("Binary sensor") { ids("binary_sensor", ["active", "clear", "unavailable"]) }
                     section("Generic") { ids("generic", ["idle", "unavailable"]) }
-                    section("Media player — 1×1") { ids("media_player", ["playing", "idle", "unavailable"]) }
                     sensorWide
-                    mediaWide
+                    // Media used to be here too — a 1×1 row through `ids(...)` and `mediaWide`
+                    // below it. The 1×1 rendering was withdrawn (tile refinements, item 3), which
+                    // also disqualified `ids(...)` for media outright: it lays out in a 4-column
+                    // grid, and media's overview default is now 2×1, so every tile in that row
+                    // would have been a two-column rendering drawn one column wide. Both sizes
+                    // moved to page `.ninth` when the new 4×1 needed room — see `mediaRow`.
                 case .fourth:
                     section("Room configuration — candidates, and none") {
                         VStack(alignment: .leading, spacing: 16) {
@@ -142,11 +152,15 @@ struct TileGallery: View {
                     climateLarge
                 case .eighth:
                     deviceContext
+                case .ninth:
+                    mediaWide
+                    mediaRow
                 case .narrowCompact: subsectionPage(Self.narrowKinds, .compact)
                 case .narrowRegular: subsectionPage(Self.narrowKinds, .regular)
                 case .wideCompact: subsectionPage(Self.wideKinds, .compact)
                 case .wideRegular: subsectionPage(Self.wideKinds, .regular)
                 case .sensors: sensorSubsections
+                case .mediaRows: mediaRowSubsections
                 case .configuring: configuringSubsections
                 case .third:
                     // **Two columns, because that is the only width this tile is ever drawn at.**
@@ -241,6 +255,16 @@ struct TileGallery: View {
         "sensor.sub_power", "binary_sensor.sub_door",
         "sensor.sub_energy", "binary_sensor.sub_motion",
     ]
+
+    /// `supported_features` for a speaker that can do everything the transport draws:
+    /// `pause | volumeSet | volumeMute | previousTrack | nextTrack | play`.
+    ///
+    /// Written as the union of `MediaPlayerFeatures`' own values rather than as `16445`, so the
+    /// fixture says which controls it is asking for and a reader does not have to decompose a
+    /// number to find out.
+    private static let prevNextPlayPause: Int = MediaPlayerFeatures([
+        .pause, .volumeSet, .volumeMute, .previousTrack, .nextTrack, .play,
+    ]).rawValue
 
     private static let twoStateCases: [String] = [
         "light.on", "light.off",
@@ -338,13 +362,54 @@ struct TileGallery: View {
         }
     }
 
-    /// The 2×1 size, which took its own commit to get struck (`e6ebe54`) after the 1×1 had already
-    /// been done — so it is worth seeing beside its sibling rather than assumed to match.
+    /// The 2×1 size, which took its own commit to get struck (`e6ebe54`) — so it is worth looking
+    /// at rather than assumed to match its siblings.
+    ///
+    /// **Two of four columns, because that is the width this size is ever drawn at.** It was a
+    /// full-width `VStack` until the 4×1 arrived and made the difference matter: with a genuinely
+    /// full-width media tile on the same page, a 2×1 drawn full width would have made the two look
+    /// like the same size. That is the identical correction page `.third` records making for
+    /// climate, for the identical reason.
+    ///
+    /// `nolabel` is the hidden-label case, and it is the one to *judge* rather than check: a player
+    /// with its name hidden and nothing playing has no text for the title window, so the window
+    /// renders blank beside a live transport. Whether that reads as a tile with nothing to say or as
+    /// a tile that failed is a question for eyes, and the answer decides whether the slot wants a
+    /// placeholder glyph. The 4×1 below renders the same fixture for the same question.
     private var mediaWide: some View {
         section("Media player — 2×1") {
-            VStack(spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2), spacing: 9) {
                 MediaPlayerTile(entityId: "media_player.playing", size: .wide)
+                MediaPlayerTile(entityId: "media_player.full", size: .wide)
+                MediaPlayerTile(entityId: "media_player.nolabel", size: .wide)
                 MediaPlayerTile(entityId: "media_player.unavailable", size: .wide)
+            }
+        }
+    }
+
+    /// **The 4×1, in the five states that draw differently.** Full width, which is what this size
+    /// is: one line of icon, scrolling title and the whole transport.
+    ///
+    /// The five are chosen for what each one changes. `full` is playing with a title and every
+    /// transport bit set — the complete cluster, and the scrolling window with something long
+    /// enough in it to actually travel. `paused` is the same tile with the glyph flipped and the
+    /// tile's lit background gone, which is the pair the `isPlaying` tint is about. `idle` declares
+    /// no features at all: no title, no prev/next, and `playPauseButton`'s dead-placeholder branch
+    /// where the button would be — the omit-don't-disable rule, which is invisible unless a fixture
+    /// has nothing to offer. `unavailable` must be struck and assert nothing. `nolabel` is the
+    /// hidden-label case described on `mediaWide` above.
+    ///
+    /// **Not** rendered at a stated height, unlike `climateLarge`: a 4×1 is a single-row span, and
+    /// single-row is the case both hosts size by *measuring* the tile rather than proposing to it
+    /// (`RoomGrid.rowHeight`, `SubsectionView.tileHeight`). Its own ideal height is therefore the
+    /// honest one to look at here, and stating a number would be this gallery asserting the very
+    /// thing the tile is supposed to be asked.
+    private var mediaRow: some View {
+        section("Media player — 4×1") {
+            VStack(spacing: 10) {
+                ForEach(["full", "paused", "idle", "unavailable", "nolabel"], id: \.self) { name in
+                    MediaPlayerTile(entityId: "media_player.\(name)", size: .row)
+                }
             }
         }
     }
@@ -459,6 +524,31 @@ struct TileGallery: View {
             subsectionCase(.sensors, .scroll, density, span: TileSpan(columns: 2, rows: 1))
             subsectionCase(.sensors, .wrap, density, span: TileSpan(columns: 2, rows: 1))
         }
+    }
+
+    /// **The 4×1 inside the container that measures it** — the thing page `.ninth` cannot show, since
+    /// those are bare tiles in a `VStack` and the claim worth checking is what a `RoomGrid` does when
+    /// it asks this tile how tall it is.
+    ///
+    /// A Media subsection is only ever 4×1 because a household picked it — the defaults are 2×1 and
+    /// 4×2 — so this is a `span:` override, for exactly the reason `sensorSubsections` overrides to
+    /// 2×1: a size on offer that no default reaches is a size nobody has looked at.
+    ///
+    /// **Both modes, because single-row is precisely the case `subsectionPage(_:_:)`'s doc comment
+    /// says is not guaranteed to agree.** Wrap takes the tallest single-row tile's *measured* ideal
+    /// and hands it to every row; scroll gives each tile the ideal it asks for. They match only
+    /// because a subsection's tiles are the same renderer at the same span — so if these two sections
+    /// ever differ in height, that is the guarantee breaking rather than a width problem, and
+    /// `MediaPlayerTile.row`'s "it takes its own height" note is where to start.
+    ///
+    /// Its own page rather than another section on `.wideCompact` or a third on `.ninth`: both are
+    /// full, and this file's standing rule is that a page which overflows has stopped being a
+    /// baseline. Named for its kind rather than for the two axes, as `.sensors` already is, because
+    /// like that one it exists for a non-default span rather than for a density/mode pairing.
+    @ViewBuilder
+    private var mediaRowSubsections: some View {
+        subsectionCase(.media, .scroll, .compact, span: TileSpan(columns: 4, rows: 1))
+        subsectionCase(.media, .wrap, .compact, span: TileSpan(columns: 4, rows: 1))
     }
 
     /// **Configuration mode, where every subsection wraps** whatever the household configured —
@@ -607,8 +697,44 @@ struct TileGallery: View {
                                                 "media_artist": .string("An Artist"),
                                                 "volume_level": .double(0.4),
                                                 "supported_features": .int(4)])
+        // A device that declares nothing, which is a real thing a `media_player` does: no title, no
+        // transport, and `playPauseButton`'s placeholder glyph where the button would be. The
+        // omit-don't-disable rule has no picture without a fixture that has nothing to offer.
         set("media_player.idle", "idle", ["friendly_name": .string("TV")])
         set("media_player.unavailable", "unavailable", ["friendly_name": .string("Radio")])
+        // **A player that declares the whole transport.** `media_player.playing` above sets
+        // `supported_features: 4` — `volumeSet` alone — so it draws a volume row and *no* live
+        // play/pause at all, which was invisible while the 1×1 and 2×1 were the only sizes looked
+        // at. `prevNextPlayPause` is play|pause|volumeSet|volumeMute|previousTrack|nextTrack, the
+        // set a speaker actually reports, and the 4×1 exists to draw it. The existing fixture keeps
+        // its volume-only mask: a player that declares almost nothing is a real device and the only
+        // picture of what the 2×1 does with one, so changing it to suit a new rendering would spend
+        // the sparse case to gain a duplicate of the rich one. (Its *layout* did change in this
+        // commit — `mediaWide` went from a full-width `VStack` to two columns — so what is preserved
+        // here is the fixture's state, not an untouched picture.)
+        //
+        // The title is long on purpose — `ScrollingText` only animates when its content overflows
+        // the window, so a short one verifies the still case and nothing else.
+        set("media_player.full", "playing",
+            ["friendly_name": .string("Kitchen"),
+             "media_title": .string("A Song With Rather A Long Name On It"),
+             "media_artist": .string("An Artist"),
+             "volume_level": .double(0.4),
+             "supported_features": .int(Self.prevNextPlayPause)])
+        set("media_player.paused", "paused",
+            ["friendly_name": .string("Study"),
+             "media_title": .string("Another Song"),
+             "media_artist": .string("A Second Artist"),
+             "volume_level": .double(0.6),
+             "supported_features": .int(Self.prevNextPlayPause)])
+        // Item 3's hidden-label fixture, and item 2's open question: a player whose name is hidden
+        // and which reports no title has nothing at all for the title window. Playing rather than
+        // idle, so the blank window sits beside a live transport — which is the comparison being
+        // judged. Hidden below, next to `light.unlabelled`.
+        set("media_player.nolabel", "playing",
+            ["friendly_name": .string("Landing"),
+             "volume_level": .double(0.3),
+             "supported_features": .int(Self.prevNextPlayPause)])
         // Companion fixtures: entities that share a device_id with a primary and sit at
         // `.companion`, which is what `CompositeState` joins on. Without registry info the resolver
         // correctly finds nothing, and the card would render blank while proving nothing.
@@ -674,12 +800,21 @@ struct TileGallery: View {
         set("cover.sub_a", "open", ["friendly_name": .string("Bay"), "current_position": .int(70)])
         set("cover.sub_b", "closed", ["friendly_name": .string("Side"), "current_position": .int(0)])
         set("cover.sub_c", "open", ["friendly_name": .string("Skylight"), "current_position": .int(40)])
+        // **One bare, one full, deliberately paired.** `sub_a` keeps `supported_features: 4`
+        // (`volumeSet` alone) as the subsection pages' untouched baseline; `sub_b` declares the whole
+        // transport. `.wideRegular` renders this kind at room detail's 4×2, which makes it the only
+        // page in the gallery that draws `MediaPlayerTile.large` — and therefore the only picture of
+        // both that tile's artwork-scrim transport and its height, the one that used to be a
+        // hard-coded 141. With both fixtures declaring volume only, that scrim drew zero buttons and
+        // the page verified half of what it renders. `sub_b` had nothing to lose by gaining them: it
+        // is idle with no title, so what changes is the controls appearing, not a state moving.
         set("media_player.sub_a", "playing", ["friendly_name": .string("Speaker"),
                                               "media_title": .string("A Song"),
                                               "media_artist": .string("An Artist"),
                                               "volume_level": .double(0.4),
                                               "supported_features": .int(4)])
-        set("media_player.sub_b", "idle", ["friendly_name": .string("TV")])
+        set("media_player.sub_b", "idle", ["friendly_name": .string("TV"),
+                                           "supported_features": .int(Self.prevNextPlayPause)])
         // The cameras page is deterministic despite the header comment above: these fixtures have no
         // registry entry and the gallery's `AppModel` has no session, so `AuthenticatedImage` fails
         // its load immediately and every render is the same placeholder. What is being looked at
@@ -759,6 +894,9 @@ struct TileGallery: View {
         // Item 2 (tile-refinements): `light.unlabelled` has its name hidden, so `.first`'s Light
         // row (`ids("light", [...])` above) shows one nameless tile beside labelled siblings.
         document = document.settingLabelHidden(true, entityId: "light.unlabelled")
+        // Item 3's own hidden-label case, on page `.ninth`: the same household choice on a media
+        // player, where it lands on the title window's name-fallback rather than on a name row.
+        document = document.settingLabelHidden(true, entityId: "media_player.nolabel")
         // The label-style twins: the same states again, with the household's choice stored, so both
         // styles can be compared rather than described.
         for (id, state, name, dc) in [
@@ -839,7 +977,7 @@ struct TileGallery: View {
     TileGallery(page: .first)
 }
 
-#Preview("Tiles 2 — scene, sensor, binary, generic, media") {
+#Preview("Tiles 2 — scene, sensor, binary, generic") {
     TileGallery(page: .second)
 }
 
@@ -872,10 +1010,17 @@ struct TileGallery: View {
     TileGallery(page: .eighth)
 }
 
+/// Media's own page, for the reason climate got one: the 4×1 needs five fixtures at full width, and
+/// page two was already full. The 4×2 is not here — it renders at a real cell height on
+/// `.wideRegular`, which is where its own height fix is looked at.
+#Preview("Tiles 9 — media 2×1 and 4×1") {
+    TileGallery(page: .ninth)
+}
+
 /// **The subsection container, which both surfaces now render** — this is where its looks are
-/// checked, away from a real home's contents. Six pages rather than one: seven kinds in two modes at two densities is
-/// twenty-eight renderings, and this file's standing rule is that a page which overflows has stopped
-/// being a baseline.
+/// checked, away from a real home's contents. Seven pages rather than one: seven kinds in two modes
+/// at two densities is twenty-eight renderings before any non-default span is looked at, and this
+/// file's standing rule is that a page which overflows has stopped being a baseline.
 ///
 /// Each page puts a kind's two modes one above the other, because the claim being checked is that
 /// the mode changes where the tiles are and not how wide they are — see `subsectionPage(_:_:)` for
@@ -903,7 +1048,13 @@ struct TileGallery: View {
     TileGallery(page: .sensors)
 }
 
-#Preview("Subsections 6 — configuring") {
+/// The 4×1 media question — see `mediaRowSubsections`. A span no default reaches, in the container
+/// that decides how tall it is.
+#Preview("Subsections 6 — media, 4×1") {
+    TileGallery(page: .mediaRows)
+}
+
+#Preview("Subsections 7 — configuring") {
     TileGallery(page: .configuring)
 }
 #endif

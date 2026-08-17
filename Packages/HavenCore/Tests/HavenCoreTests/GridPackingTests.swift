@@ -102,8 +102,11 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
 @Test func everyDomainOffersOnlyTheSizesSomethingCanDraw() {
     #expect(TileSpan.available(for: .sensor) == [TileSpan(columns: 1, rows: 1),
                                                  TileSpan(columns: 2, rows: 1)])
-    #expect(TileSpan.available(for: .mediaPlayer) == [TileSpan(columns: 1, rows: 1),
-                                                      TileSpan(columns: 2, rows: 1),
+    // No 1×1 media: the centred-play/pause tile was withdrawn (tile refinements, item 3) because a
+    // quarter-width media tile could name the track or offer a transport and never both, and its
+    // 4×1 replacement gives the title a whole row with prev/play-pause/next beside it.
+    #expect(TileSpan.available(for: .mediaPlayer) == [TileSpan(columns: 2, rows: 1),
+                                                      TileSpan(columns: 4, rows: 1),
                                                       TileSpan(columns: 4, rows: 2)])
     // No 1-column camera: below two columns a feed is a thumbnail of a thumbnail.
     #expect(TileSpan.available(for: .camera) == [TileSpan(columns: 2, rows: 2),
@@ -129,7 +132,8 @@ private func expectCells(_ placements: [GridPlacement], _ expected: [(Int, Int)]
 
 @Test func aSpanRoundTripsThroughItsStoredForm() {
     for span in [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1),
-                 TileSpan(columns: 2, rows: 2), TileSpan(columns: 4, rows: 2)] {
+                 TileSpan(columns: 2, rows: 2), TileSpan(columns: 4, rows: 1),
+                 TileSpan(columns: 4, rows: 2)] {
         #expect(TileSpan(stored: span.stored) == span)
     }
     #expect(TileSpan(columns: 2, rows: 1).stored == "2x1")

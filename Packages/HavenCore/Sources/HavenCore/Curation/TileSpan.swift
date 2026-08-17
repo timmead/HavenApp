@@ -2,10 +2,11 @@ import Foundation
 
 /// How many cells of a room's grid a tile occupies.
 ///
-/// **A value, not an enum of the three sizes in use.** Today every tile is 1×1, 2×1 or 2×2, and an
-/// enum would be tidier — but 4×1 and 4×2 renderings are foreseeable, and `MediaPlayerTile.large`
-/// *already is* 4×2 in room detail. An enum would need widening, along with every `switch` over it,
-/// the first time one of those reached the overview.
+/// **A value, not an enum of the sizes in use.** An enum would be tidier, and the argument against
+/// it has since been settled by events: when this was written the shapes in use were 1×1, 2×1 and
+/// 2×2, with 4×1 and 4×2 called "foreseeable" and only `MediaPlayerTile.large` actually 4×2. Both
+/// arrived — 4×2 for cameras, then 4×1 for media (`MediaTileSize.row`) — and each would have meant
+/// widening the enum and every `switch` over it. A value absorbed them without a case.
 public struct TileSpan: Sendable, Equatable, Hashable {
     public let columns: Int
     public let rows: Int
@@ -112,8 +113,12 @@ public struct TileSpan: Sendable, Equatable, Hashable {
         // sheet — see `ClimateTile`.
         case .climate:
             return [TileSpan(columns: 2, rows: 1), TileSpan(columns: 4, rows: 2)]
+        // A scrolling title with play/pause, that title given a whole row and a real transport, or
+        // the artwork-and-volume rendering — see `MediaTileSize`. **There is no 1×1 any more:** the
+        // centred-play/pause tile was withdrawn because a quarter-width media tile could say what
+        // was playing or offer a transport and never both, and this list followed it out.
         case .mediaPlayer:
-            return [TileSpan(columns: 1, rows: 1), TileSpan(columns: 2, rows: 1),
+            return [TileSpan(columns: 2, rows: 1), TileSpan(columns: 4, rows: 1),
                     TileSpan(columns: 4, rows: 2)]
         // No 1-column camera, deliberately: below two columns a feed is a thumbnail of a thumbnail.
         case .camera:

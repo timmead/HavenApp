@@ -7,10 +7,11 @@ import HavenCore
 /// that changed size when playback started would be a tile resizing itself out from under the grid
 /// mid-render — the entity would visibly reflow its subsection every time a song began.
 enum MediaTileSize {
-    /// 1×1. A centred play/pause and the name beneath it.
-    case small
     /// 2×1. No artwork: the title takes the artwork's place, in a scrolling window.
     case wide
+    /// 4×1. One line the width of the room: icon, the title in the same scrolling window, and the
+    /// whole transport on the right.
+    case row
     /// 4×2. Artwork down the whole left side with the transport over it; text and volume right.
     case large
 }
@@ -18,9 +19,17 @@ enum MediaTileSize {
 /// **No size is a pure launcher.** Every one of the three carries at least play/pause, because a
 /// media tile whose only action is "open the modal" is a label, and the thing you want from across
 /// the room is to stop the music.
+///
+/// That rule is why there is no 1×1 any more. There was one — a centred play/pause with the name
+/// under it — and it obeyed the rule by the narrowest possible margin: it was the only size that
+/// could not also say *what was playing*, because a quarter-width tile fits a button or a track
+/// name and not both. Withdrawing it (tile refinements, item 3) made the 2×1 the smallest media
+/// tile and left the rule holding with room to spare at every remaining size.
 struct MediaPlayerTile: View {
     let entityId: String
-    var size: MediaTileSize = .small
+    /// The smallest rendering, matching `MediaTileSize(span:)`'s own fallback — so a caller with no
+    /// opinion and a span with no rendering land in the same place.
+    var size: MediaTileSize = .wide
     @Environment(HomeStore.self) private var store
     @Environment(Navigation.self) private var navigation
     /// Which surface this tile is on — set by `ConfigurableTile`, and what a tap in
@@ -43,8 +52,9 @@ struct MediaPlayerTile: View {
         let labelHidden = store.labelHidden(of: entityId)
         Group {
             switch size {
-            case .small: small(s, name: name, unavailable: unavailable, labelHidden: labelHidden)
             case .wide: wide(s, name: name, unavailable: unavailable, labelHidden: labelHidden)
+            case .row: row(s, name: name, deviceClass: e?.deviceClass,
+                           unavailable: unavailable, labelHidden: labelHidden)
             case .large: large(s, name: name, deviceClass: e?.deviceClass, labelHidden: labelHidden)
             }
         }
@@ -55,35 +65,6 @@ struct MediaPlayerTile: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.map { AccessibilitySummary.mediaPlayer(name, $0) } ?? name)
         .accessibilityAction(named: "Open controls") { navigation.open(entityId, on: surface) }
-    }
-
-    // MARK: - 1×1
-
-    private func small(_ s: MediaPlayerState?, name: String, unavailable: Bool,
-                       labelHidden: Bool) -> some View {
-        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
-            VStack(spacing: 4) {
-                Spacer(minLength: 0)
-                playPauseButton(s, size: 26)
-                Spacer(minLength: 0)
-                // Absent from the layout rather than blanked when hidden — the same rule
-                // `TileLabel`/`StateFace` apply — so the button gets the reclaimed row rather than
-                // a gap under it.
-                if !labelHidden {
-                    // `isActive` already reads `false` for an `unavailable` state string (see
-                    // `MediaPlayerState.Playback.isActive`), so this was already `.secondary` there
-                    // — incidentally rather than deliberately, same as the other tiles' on/off-
-                    // derived name colours. Stated explicitly like the rest.
-                    Text(name)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .lineLimit(1)
-                        .foregroundStyle(((s?.isActive ?? false) ? Emphasis.primary : .secondary)
-                            .color(unavailable: unavailable, accent: accent))
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .contentShape(Rectangle())
     }
 
     // MARK: - 2×1
@@ -148,20 +129,100 @@ struct MediaPlayerTile: View {
         }
     }
 
+    // MARK: - 4×1
+
+    /// **The extra two columns go entirely to controls.** The 2×1 fits the title and one-and-a-bit
+    /// buttons; given the whole width, this size spends what it gains on a real transport —
+    /// previous, play/pause, next — rather than on artwork or a volume slider. One row's worth of
+    /// the things you do from across the room, which is the only reason to give a row to a speaker.
+    ///
+    /// **It takes its own height, and it must keep taking it.** Unlike `large()` below, a 4×1 is a
+    /// *single-row* span, and single-row is the one case both hosts size by measurement rather than
+    /// by proposal: `RoomGrid.rowHeight` measures `sizeThatFits(.unspecified)` on single-row
+    /// subviews and hands the tallest one's height to every row, and `SubsectionView.tileHeight`
+    /// returns nil for a single row so each tile asks for what it wants. A `maxHeight: .infinity`
+    /// here would therefore be greedy rather than exact — the trap `SubsectionView.tileHeight`'s
+    /// comment records having fallen into and removed — which is the exact opposite of what
+    /// `large()` and `CameraTile.wide` need. Same file, opposite rules, because the spans differ.
+    ///
+    /// The height is also identical in every playback state, which this file's opening argument
+    /// requires: the tallest thing on the line is the 22pt play/pause in its 36pt frame, well under
+    /// `GlassTile`'s 66pt content floor, and there is no volume strip to appear when playback
+    /// starts. That matters more here than anywhere else — a Media subsection sizes all its tiles
+    /// alike, so this tile *is* the measured row height for the whole container.
+    private func row(_ s: MediaPlayerState?, name: String, deviceClass: String?,
+                     unavailable: Bool, labelHidden: Bool) -> some View {
+        // `.leading` — horizontally leading, vertically centred. A single line hung from the top of
+        // an 85pt tile floats over 30pt of nothing; `wide()` above can sit at the top because it has
+        // a second row to put in that space and this size deliberately does not.
+        GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable,
+                  alignment: .leading) {
+            HStack(spacing: 10) {
+                // What the 2×1 has no width for and the 4×2 spends a whole square on: at a glance
+                // across a room, the thing that says "speaker" before you have read anything.
+                Image(systemName: IconMap.symbol(domain: .mediaPlayer, deviceClass: deviceClass))
+                    .font(.system(size: 20))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Emphasis.accent.color(unavailable: unavailable, accent: accent))
+                    .frame(width: 26)
+                    // The tile's own label already names the device and says what it is playing.
+                    .accessibilityHidden(true)
+                // **The same window and the same fallback as `wide()`, deliberately including the
+                // empty string.** `large()` uses `if let` because its title block sizes to its own
+                // content, so a blank line would still claim a line box; here the title sits in a
+                // fixed 30pt `ScrollingText` window inside a *horizontal* row, so its height never
+                // reaches the tile's at all and blank and absent occupy identical space. Forking the
+                // two `ScrollingText` call sites' idiom would buy nothing but a difference to
+                // explain. The fallback itself is the rule Task 2 set: a hidden label falls back to
+                // no title rather than to the device's name, because this slot is where the visible
+                // name actually shows and falling back to it would put it straight back on screen.
+                ScrollingText(
+                    text: s?.title ?? (labelHidden ? "" : name),
+                    secondary: s?.secondaryLine,
+                    windowHeight: 30,
+                    unavailable: unavailable
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { navigation.open(entityId, on: surface) }
+                // Tight spacing because each button already carries a 16pt-larger tap frame than its
+                // glyph: the gaps you see are those frames, and a stated gap on top of them would
+                // push the cluster off the right of the tile rather than space it.
+                transportCluster(s, playPause: 22, sides: 15, spacing: 2)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     // MARK: - 4×2
 
-    // Deliberately not struck when unavailable. Unlike `small()` and `wide()`, this size does
+    // Deliberately not struck when unavailable. Unlike `wide()` and `row()`, this size does
     // not route through `GlassTile` at all — it is a full-bleed `HStack` with its own artwork,
     // scrim, and background, structurally the same shape as `CameraTile`. Giving it a strike
     // would mean designing a treatment for a different surface, not passing a flag to an
     // existing one, which is out of scope here.
     private func large(_ s: MediaPlayerState?, name: String, deviceClass: String?,
                        labelHidden: Bool) -> some View {
-        // Two tile rows plus the grid's own row spacing, so a 4×2 lines up with two rows of 1×1s.
-        let height: CGFloat = 141
-        return HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            // **A square of whatever height the grid gave the tile, with no number of its own.**
+            // This used to be `.frame(width: 141, height: 141)` inside an outer `.frame(height:
+            // 141)` — "two tile rows plus the grid's own row spacing" — which is the same constant
+            // and the same mistake `CameraTile.wide` now records: 141 assumes `GlassTile`'s 66pt
+            // floor for a two-row cell, and a real two-row cell measures nearer 173, so a 4×2 media
+            // tile drew a full 32pt shorter than the two rows it claims to occupy.
+            // `RoomGrid.fallbackRowHeight`'s doc comment names that very constant as the trap the
+            // grid exists to have escaped; the two tiles that hard-coded it are now both fixed.
+            //
+            // `aspectRatio(1, contentMode: .fit)` resolves the square from the height this row is
+            // given rather than from a literal, so the artwork grows with the cell. As with
+            // `CameraTile.wide`, the dependency is now the structural inverse of the old bug: the
+            // tile needs an *exact* height proposal, and against an unbounded one `.fit` would
+            // resolve from the child instead — a resizable image with no opinion worth having.
+            // Both hosts give an exact one for a multi-row span (`RoomGrid.placeSubviews` directly,
+            // `SubsectionView`'s scroll body via `unmeasuredHeight(for:)`), so a 4×2 media tile must
+            // not be placed anywhere else.
             artwork(s, deviceClass: deviceClass)
-                .frame(width: height, height: height)
+                .aspectRatio(1, contentMode: .fit)
                 .clipped()
                 .overlay(alignment: .bottom) { transportScrim(s) }
                 .contentShape(Rectangle())
@@ -197,7 +258,7 @@ struct MediaPlayerTile: View {
             .padding(EdgeInsets(top: 11, leading: 12, bottom: 11, trailing: 12))
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(height: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill((s?.isPlaying ?? false) ? AnyShapeStyle(accent.opacity(0.30)) : AnyShapeStyle(.regularMaterial))
@@ -230,29 +291,44 @@ struct MediaPlayerTile: View {
         .accessibilityHidden(true)      // the tile's own label already says what is playing
     }
 
-    /// Prev / play-pause / next over a scrim on the bottom of the artwork. The scrim is what makes
-    /// white controls legible over an arbitrary album cover, which can be any colour at all.
-    @ViewBuilder
-    private func transportScrim(_ s: MediaPlayerState?) -> some View {
-        HStack(spacing: 14) {
+    /// Previous / play-pause / next — the whole transport, drawn by the two sizes that have room
+    /// for one: on the right of `row()`'s line, and over `large()`'s artwork scrim.
+    ///
+    /// **Shared for the omission rules rather than for the `HStack`.** Each side button is drawn
+    /// only where the device declared its feature bit, and `playPauseButton` has its own branch for
+    /// a device that declared neither half — an unsupported control is omitted, never shown
+    /// disabled. Two copies of a layout would be tedious; two copies of *what a device can do*
+    /// would be somewhere for the answer to fall out of step, and the `.wide` size below is already
+    /// a third, deliberately cut-down set (play-pause and next only, because two columns is what it
+    /// has). Sizes stay parameters because the call sites are drawn at different scales over
+    /// different backgrounds — white over an album cover, the domain accent on glass.
+    private func transportCluster(_ s: MediaPlayerState?, playPause: CGFloat, sides: CGFloat,
+                                  spacing: CGFloat, tint: Color? = nil) -> some View {
+        HStack(spacing: spacing) {
             if s?.features.contains(.previousTrack) ?? false {
-                transportButton("backward.end.fill", label: "Previous track", size: 13, tint: .white) {
+                transportButton("backward.end.fill", label: "Previous track", size: sides, tint: tint) {
                     store.mediaPreviousTrack(entityId)
                 }
             }
-            playPauseButton(s, size: 20, tint: .white)
+            playPauseButton(s, size: playPause, tint: tint)
             if s?.features.contains(.nextTrack) ?? false {
-                transportButton("forward.end.fill", label: "Next track", size: 13, tint: .white) {
+                transportButton("forward.end.fill", label: "Next track", size: sides, tint: tint) {
                     store.mediaNextTrack(entityId)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .background {
-            LinearGradient(colors: [.black.opacity(0), .black.opacity(0.55)],
-                           startPoint: .top, endPoint: .bottom)
-        }
+    }
+
+    /// The transport over a scrim on the bottom of the artwork. The scrim is what makes white
+    /// controls legible over an arbitrary album cover, which can be any colour at all.
+    private func transportScrim(_ s: MediaPlayerState?) -> some View {
+        transportCluster(s, playPause: 20, sides: 13, spacing: 14, tint: .white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background {
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.55)],
+                               startPoint: .top, endPoint: .bottom)
+            }
     }
 
     /// A mute button plus a volume slider, shared by the 2×1 and the 4×2 so the two behave alike.
@@ -396,7 +472,7 @@ private struct ScrollingText: View {
     var secondary: String?
     let windowHeight: CGFloat
     /// Had no `foregroundStyle` at all on the main line, which defaults to `.primary` regardless
-    /// of reachability — the only caller is `MediaPlayerTile.wide()`, which now threads its own
+    /// of reachability — its callers, `MediaPlayerTile.wide()` and `.row()`, each thread their own
     /// `unavailable` through here rather than leaving this window as the one text element on the
     /// tile the strike didn't reach. `large()` has its own title `Text` and does not use this
     /// view — see its doc comment for why it stays out of this feature entirely.
@@ -461,11 +537,21 @@ private struct ScrollingText: View {
 extension MediaTileSize {
     /// The rendering a span asks for. See `DeviceTileView.tile` — this is half of the one place
     /// where a number of cells becomes a drawing.
+    ///
+    /// The three cases are exactly `TileSpan.available(for: .mediaPlayer)`, listed in the same
+    /// order, so the two can be read against each other — that list's own rule is that nothing is
+    /// offered which cannot be drawn.
+    ///
+    /// **The fallback is `.wide`, the smallest**, and it used to be a 1×1 that no longer exists. It
+    /// is reachable in one real way: a household that stored `1x1` for its Media subsection under a
+    /// build that still offered it. That is a size decision Haven has withdrawn, not a document to
+    /// discard, so the tile draws at the smallest rendering it does have rather than not at all.
     init(span: TileSpan) {
         switch (span.columns, span.rows) {
-        case (4, 2): self = .large
         case (2, 1): self = .wide
-        default: self = .small
+        case (4, 1): self = .row
+        case (4, 2): self = .large
+        default: self = .wide
         }
     }
 }

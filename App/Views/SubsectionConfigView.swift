@@ -285,6 +285,15 @@ struct SubsectionConfigView: View {
     /// `TileSizePicker`'s binding. Reads as `nil` — no chip checked — whenever Follow is the current
     /// draft, so the row above and a chip below are never checked at once; writes always mean a chip
     /// was tapped, which is a size chosen, so it clears `followsOtherSurface` the same motion.
+    ///
+    /// **No chip checked has a second cause, and the sheet is where it resolves.** A span this
+    /// household stored under an older build, which Haven has since withdrawn from
+    /// `kind.availableSpans`, matches no chip either — media's 1×1 is the standing example
+    /// (`MediaTileSize(span:)` still draws it, at the smallest rendering left). The two are told
+    /// apart above rather than here: Follow-chosen checks the Follow row, a withdrawn span leaves it
+    /// unchecked too, so a picker with nothing checked *anywhere* is the withdrawn case. Nothing
+    /// guards against it, deliberately — picking any chip, or Follow, overwrites the dead value, so
+    /// the sheet a household opens to change the size is already the thing that clears it.
     private var sizeSelection: Binding<TileSpan?> {
         Binding(
             get: { followsOtherSurface ? nil : span },
