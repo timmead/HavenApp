@@ -456,14 +456,36 @@ struct TileGallery: View {
     /// **Configuration mode, where every subsection wraps** whatever the household configured —
     /// design decision 8, because rearranging happens on a grid and never inside a scroll row.
     ///
-    /// All three of these are configured `.scroll` and not one of them renders as one; that flip is
+    /// The first three are configured `.scroll` and not one of them renders as one; that flip is
     /// the thing to look at. Their headings are tap targets rather than labels, which is the other
     /// — and it is deliberately undecorated, exactly as a room's heading is in the same mode.
+    ///
+    /// **The fourth, `.media`/`.regular`, is a regression fixture for the blank-row defect a
+    /// hands-on pass found**: two media players at room detail's full-bleed 4×2 default fill exactly
+    /// two whole rows with nothing left over, which is precisely the condition
+    /// `SubsectionView.endDropCell`'s doc comment now names — a subsection whose last real row is
+    /// exactly full pushes the end-drop cell (1 column, `span.rows` tall) to a *new* row of its own,
+    /// and an idle configuration screen paid for that row's height with nothing in it. Confirmed by
+    /// hand against `GridPacking.place` before this fixture was written: two 4×2 spans plus a 1×2
+    /// end cell in a 4-column grid come back with `rowCount == 6` while only the first four rows
+    /// hold a real tile.
+    ///
+    /// **Not the only fixture on this page that could have shown it, in hindsight.** `.lights` (5
+    /// tiles in 4 columns) and `.shades` (3 tiles in 4 columns) both leave a genuinely partial last
+    /// row, which is where the defect actually hid — the end cell tucks in beside real tiles rather
+    /// than forcing a new one. `.cameras`, though, is two 2×2 tiles at the compact/overview default,
+    /// which also fills exactly four columns and — checked the same way, `GridPacking.place` on
+    /// `[2×2, 2×2, 1×2]` at 4 columns — comes back `rowCount == 4` against two rows of real content.
+    /// It was already reproducing this defect before this fixture was added; it went unnoticed on
+    /// this page regardless, which is itself worth naming rather than only adding a new case beside
+    /// it. This fixture is deliberately the loudest version, at the exact width and site (room
+    /// detail, a full-bleed tile) the hands-on report described.
     @ViewBuilder
     private var configuringSubsections: some View {
         subsectionCase(.lights, .scroll, .compact)
         subsectionCase(.cameras, .scroll, .compact)
         subsectionCase(.shades, .scroll, .regular)
+        subsectionCase(.media, .scroll, .regular)
     }
 
     // MARK: - Fixtures

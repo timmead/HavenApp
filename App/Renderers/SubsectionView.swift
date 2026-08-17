@@ -327,7 +327,7 @@ struct SubsectionView: View {
                                                     drag: drag))
                 }
             }
-            if navigation.isConfiguring { endDropCell }
+            if navigation.isConfiguring && drag.dragging != nil { endDropCell }
         }
     }
 
@@ -350,11 +350,33 @@ struct SubsectionView: View {
     /// the room is last among its own kind, and no other subsection's sequence moves. Same reasoning
     /// as `roomOrder`, from the other end.
     ///
-    /// Always present while configuring rather than only while a drag is live, deliberately: gating
-    /// *layout* on `drag.dragging` would make a cell appear and the grid reflow from a value SwiftUI
-    /// sets at moments of its own choosing (see `TileDragState.isOver`). One empty 1×1 at the end of
-    /// each subsection is the cost, and it is paid in configuration mode, where placeholders and
-    /// dashed outlines are already what the screen is made of.
+    /// **Present only while a drag is actually live** (`navigation.isConfiguring && drag.dragging
+    /// != nil`), not for the whole of configuration mode. It used to be the latter, on the theory
+    /// that gating *layout* on `drag.dragging` would make a cell appear and the grid reflow from a
+    /// value SwiftUI sets at moments of its own choosing — but `dragging` is not that value;
+    /// `isOver` is (see its doc comment), and this cell never reads `isOver`. Left ungated, an idle
+    /// configuration screen paid for a cell nobody could drop on: whenever a subsection's last real
+    /// row landed exactly full — a 4×2 Media tile full-bleed in room detail, four 1×1s in any
+    /// single-span kind — `GridPacking` wrapped this cell to a *new* row, and the grid reserved a
+    /// full `span.rows` of empty height for it: roughly 170pt of blank space below (and, for the
+    /// subsection after it, above) a subsection with nothing wrong with it. The gallery's
+    /// configure-mode fixtures all happened to leave a partial last row, where the cell tucks in
+    /// beside the tiles instead of wrapping — which is exactly how this hid from the one page meant
+    /// to catch it; see `subsectionsRoom`'s fixture count and the fixture added there since.
+    ///
+    /// Two consequences of gating on `dragging`, named rather than left to be rediscovered:
+    /// - **Lifting a tile in a full-last-row subsection reflows it by one row** as this cell appears
+    ///   — the drop affordance becoming visible. Acceptable, and arguably more informative than a
+    ///   row that was always there and never explained why.
+    /// - **A stale `dragging`** — an abandoned drag, released with nothing to clear it, before
+    ///   `TileDropDelegate.discardIfSuperseded` notices it was superseded — keeps this cell (and the
+    ///   row it may cause) visible until something touches this subsection's own `drag` again: a
+    ///   fresh lift begun *in* this subsection overwrites `dragging` directly; a live drag whose
+    ///   finger merely passes back over one of this subsection's own drop targets trips `accepts` →
+    ///   `discardIfSuperseded` on entry. Bounded and self-healing by the same mechanism that already
+    ///   recovers a stale drag's *acceptance* — not a new failure mode, the existing one made
+    ///   visible in a second place.
+    ///
     /// **One column, but as many rows as the subsection's tiles**, which is about the caret's height
     /// and about not disturbing the grid's.
     ///
