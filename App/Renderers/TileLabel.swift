@@ -58,6 +58,11 @@ struct TileLabel<Subtitle: View>: View {
     var title: Emphasis = .primary
     let accent: Color
     let unavailable: Bool
+    /// The household's "Show name on tile" choice for this device. When true the name row is not
+    /// merely blanked but **absent from the layout** — an unlabelled tile gets the row's space back
+    /// rather than a gap where a name used to be, so a glyph that had to share the tile with a name
+    /// gets to use the room a labelled sibling never freed up.
+    var nameHidden: Bool = false
     /// How big the glyph is drawn. 20 is the tile default; a tile whose *reading* is the thing worth
     /// looking at passes something smaller, so the icon says which device this is without competing
     /// with the number.
@@ -74,10 +79,12 @@ struct TileLabel<Subtitle: View>: View {
                 .foregroundStyle(icon.resolved(unavailable: unavailable).color(accent: accent))
                 .symbolRenderingMode(.hierarchical)
             Spacer(minLength: 2)
-            Text(name)
-                .font(.system(size: 10.5, weight: .semibold))
-                .lineLimit(1)
-                .foregroundStyle(title.resolved(unavailable: unavailable).color(accent: accent))
+            if !nameHidden {
+                Text(name)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(title.resolved(unavailable: unavailable).color(accent: accent))
+            }
             subtitle()
         }
     }
@@ -85,8 +92,10 @@ struct TileLabel<Subtitle: View>: View {
 
 extension TileLabel where Subtitle == EmptyView {
     init(symbol: String, name: String, icon: Emphasis = .secondary,
-         title: Emphasis = .primary, accent: Color, unavailable: Bool, iconSize: CGFloat = 20) {
+         title: Emphasis = .primary, accent: Color, unavailable: Bool,
+         nameHidden: Bool = false, iconSize: CGFloat = 20) {
         self.init(symbol: symbol, name: name, icon: icon, title: title,
-                  accent: accent, unavailable: unavailable, iconSize: iconSize) { EmptyView() }
+                  accent: accent, unavailable: unavailable, nameHidden: nameHidden,
+                  iconSize: iconSize) { EmptyView() }
     }
 }

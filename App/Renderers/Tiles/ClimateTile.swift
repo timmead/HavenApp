@@ -56,11 +56,18 @@ struct ClimateTile: View {
                         .foregroundStyle((on ? Emphasis.accent : .secondary)
                             .color(unavailable: unavailable, accent: accent))
                         .symbolRenderingMode(.hierarchical)
-                    Text(store.displayName(of: entityId))
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
-                                                                accent: accent))
+                    // **The only climate rendering that shows a name at all** — `compact` (2×1)
+                    // has never had room for one, so it already satisfies "omitted when hidden"
+                    // without a line changing. Absent from the layout rather than blanked, the
+                    // same rule `TileLabel`/`StateFace` apply, so the power button gets the space
+                    // back instead of a gap beside it.
+                    if !store.labelHidden(of: entityId) {
+                        Text(store.displayName(of: entityId))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                            .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
+                                                                    accent: accent))
+                    }
                     Spacer(minLength: 0)
                     powerButton(on: on, unavailable: unavailable,
                                 unreachable: e?.state == "unavailable",

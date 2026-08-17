@@ -73,7 +73,15 @@ struct TileGallery: View {
             VStack(alignment: .leading, spacing: 14) {
                 switch page {
                 case .first:
-                    section("Light") { ids("light", ["on", "off", "unavailable"]) }
+                    // "unlabelled" is item 2's fixture (tile-refinements): a light with its name
+                    // hidden, beside three labelled siblings — the state a "Show name on tile"
+                    // toggle produces, visible in the same row it sits in. Its own id rather than
+                    // reusing `light.off`: `light.off` is also in `twoStateCases` below, which page
+                    // `.sixth` renders twice (once per state style) on the stated premise that both
+                    // rows show "the same devices, same states" — hiding its label there would make
+                    // the icon-style tile and its `_l` twin disagree on more than the one thing that
+                    // page exists to compare.
+                    section("Light") { ids("light", ["on", "off", "unlabelled", "unavailable"]) }
                     section("Switch") { ids("switch", ["on", "off", "unavailable"]) }
                     section("Cover") { ids("cover", ["open", "closed", "unavailable"]) }
                     // Four, not three: `unavailable` must render `questionmark.circle` and **not**
@@ -499,6 +507,10 @@ struct TileGallery: View {
         }
         set("light.on", "on", ["friendly_name": .string("Kitchen"), "brightness": .int(153)])
         set("light.off", "off", ["friendly_name": .string("Hallway")])
+        // Item 2 (tile-refinements): its label is hidden below, alongside `document`'s other
+        // household choices — see that comment for why this is its own fixture rather than a
+        // `light.off` shared with `twoStateCases`.
+        set("light.unlabelled", "off", ["friendly_name": .string("Landing")])
         set("light.unavailable", "unavailable", ["friendly_name": .string("Porch")])
 
         set("switch.on", "on", ["friendly_name": .string("Fan")])
@@ -743,9 +755,12 @@ struct TileGallery: View {
             "sensor.garage_signal": EntityRegistryInfo(platform: nil, uniqueId: nil, deviceId: "garage"),
         ])
         store.resolveEnvironment()
+        var document = store.config.document
+        // Item 2 (tile-refinements): `light.unlabelled` has its name hidden, so `.first`'s Light
+        // row (`ids("light", [...])` above) shows one nameless tile beside labelled siblings.
+        document = document.settingLabelHidden(true, entityId: "light.unlabelled")
         // The label-style twins: the same states again, with the household's choice stored, so both
         // styles can be compared rather than described.
-        var document = store.config.document
         for (id, state, name, dc) in [
             ("binary_sensor.active_l", "on", "Door", "door"),
             ("binary_sensor.clear_l", "off", "Window", "window"),

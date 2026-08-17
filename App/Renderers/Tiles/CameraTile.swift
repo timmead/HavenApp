@@ -113,8 +113,13 @@ struct CameraTile: View {
                 .frame(maxHeight: .infinity)
                 .clipped()
                 .overlay(alignment: .bottomTrailing) { ageStamp(s) }
-            caption(name: name)
-                .frame(height: captionHeight)
+            // Omitted outright when the name is hidden, not just its text — the still's own
+            // `maxHeight: .infinity` already claims whatever height this strip would have used, so
+            // dropping the row grows the picture rather than leaving a blank 26pt bar under it.
+            if !store.labelHidden(of: entityId) {
+                caption(name: name)
+                    .frame(height: captionHeight)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
@@ -227,26 +232,38 @@ struct CameraTile: View {
     /// The name over a gradient, which is what makes white text legible over a picture that can be
     /// any colour at all — a floodlit driveway at night and a sunlit garden are both possible under
     /// the same label.
+    ///
+    /// **Nothing at all, gradient included, when there is neither a name nor a status to show.** A
+    /// household with this camera's name hidden and an available feed would otherwise get a
+    /// gradient wash over the bottom of the picture with nothing written on it — the scrim exists to
+    /// make text legible, and a scrim defending no text is a wash with no purpose people cannot see.
+    @ViewBuilder
     private func nameScrim(_ s: CameraState?, name: String) -> some View {
-        HStack(spacing: 6) {
-            Text(name)
-                .font(.system(size: 13.5, weight: .bold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            if let s, !s.isAvailable {
-                Text(s.status.label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+        let showsName = !store.labelHidden(of: entityId)
+        let showsStatus = s.map { !$0.isAvailable } ?? false
+        if showsName || showsStatus {
+            HStack(spacing: 6) {
+                if showsName {
+                    Text(name)
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                if showsStatus, let s {
+                    Text(s.status.label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 22)
-        .padding(.bottom, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            LinearGradient(colors: [.black.opacity(0), .black.opacity(0.62)],
-                           startPoint: .top, endPoint: .bottom)
+            .padding(.horizontal, 12)
+            .padding(.top, 22)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.62)],
+                               startPoint: .top, endPoint: .bottom)
+            }
         }
     }
 

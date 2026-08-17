@@ -36,6 +36,10 @@ struct TileConfigView: View {
     @State private var committed = false
     /// Whether this device's tile shows its state as a glyph or a word. A draft, like the rest.
     @State private var stateStyle: TileStateStyle = .icon
+    /// Whether the tile shows this device's name at all. A draft, like the rest — default true
+    /// matches `labelHidden`'s own default (absent means shown), so a sheet opened on a device
+    /// nobody has touched yet seeds the toggle to what the tile is already doing.
+    @State private var showName = true
     /// Which companion plays which role. Drafts, like the rest — nothing writes until Done.
     @State private var bindings: [DeviceRole: String] = [:]
     /// Seeded so a preview can render the open state, which no static render reaches by tapping.
@@ -72,6 +76,12 @@ struct TileConfigView: View {
                         .textFieldStyle(.roundedBorder)
                         .submitLabel(.done)
                         .onSubmit { Task { if await commit() { dismiss() } } }
+                    // Phrased as what it does, not as "no label": the household is choosing
+                    // whether the tile shows this, not disowning the name itself — the control
+                    // modal, the pickers and this sheet keep showing it regardless, so a device
+                    // with this off stays findable everywhere except the grid.
+                    Toggle("Show name on tile", isOn: $showName)
+                        .font(.system(size: 13, weight: .semibold))
                     // What Home Assistant calls it, so an override reads as an override rather than
                     // as a mystery — and so the user can see what a reset would give them back.
                     Text(haName.map { "Home Assistant calls this “\($0)”" }
@@ -159,6 +169,7 @@ struct TileConfigView: View {
         .onAppear {
             draft = storedOverride ?? ""
             stateStyle = store.stateStyle(of: entityId)
+            showName = !store.labelHidden(of: entityId)
             bindings = store.bindings(of: entityId)
         }
         // **Swiping the sheet away commits too**, because there is no Cancel here and discarding a
@@ -169,12 +180,14 @@ struct TileConfigView: View {
             guard !committed, hasChanges else { return }
             let name = DisplayName.override(from: draft)
             let style = stateStyleEdit
+            let hidden = labelHiddenEdit
             let bound = bindingEdits
             let surface = surface
             committed = true
             Task {
                 _ = await store.applyTileConfig(entityId, name: name,
-                                                stateStyle: style, bindings: bound, on: surface)
+                                                stateStyle: style, labelHidden: hidden,
+                                                bindings: bound, on: surface)
             }
         }
     }
@@ -336,22 +349,31 @@ struct TileConfigView: View {
         return stateStyle == .icon ? .some(nil) : .some(stateStyle)
     }
 
+    /// Whether the "Show name on tile" toggle differs from what is stored. `nil` when unchanged, the
+    /// single-optional shape `settingLabelHidden` wants — unlike `stateStyleEdit` above, the mutator
+    /// already has its own clear-to-shown value (`false`), so there is no second layer of optional
+    /// needed to say "leave it alone".
+    private var labelHiddenEdit: Bool? {
+        let target = !showName
+        return target == store.labelHidden(of: entityId) ? nil : target
+    }
+
     /// Whether committing would change anything. Compared against the stored override rather than
     /// against the resolved name, and trimmed, so re-typing the same name with a stray space is not
     /// an edit — and so a sheet merely opened and closed writes nothing at all.
     ///
-    /// **This and `stateStyleEdit`/`bindingEdits` above are private computed properties on a `View`,
-    /// unreachable by any test — the same shape `SubsectionConfigView`'s `spanEdit`/`modeEdit`/
-    /// `hasChanges` were before `SubsectionConfigEdit` pulled them into a plain, testable value type.
-    /// Nothing here is known to be wrong; this is a precedent note, not a defect report. If one of
-    /// these three ever needs pinning — a regression like the opened-but-untouched span bug
-    /// `SubsectionConfigEdit`'s own doc comment records — the same extraction is the fix: a
-    /// `TileConfigEdit` (or similar) taking the drafts and the stored values as plain arguments,
-    /// answering `nameEdit`/`stateStyleEdit`/`bindingEdits`/`hasChanges`, with this view's properties
-    /// reduced to one-line calls into it.
+    /// **This and `stateStyleEdit`/`labelHiddenEdit`/`bindingEdits` above are private computed
+    /// properties on a `View`, unreachable by any test — the same shape `SubsectionConfigView`'s
+    /// `spanEdit`/`modeEdit`/`hasChanges` were before `SubsectionConfigEdit` pulled them into a
+    /// plain, testable value type. Nothing here is known to be wrong; this is a precedent note, not
+    /// a defect report. If one of these four ever needs pinning — a regression like the
+    /// opened-but-untouched span bug `SubsectionConfigEdit`'s own doc comment records — the same
+    /// extraction is the fix: a `TileConfigEdit` (or similar) taking the drafts and the stored
+    /// values as plain arguments, answering `nameEdit`/`stateStyleEdit`/`labelHiddenEdit`/
+    /// `bindingEdits`/`hasChanges`, with this view's properties reduced to one-line calls into it.
     private var hasChanges: Bool {
         DisplayName.override(from: draft) != storedOverride
-            || stateStyleEdit != nil || bindingEdits != nil
+            || stateStyleEdit != nil || labelHiddenEdit != nil || bindingEdits != nil
     }
 
     /// The one write this sheet performs. Returns whether the sheet may close.
@@ -367,7 +389,7 @@ struct TileConfigView: View {
         guard hasChanges else { committed = true; return true }
         committed = true
         switch await store.applyTileConfig(entityId, name: DisplayName.override(from: draft),
-                                           stateStyle: stateStyleEdit,
+                                           stateStyle: stateStyleEdit, labelHidden: labelHiddenEdit,
                                            bindings: bindingEdits, on: surface) {
         case .written, .unchanged:
             return true

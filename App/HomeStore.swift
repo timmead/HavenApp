@@ -244,6 +244,14 @@ final class HomeStore {
         config.document.tileStateStyles[entityId] ?? .icon
     }
 
+    /// Whether this device's tile hides its name. `false` unless the household said otherwise — see
+    /// `displayName(of:)` above for why every renderer must go through the store rather than reading
+    /// the document itself: only this join registers the `@Observable` dependency a view needs to
+    /// redraw when the toggle changes.
+    func labelHidden(of entityId: String) -> Bool {
+        config.document.labelHidden(entityId)
+    }
+
     /// Commits everything one configuration sheet holds, in a **single** write.
     ///
     /// Not a convenience over `rename` and a state-style setter called in turn: each write bumps the
@@ -254,14 +262,27 @@ final class HomeStore {
     /// `applySubsectionConfig` — and `TileConfigView` has had no size control to pass one from since
     /// Task 6; Task 7 deleted `settingSize` from Core and this parameter with it, rather than leave a
     /// signature that could still express a decision nothing in the app makes any more.
+    ///
+    /// **`name` is unconditional, unlike every parameter after it.** `stateStyle`/`labelHidden`/
+    /// `bindings` are each an opt-in guard — `nil` means the sheet's control was untouched — but
+    /// `name` always calls `settingDisplayName`, because that has been this function's contract since
+    /// before those guards existed and every caller passes the draft either way. A caller must
+    /// therefore pass the *current* name to leave it alone, not `nil`: `nil` clears it.
     func applyTileConfig(_ entityId: String, name: String?,
                          stateStyle: TileStateStyle?? = nil,
+                         labelHidden: Bool? = nil,
                          bindings: [DeviceRole: String?]? = nil,
                          on surface: HavenSurface) async -> HavenConfig.Outcome {
         await config.update { document in
             var next = document.settingDisplayName(name, for: entityId)
             if let stateStyle {
                 next = next.settingStateStyle(stateStyle, for: entityId)
+            }
+            // A single `Bool`, not `Bool??` like `stateStyle` just above: the mutator already
+            // has its own clear-to-shown value (`false`), so nothing here needs a second layer of
+            // optional to say "leave it alone" — `nil` says that on its own.
+            if let labelHidden {
+                next = next.settingLabelHidden(labelHidden, entityId: entityId)
             }
             // Roles live in the device's own inputs — one home for them, since choosing a type is
             // what creates the device they belong to.

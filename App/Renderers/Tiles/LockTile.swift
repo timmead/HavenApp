@@ -23,7 +23,8 @@ struct LockTile: View {
                                             unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: true, unavailable: unavailable)
+                      accent: accent, active: true, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
         }
         .tileInteraction(entityId,
                          label: s.map { AccessibilitySummary.lock(store.displayName(of: entityId), $0) }

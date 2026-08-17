@@ -37,11 +37,15 @@ struct MediaPlayerTile: View {
         let s = e.map(MediaPlayerState.init)
         let name = store.displayName(of: entityId)
         let unavailable = e?.isUnavailable ?? false
+        // Kept separate from `name` deliberately: `name` still feeds the accessibility label two
+        // lines down regardless of this toggle, so nothing here nils it out — that would silence
+        // VoiceOver's identification of the tile along with the on-screen text.
+        let labelHidden = store.labelHidden(of: entityId)
         Group {
             switch size {
-            case .small: small(s, name: name, unavailable: unavailable)
-            case .wide: wide(s, name: name, unavailable: unavailable)
-            case .large: large(s, name: name, deviceClass: e?.deviceClass)
+            case .small: small(s, name: name, unavailable: unavailable, labelHidden: labelHidden)
+            case .wide: wide(s, name: name, unavailable: unavailable, labelHidden: labelHidden)
+            case .large: large(s, name: name, deviceClass: e?.deviceClass, labelHidden: labelHidden)
             }
         }
         .onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
@@ -55,21 +59,27 @@ struct MediaPlayerTile: View {
 
     // MARK: - 1×1
 
-    private func small(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+    private func small(_ s: MediaPlayerState?, name: String, unavailable: Bool,
+                       labelHidden: Bool) -> some View {
         GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             VStack(spacing: 4) {
                 Spacer(minLength: 0)
                 playPauseButton(s, size: 26)
                 Spacer(minLength: 0)
-                // `isActive` already reads `false` for an `unavailable` state string (see
-                // `MediaPlayerState.Playback.isActive`), so this was already `.secondary` there —
-                // incidentally rather than deliberately, same as the other tiles' on/off-derived
-                // name colours. Stated explicitly like the rest.
-                Text(name)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(((s?.isActive ?? false) ? Emphasis.primary : .secondary)
-                        .color(unavailable: unavailable, accent: accent))
+                // Absent from the layout rather than blanked when hidden — the same rule
+                // `TileLabel`/`StateFace` apply — so the button gets the reclaimed row rather than
+                // a gap under it.
+                if !labelHidden {
+                    // `isActive` already reads `false` for an `unavailable` state string (see
+                    // `MediaPlayerState.Playback.isActive`), so this was already `.secondary` there
+                    // — incidentally rather than deliberately, same as the other tiles' on/off-
+                    // derived name colours. Stated explicitly like the rest.
+                    Text(name)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(((s?.isActive ?? false) ? Emphasis.primary : .secondary)
+                            .color(unavailable: unavailable, accent: accent))
+                }
             }
             .frame(maxWidth: .infinity)
         }
@@ -78,7 +88,8 @@ struct MediaPlayerTile: View {
 
     // MARK: - 2×1
 
-    private func wide(_ s: MediaPlayerState?, name: String, unavailable: Bool) -> some View {
+    private func wide(_ s: MediaPlayerState?, name: String, unavailable: Bool,
+                      labelHidden: Bool) -> some View {
         GlassTile(active: s?.isPlaying ?? false, accent: accent, unavailable: unavailable) {
             // `spacing: 0` with a `Spacer` between the two rows, rather than a spaced `VStack`:
             // a `VStack(spacing: 6)` over three children adds *two* 6pt gaps, which would push the
@@ -90,8 +101,14 @@ struct MediaPlayerTile: View {
                     // Deliberately no artwork at this size — the approved design gives the artwork's
                     // place to the title, because at two columns a thumbnail and an ellipsised track
                     // name answer "what's playing?" less well than the whole track name does.
+                    //
+                    // **The fallback to `name` is itself the visible name.** A player reporting no
+                    // title has nothing else to show here, so a hidden label falls back to an empty
+                    // string rather than the device's name — the one spot on this tile where "no
+                    // title" and "no label" would otherwise look identical and only one of them is
+                    // the household's choice to have made.
                     ScrollingText(
-                        text: s?.title ?? name,
+                        text: s?.title ?? (labelHidden ? "" : name),
                         secondary: s?.secondaryLine,
                         windowHeight: 30,
                         unavailable: unavailable
@@ -138,7 +155,8 @@ struct MediaPlayerTile: View {
     // scrim, and background, structurally the same shape as `CameraTile`. Giving it a strike
     // would mean designing a treatment for a different surface, not passing a flag to an
     // existing one, which is out of scope here.
-    private func large(_ s: MediaPlayerState?, name: String, deviceClass: String?) -> some View {
+    private func large(_ s: MediaPlayerState?, name: String, deviceClass: String?,
+                       labelHidden: Bool) -> some View {
         // Two tile rows plus the grid's own row spacing, so a 4×2 lines up with two rows of 1×1s.
         let height: CGFloat = 141
         return HStack(spacing: 0) {
@@ -150,10 +168,19 @@ struct MediaPlayerTile: View {
                 .onTapGesture { navigation.open(entityId, on: surface) }
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(s?.title ?? name)
-                        .font(.system(size: 14, weight: .bold))
-                        .lineLimit(2)
-                        .foregroundStyle((s?.isActive ?? false) ? .primary : .secondary)
+                    // Same rule as `wide()`'s title fallback: a hidden label falls back to no
+                    // title, not to the device's name, so "nothing is playing" and "the name is
+                    // hidden" cannot be mistaken for each other here. Unlike `wide()`'s fixed-height
+                    // `ScrollingText`, this block sizes to its own content, so — the same
+                    // absent-not-blanked rule `TileLabel`/`StateFace` apply — an `if let` rather
+                    // than an empty string: a blank bold line would still claim its own line box
+                    // above the playback word for no visible text.
+                    if let title = s?.title ?? (labelHidden ? nil : name) {
+                        Text(title)
+                            .font(.system(size: 14, weight: .bold))
+                            .lineLimit(2)
+                            .foregroundStyle((s?.isActive ?? false) ? .primary : .secondary)
+                    }
                     if let secondary = s?.secondaryLine {
                         Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                     } else {

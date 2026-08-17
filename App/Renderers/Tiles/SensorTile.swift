@@ -82,10 +82,15 @@ struct SensorTile: View {
                     }
                 }
                 Spacer(minLength: 2)
-                Text(store.displayName(of: entityId))
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: .gray))
+                // Its own layout, not `TileLabel` — see the comment above — so it repeats
+                // `TileLabel`'s `nameHidden` rule by hand: absent from the layout rather than
+                // blanked, so the reading above gets the reclaimed row rather than a gap under it.
+                if !store.labelHidden(of: entityId) {
+                    Text(store.displayName(of: entityId))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: .gray))
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // **A background, not a `ZStack` member — and the difference is the whole tile.**
@@ -141,7 +146,8 @@ struct SensorTile: View {
             // is; it no longer competes with the number for the eye.
             TileLabel(symbol: IconMap.symbol(domain: .sensor, deviceClass: e?.deviceClass),
                       name: store.displayName(of: entityId),
-                      accent: .gray, unavailable: unavailable, iconSize: 10) {
+                      accent: .gray, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId), iconSize: 10) {
                 // Value and unit are drawn separately because they are not equally interesting:
                 // "21.4" is the reading and "°C" is a label on it. Baseline-aligned so the small
                 // unit sits on the number's line rather than floating beside its middle.

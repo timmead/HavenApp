@@ -273,6 +273,93 @@ extension DashboardConfigWriteBackTests {
         #expect(entity?["state_style"] as? String == "label")
     }
 
+    /// **Toggling "Show name on tile" off round-trips `entities.<id>.label: "hidden"` to the wire.**
+    /// `name: nil` here means "the sheet's name field was untouched" — there is nothing stored to
+    /// clear — the same distinction the doc comment on `applyTileConfig`'s guard draws.
+    @Test func hidingATilesLabelRoundTripsToTheWirePayload() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applyTileConfig("sensor.lr_temp", name: nil,
+                                                  labelHidden: true, on: .overview)
+        #expect(outcome == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
+        #expect((entities?["sensor.lr_temp"] as? [String: Any])?["label"] as? String == "hidden")
+    }
+
+    /// **Toggling back on clears the key — absent on the wire, not a stored `false`.** Booted from a
+    /// document that already holds `label: "hidden"` beside a `name`, the same shape
+    /// `householdDefaultWritesTheKeyAbsentRatherThanNull` books for `subsections.lights.mode`:
+    /// writing `false`/`nil` over an *absent* key is a no-op `HavenConfig.update` would refuse to
+    /// send, leaving nothing on the wire to assert against. The sibling `name` key is what lets this
+    /// assert "the label key is gone" and "the record is not gone" as two different facts — with
+    /// `label` as the entity's only key, no-husk discipline would remove the whole record and this
+    /// test could not tell "key cleared" from "record deleted"; that case belongs to the Core suite's
+    /// own no-husk test (`showingTheLabelAgainClearsTheKeyRatherThanStoringFalse`).
+    ///
+    /// `name: "Lounge"` here is the stored value sent back unchanged — what the sheet's draft,
+    /// seeded from the same stored override, would actually resend. Passing `nil` instead would
+    /// exercise a different bug (clearing a name nobody asked to clear), not the one this test is for.
+    @Test func showingTheLabelAgainClearsTheKeyOnTheWire() async throws {
+        let stored = #"""
+        {"version":4,"payload":{"schema":1,
+           "rooms":{"living":{"temperature":{"entity_id":"sensor.lr_temp","source":"state"}}},
+           "entities":{"sensor.lr_temp":{"name":"Lounge","label":"hidden"}}},
+         "updated":"2026-08-17T00:00:00+00:00","updated_by":"someone"}
+        """#
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get":
+                return #"{"id":\#(id),"type":"result","success":true,"result":\#(stored)}"#
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        let outcome = await store.applyTileConfig("sensor.lr_temp", name: "Lounge",
+                                                  labelHidden: false, on: .overview)
+        #expect(outcome == .written)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").compactMap(decode)
+        #expect(writes.count == before + 1)
+        let entities = (writes.last?["payload"] as? [String: Any])?["entities"] as? [String: Any]
+        let entity = entities?["sensor.lr_temp"] as? [String: Any]
+        #expect(entity?["label"] == nil)
+        #expect(entity?["name"] as? String == "Lounge")
+    }
+
+    /// **Passing no edits writes nothing** — the store-level half of the contract, mirroring
+    /// `passingNoEditsToTheSubsectionSheetsCommitWritesNothing`. `TileConfigView`'s own dirty-check
+    /// (`labelHiddenEdit`, deciding *whether* to pass a value at all) is private and unreached by any
+    /// test, the file's standing precedent note for `stateStyleEdit`/`bindingEdits`/`hasChanges` —
+    /// this pins that the store honours `nil` as "leave it alone" once the sheet has decided, not
+    /// that the sheet always decides correctly.
+    @Test func passingNoTileConfigEditsWritesNothing() async throws {
+        let (store, socket) = try await boot { id, type, _ in
+            switch type {
+            case "havenapp/config/get": return absent(id)
+            case "havenapp/config/set": return ok(id)
+            default: return nil
+            }
+        }
+        let before = await socket.frameTexts(ofType: "havenapp/config/set").count
+
+        #expect(await store.applyTileConfig("sensor.lr_temp", name: nil, on: .overview) == .unchanged)
+
+        let writes = await socket.frameTexts(ofType: "havenapp/config/set").count
+        #expect(writes == before)
+    }
+
     /// **A drag writes only the surface it happened on, and leaves the other surface's list
     /// standing.**
     ///

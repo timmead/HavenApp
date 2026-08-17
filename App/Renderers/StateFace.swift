@@ -20,6 +20,11 @@ struct StateFace: View {
     let accent: Color
     let active: Bool
     let unavailable: Bool
+    /// The household's "Show name on tile" choice for this device. When true the name row is
+    /// **absent from the layout**, not blanked — the two `Spacer`s above and below it then centre
+    /// the state face in the whole tile instead of leaving the bottom fifteen points empty for a
+    /// name that will never be drawn.
+    var nameHidden: Bool = false
 
     /// How tall the name is, for a control drawn *over* this face to stop short of.
     ///
@@ -55,11 +60,13 @@ struct StateFace: View {
                     .foregroundStyle(stateColor)
             }
             Spacer(minLength: 0)
-            Text(name)
-                .font(.system(size: 10.5, weight: .semibold))
-                .lineLimit(1)
-                .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: accent))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !nameHidden {
+                Text(name)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(Emphasis.primary.color(unavailable: unavailable, accent: accent))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

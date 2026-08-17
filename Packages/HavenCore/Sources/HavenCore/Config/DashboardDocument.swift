@@ -35,6 +35,8 @@ public struct DashboardDocument: Sendable, Equatable {
     private static let stateStyleKey = "state_style"
     private static let devicesKey = "devices"
     private static let orderKey = "order"
+    private static let labelKey = "label"
+    private static let labelHiddenValue = "hidden"
 
     public let raw: JSONValue
 
@@ -270,6 +272,49 @@ public struct DashboardDocument: Sendable, Equatable {
             entity[Self.stateStyleKey] = .string(style.rawValue)
         } else {
             entity.removeValue(forKey: Self.stateStyleKey)
+        }
+        if entity.isEmpty {
+            entities.removeValue(forKey: entityId)
+        } else {
+            entities[entityId] = .object(entity)
+        }
+        if entities.isEmpty {
+            root.removeValue(forKey: Self.entitiesKey)
+        } else {
+            root[Self.entitiesKey] = .object(entities)
+        }
+        return DashboardDocument(raw: .object(root))
+    }
+
+    // MARK: - Whether a tile shows its name
+
+    /// Whether one entity's tile hides its name — the `entities.<id>.label: "hidden"` key.
+    ///
+    /// Explicit vocabulary in the style of `state_style`, not an empty-string sentinel through
+    /// `name`: the name and whether it is *shown* are different facts, and a household that hides a
+    /// label has not renamed anything. Absent, or a value this build does not recognise, reads as
+    /// `false` — the same "unreadable is unset, never guessed at" rule `tileStateStyles` applies, so
+    /// a document from a newer build that adds a second label value this one has never heard of does
+    /// not silently hide a name nobody asked to hide.
+    public func labelHidden(_ entityId: String) -> Bool {
+        raw.asObject?[Self.entitiesKey]?.asObject?[entityId]?.asObject?[Self.labelKey]?.asString
+            == Self.labelHiddenValue
+    }
+
+    /// This document with one entity's label visibility set. `false` clears the key back to shown —
+    /// the vocabulary's only state worth storing is "hidden"; shown is the absence of an opinion,
+    /// the same discipline `settingStateStyle`'s `nil`-clears. Merges at every level for the reason
+    /// in the type's doc comment, so an entity's other keys (a name, a state style) survive, and
+    /// showing the name again removes only this key rather than the entity's whole record.
+    public func settingLabelHidden(_ hidden: Bool, entityId: String) -> DashboardDocument {
+        var root = raw.asObject ?? [:]
+        root[Self.schemaKey] = .int(max(declaredSchema, Self.schema))
+        var entities = root[Self.entitiesKey]?.asObject ?? [:]
+        var entity = entities[entityId]?.asObject ?? [:]
+        if hidden {
+            entity[Self.labelKey] = .string(Self.labelHiddenValue)
+        } else {
+            entity.removeValue(forKey: Self.labelKey)
         }
         if entity.isEmpty {
             entities.removeValue(forKey: entityId)

@@ -22,7 +22,8 @@ struct BinarySensorTile: View {
                                                     isActive: active, unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: active, unavailable: unavailable)
+                      accent: accent, active: active, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
         }
         .contentShape(Rectangle()).onTapGesture { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)

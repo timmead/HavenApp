@@ -17,7 +17,8 @@ struct LightTile: View {
             StateFace(state: TileState.light(isOn: on, unavailable: unavailable),
                       style: store.stateStyle(of: entityId),
                       name: store.displayName(of: entityId),
-                      accent: accent, active: on, unavailable: unavailable)
+                      accent: accent, active: on, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
                 .overlay(alignment: .trailing) {
                     // Shown only while the light is on, unchanged: an off light has no brightness,
                     // and `LightModal` makes the same call ("don't show a stale percentage"). So the

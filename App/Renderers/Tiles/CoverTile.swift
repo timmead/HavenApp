@@ -27,7 +27,8 @@ struct CoverTile: View {
                       accent: accent,
                       // The derived state's own tint where there is one — see `DeviceState.isActive`.
                       active: store.deviceState(of: entityId).isActive ?? open,
-                      unavailable: unavailable)
+                      unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
                 .overlay(alignment: .trailing) {
                     // Unlike the light, this is shown at every position including 0 — a closed shade
                     // has a real, meaningful position — so a drag up from the bottom genuinely opens

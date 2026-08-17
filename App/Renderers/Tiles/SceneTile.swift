@@ -17,7 +17,8 @@ struct SceneTile: View {
             TileLabel(symbol: IconMap.symbol(domain: Domain.of(entityId), deviceClass: nil),
                       name: store.displayName(of: entityId),
                       icon: .accent,
-                      accent: accent, unavailable: unavailable)
+                      accent: accent, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
         }
         .contentShape(Rectangle()).onTapGesture { store.run(entityId) }.onLongPressGesture(minimumDuration: 0.35) { navigation.open(entityId, on: surface) }
         .accessibilityElement(children: .combine)

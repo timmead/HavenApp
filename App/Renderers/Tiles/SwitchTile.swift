@@ -30,7 +30,8 @@ struct SwitchTile: View {
                       accent: accent,
                       // The derived state's own tint where there is one — see `DeviceState.isActive`.
                       active: store.deviceState(of: entityId).isActive ?? on,
-                      unavailable: unavailable)
+                      unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId))
         }
         .tileInteraction(entityId,
                          label: AccessibilitySummary.switchOutlet(name, isOn: on)) {

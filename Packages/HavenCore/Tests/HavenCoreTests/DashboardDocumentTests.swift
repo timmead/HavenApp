@@ -348,6 +348,76 @@ private func json(_ text: String) -> JSONValue {
     #expect(doc.tileStateStyles["binary_sensor.front"] == nil)
 }
 
+// MARK: - Whether a tile shows its name
+
+@Test func hidingALabelRoundTrips() {
+    let doc = DashboardDocument().settingLabelHidden(true, entityId: "light.hall")
+    #expect(doc.labelHidden("light.hall"))
+}
+
+/// Shown is the *absence* of the key, not a stored `false` — the same vocabulary `state_style`
+/// uses. Writing `false` back over a hidden label must remove the key outright, and here that key
+/// was the entity record's only content, so the record itself disappears rather than a `"label"`-
+/// less husk surviving for the next read to tolerate for no reason.
+@Test func showingTheLabelAgainClearsTheKeyRatherThanStoringFalse() {
+    let doc = DashboardDocument()
+        .settingLabelHidden(true, entityId: "light.hall")
+        .settingLabelHidden(false, entityId: "light.hall")
+    #expect(!doc.labelHidden("light.hall"))
+    #expect(doc.raw.asObject?["entities"] == nil)
+}
+
+@Test func hidingALabelSurvivesTheOtherDecisionsAboutADevice() {
+    let doc = DashboardDocument()
+        .settingDisplayName("Hallway", for: "light.hall")
+        .settingLabelHidden(true, entityId: "light.hall")
+    #expect(doc.displayNames["light.hall"] == "Hallway")
+    #expect(doc.labelHidden("light.hall"))
+}
+
+/// Beside `aLegacyEntitySizeSurvivesAnUnrelatedMutation` — the same merge discipline, checked
+/// against this mutator instead: a key neither this build's reader nor writer looks at (a legacy
+/// `sizes` subtree) must stand through a label-visibility edit in either direction, and the name
+/// this build *does* know about must stand alongside it.
+@Test func hidingALabelLeavesUnrelatedEntityKeysStanding() {
+    let raw = JSONValue.object([
+        "schema": .int(DashboardDocument.schema),
+        "entities": .object(["sensor.hall": .object([
+            "name": .string("Hallway"),
+            "sizes": .object(["overview": .string("2x1")])])])])
+    let sizes = JSONValue.object(["overview": .string("2x1")])
+
+    let hidden = DashboardDocument(raw: raw).settingLabelHidden(true, entityId: "sensor.hall")
+    #expect(hidden.raw.asObject?["entities"]?.asObject?["sensor.hall"]?.asObject?["sizes"] == sizes)
+    #expect(hidden.displayNames["sensor.hall"] == "Hallway")
+
+    let shown = DashboardDocument(raw: raw).settingLabelHidden(false, entityId: "sensor.hall")
+    #expect(shown.raw.asObject?["entities"]?.asObject?["sensor.hall"]?.asObject?["sizes"] == sizes)
+    // The false-clears assertion `showingTheLabelAgainClearsTheKeyRatherThanStoringFalse` cannot
+    // make: there the record held nothing else, so no-husk discipline removes it outright and
+    // "the key is gone" and "the record is gone" cannot be told apart. Here the record survives
+    // (via `name`/`sizes` above), so this is the one place the key itself is pinned absent on a
+    // record that is still standing.
+    #expect(shown.raw.asObject?["entities"]?.asObject?["sensor.hall"]?.asObject?["label"] == nil)
+}
+
+/// A value a newer build understands and this one does not reads as shown rather than guessed at —
+/// the same rule `anUnreadableStateStyleIsIgnored` holds for `state_style`, and the more important
+/// direction to get right here: a label vocabulary this build cannot parse must never *hide* a
+/// name by accident.
+@Test func anUnreadableLabelValueReadsAsShown() {
+    let doc = DashboardDocument(raw: .object([
+        "schema": .int(DashboardDocument.schema),
+        "entities": .object(["light.hall": .object([
+            "label": .string("interpretive-dance")])])]))
+    #expect(!doc.labelHidden("light.hall"))
+}
+
+/// Absent is shown, the ordinary case with no record at all.
+@Test func anEntityWithNoRecordShowsItsLabel() {
+    #expect(!DashboardDocument().labelHidden("light.hall"))
+}
+
 // MARK: - Per-surface tile order (design decision 9)
 
 /// **Arranging one surface must leave the other's list exactly as it was.**

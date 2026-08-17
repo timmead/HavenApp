@@ -13,7 +13,8 @@ struct GenericTile: View {
         GlassTile(active: false, accent: .gray, unavailable: unavailable) {
             TileLabel(symbol: "square.dashed",
                       name: store.displayName(of: entityId),
-                      accent: .gray, unavailable: unavailable) {
+                      accent: .gray, unavailable: unavailable,
+                      nameHidden: store.labelHidden(of: entityId)) {
                 // Already unconditionally `.secondary`, and already shows the literal raw state
                 // string — for an unavailable entity that string *is* "unavailable", so this is
                 // an honest reading rather than a false claim, and needs no further guard.
