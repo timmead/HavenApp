@@ -132,8 +132,9 @@ struct CameraTile: View {
     /// The name, and nothing else.
     ///
     /// It used to carry the state and the age on a second line beneath. Both left, in opposite
-    /// directions, and the strip shrank from 42pt to one line — the 16pt goes to the picture, and
-    /// the tile's overall 141 is unchanged because it is matched to the 4×2 media tile.
+    /// directions, and the strip shrank from 42pt to one line — the 16pt that freed up goes to the
+    /// picture, not to the tile growing: the cell's overall height is the grid's to give, not this
+    /// tile's to keep score of (see `wide()`'s comment on the same point).
     ///
     /// - The **age** moved onto the still (`ageStamp`), where it is beside the thing it describes
     ///   instead of below it.
@@ -194,13 +195,23 @@ struct CameraTile: View {
     // MARK: - 4×2
 
     private func wide(_ s: CameraState?, name: String) -> some View {
-        let height: CGFloat = 141
-        return still(s)
+        // **No height of its own.** This used to hard-code 141 — "two tile rows plus the grid's
+        // own row spacing" — for the same reason `square()`'s comment above names: 141 assumed
+        // `GlassTile`'s 66pt floor for a two-row cell, and a real two-row cell measures nearer
+        // 173, so this was quietly making a 4×2 camera shorter than the two rows it claims to
+        // occupy — most visibly the moment a Cameras subsection's span flips from 2×2 to 4×2 and
+        // the tile shrinks rather than only widens. `RoomGrid.fallbackRowHeight`'s doc comment
+        // names this exact constant as the trap the grid exists to have escaped; a flexible frame
+        // is what actually escapes it. `RoomGrid.placeSubviews` proposes an exact size for a
+        // multi-row span and `SubsectionView`'s scroll body matches it via `unmeasuredHeight(for:)`
+        // — both an exact height, never unbounded — so filling what is proposed is safe rather
+        // than a route to zero-or-infinite.
+        still(s)
             .frame(maxWidth: .infinity)
-            .frame(height: height)
+            .frame(maxHeight: .infinity)
             .clipped()
             .overlay(alignment: .bottomLeading) { nameScrim(s, name: name) }
-            .frame(height: height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.regularMaterial)
