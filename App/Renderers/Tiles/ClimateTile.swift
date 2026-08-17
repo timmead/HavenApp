@@ -213,6 +213,10 @@ struct ClimateTile: View {
     /// moment it came on, would be worse than none. The name belongs to the 4×2, which is the size
     /// with a line to put it on whatever the unit is doing.
     ///
+    /// On is genuinely tight rather than rhetorically tight: the mode-and-fan tail wants ~95pt and
+    /// this line gives it ~65, so it is *already* the thing truncating (see its own comment below).
+    /// A name would take that width from a slot that has none to give.
+    ///
     /// **It takes its own height, and it must keep taking it.** A 4×1 is a *single-row* span, and
     /// single-row is the one case both hosts size by measurement rather than by proposal:
     /// `RoomGrid.rowHeight` measures `sizeThatFits(.unspecified)` on single-row subviews and hands
@@ -234,10 +238,11 @@ struct ClimateTile: View {
         let on = s?.isOn ?? false
         let accent = HavenColor.climate(s?.function ?? .unspecified)
         let unavailable = e?.isUnavailable ?? false
-        // `.leading` — horizontally leading, vertically centred. One line of content hung from the
-        // top of an 85pt tile floats above 30pt of nothing; `compact` may sit at the top because it
-        // has a second line to put there and this size deliberately does not. `MediaPlayerTile.row`
-        // is that parameter's other caller, for the identical reason.
+        // `.leading` — horizontally leading, vertically centred. This line is ~29pt of content
+        // inside `GlassTile`'s 66pt floor, so hanging it from the top would float it above ~37pt of
+        // nothing; `compact` may sit at the top because it has a second line to put there and this
+        // size deliberately does not. `MediaPlayerTile.row` is that parameter's only other caller,
+        // for the identical reason — see `GlassTile.alignment`, where the two are one rule.
         return GlassTile(active: s?.isConditioning ?? false, accent: accent,
                          unavailable: unavailable, alignment: .leading) {
             HStack(spacing: 10) {
@@ -264,10 +269,25 @@ struct ClimateTile: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(Emphasis.primary.color(unavailable: unavailable,
                                                                 accent: accent))
-                    // The same string `compact` draws, one point larger. 10pt is the size two
-                    // columns forced — that tile's history is a commit dropping the `· fan auto`
-                    // tail for not fitting — and a full row is under no such pressure, so the word
-                    // can be read from the distance the number beside it can.
+                    // **The same string `compact` draws, one point larger — and with less room for
+                    // it, not more.** The intuition that a wider tile is a roomier one is wrong
+                    // here, and it is worth being exact about why: `compact` gives this text a line
+                    // of its own beneath the target number, so it has some 105pt to spend at 10pt,
+                    // while this size shares a single line with the setpoint cluster and the power
+                    // button and has nearer 65pt at 11pt. A full tail wants ~95 — "Fan Only · Fan
+                    // High" is a real reading — so it truncates here and does not on the *narrower*
+                    // tile.
+                    //
+                    // That is the trade, taken deliberately: the row buys legibility, since a size
+                    // meant to be read across a room should not set its only words at the size two
+                    // columns forced, and it pays in length. The tail is what gives, by
+                    // construction — `lineLimit(1)` here meets a temperature that keeps its full
+                    // width through `fixedSize` above, so the number stays unambiguous and the word
+                    // beside it shortens.
+                    //
+                    // It is also the strongest single argument for cutting the mode row rather than
+                    // squeezing it (see this size's doc comment): if a two-word fan mode cannot
+                    // finish on this line, five mode buttons were never going to start.
                     Text(s.map { "\(TileName.words($0.hvacMode))\($0.fanMode.map { " · Fan \(TileName.words($0))" } ?? "")" } ?? "")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)

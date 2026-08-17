@@ -355,7 +355,10 @@ struct TileGallery: View {
     /// and a power button with a long gap between them, and whether that gap reads as deliberate or
     /// as a tile that failed to fill itself is a question for eyes. `unavailable` must be struck and
     /// assert nothing — note it has a cached `temperature` and shows it nowhere, because an
-    /// unreachable thermostat is never `isOn` and so never draws a setpoint at all.
+    /// unreachable thermostat is never `isOn` and so never draws a setpoint at all, while its cached
+    /// *current* reading is shown and struck. That pairing is the thing to look at: one stale number
+    /// suppressed because it is a setting the tile would be inviting you to change, the other kept
+    /// because it is a reading, dimmed to say how much to trust it.
     ///
     /// **Every fixture here declares two `hvac_modes`, and this size draws none of them.** That is
     /// not an omission in the fixtures — see `ClimateTile.row`, which cut the mode row because seven
@@ -716,8 +719,21 @@ struct TileGallery: View {
         set("climate.unknown", "unknown", ["friendly_name": .string("Garage"), "temperature": .double(19),
             "current_temperature": .double(22.1),
                                            "hvac_modes": .array([.string("off"), .string("heat")])])
+        // `current_temperature` alongside the cached target, added when climate gained a 4×1 — the
+        // same reasoning as `climate.sub_b` below, one step further. An unreachable thermostat holds
+        // a stale room reading exactly as it holds a stale target, and the 4×1 makes that reading
+        // its largest text; without the attribute this fixture drew "—" there, which is a *struck
+        // em-dash* and shows nothing about whether the strike reached the tile's most prominent
+        // number. That is precisely the miss this gallery exists to catch — `SensorTile` shipped
+        // with no `foregroundStyle` at all and the sweep did not notice.
+        //
+        // The trade, stated: no climate fixture now exercises a *missing* current reading, so the
+        // "—" path has no picture here. Deliberate — a strike landing on a real number is the more
+        // valuable of the two, and the em-dash branch is a `map` over an optional rather than a
+        // treatment anyone can get subtly wrong.
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
-                                                   "temperature": .double(23)])
+                                                   "temperature": .double(23),
+                                                   "current_temperature": .double(18.7)])
 
         // For the configuration page: two temperature sources called almost the same thing, which
         // is what the entity id on every picker row is for, plus a room with nothing to pick.

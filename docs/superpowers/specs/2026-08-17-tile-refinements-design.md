@@ -59,9 +59,28 @@ phrased as what it does, not as "no label". Semantics:
 `TileSpan.available(for: .climate)` changes from `[2×1, 4×2]` to `[2×1, 4×1, 4×2]`.
 
 - **New 4×1 rendering** (`ClimateTileSize.row`): the current reading and state word on the left
-  (the 2×1's readout, given room to breathe), the target steppers and the mode row inline on the
-  right — the sheet's top strip as a tile. No second row, no history.
+  (the 2×1's readout, given room to breathe), the target steppers on the right. No second row, no
+  history.
 - Defaults untouched (2×1 both surfaces); invariant holds.
+
+**Amended in implementation: the mode row was cut, and this paragraph originally promised it.** As
+approved, the right-hand side was "the target steppers **and the mode row** inline — the sheet's top
+strip as a tile". It does not fit, and the constraint is width rather than the height the task
+guarded against. A four-column tile is ~337pt of content on a 393pt phone (16pt page padding either
+side, less `GlassTile`'s 10/14 insets); the icon, the readout, the ~110pt stepper cluster, the power
+button and their gaps consume ~275 of it. That leaves ~60pt for a row whose buttons each take an
+equal share of what remains — against a single "Heat Cool" label needing ~52pt at 11pt. Two declared
+modes get ~30pt apiece; a heat pump declaring five or seven gets a fifth of that. Dropping the power
+button (the mode row does carry `off`) or dropping the steppers only moves the figure to ~33pt.
+
+So the mode row stays what it already was: **the 4×2's own control**, and one tap away in the sheet
+this tile opens. The 4×1 keeps what it can honestly draw — the room's temperature *and* the target
+both visible, where the 2×1 shows only the target, with the setpoint as a control rather than a
+number with steppers in a far corner.
+
+Worth recording that **no fixture could have caught this**: every climate fixture in `TileGallery`
+declares exactly two `hvac_modes`, so a five-mode unit's squeeze is invisible in the one place that
+draws the tile. It was settled by arithmetic before the view was written.
 
 ## Cross-cutting
 
