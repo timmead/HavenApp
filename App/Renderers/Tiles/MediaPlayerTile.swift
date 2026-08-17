@@ -185,9 +185,12 @@ struct MediaPlayerTile: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { navigation.open(entityId, on: surface) }
-                // Tight spacing because each button already carries a 16pt-larger tap frame than its
-                // glyph: the gaps you see are those frames, and a stated gap on top of them would
-                // push the cluster off the right of the tile rather than space it.
+                // Tight spacing because each button already carries a tap frame larger than its
+                // glyph — `transportButton` by 16pt, `playPauseButton` by 14 — so the gaps you see
+                // are those frames, and a stated gap on top of them would push the cluster off the
+                // right of the tile rather than space it. (The two constants differ by 2pt and
+                // nothing here depends on which is which; what the argument needs is only that
+                // every button in the cluster is already padded well past its glyph.)
                 transportCluster(s, playPause: 22, sides: 15, spacing: 2)
             }
             .frame(maxWidth: .infinity)

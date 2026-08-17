@@ -73,6 +73,13 @@ equal share of what remains — against a single "Heat Cool" label needing ~52pt
 modes get ~30pt apiece; a heat pump declaring five or seven gets a fifth of that. Dropping the power
 button (the mode row does carry `off`) or dropping the steppers only moves the figure to ~33pt.
 
+That ~60pt is **the same slack the mode-and-fan state word is already short of**, not a second
+budget: the tail wants ~95 and truncates as it stands (see `ClimateTile.row`, where both figures are
+derived a few lines apart and would otherwise read as a contradiction). A mode row would therefore
+*displace* the state word rather than sit beside it — so the real choice was never "steppers and
+modes" but "the word that says what the thermostat is doing, or a row of buttons too narrow to
+read". That strengthens the cut rather than qualifying it.
+
 So the mode row stays what it already was: **the 4×2's own control**, and one tap away in the sheet
 this tile opens. The 4×1 keeps what it can honestly draw — the room's temperature *and* the target
 both visible, where the 2×1 shows only the target, with the setpoint as a control rather than a

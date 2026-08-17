@@ -29,9 +29,16 @@ import HavenCore
 /// three when climate grew to eight fixtures at double width and pushed its own `unknown` and
 /// `unavailable` cases off the bottom of page one: a page that overflows has quietly stopped being
 /// a baseline, so the fix is another page rather than a shorter list.
+///
+/// **Eleven tile pages now, and the count is a history rather than a scheme** — the ordinals mean
+/// "the one after the last one that filled up" and nothing else. The last three record the same
+/// rule applying three more times: `.ninth` when media's 4×1 needed five full-width fixtures,
+/// `.tenth` when climate's did, and `.eleventh` when the no-label toggle turned out to have no
+/// picture at either 4×2. The named subsection pages below are the deliberate exception to the
+/// ordinals; see `Page`.
 struct TileGallery: View {
     enum Page {
-        case first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth
+        case first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth, eleventh
         /// The subsection container, whose pages are the only thing in the app that renders it — see
         /// `subsectionPage(_:_:)`.
         ///
@@ -161,6 +168,8 @@ struct TileGallery: View {
                     mediaRow
                 case .tenth:
                     climateRow4x1
+                case .eleventh:
+                    namesHidden
                 case .narrowCompact: subsectionPage(Self.narrowKinds, .compact)
                 case .narrowRegular: subsectionPage(Self.narrowKinds, .regular)
                 case .wideCompact: subsectionPage(Self.wideKinds, .compact)
@@ -404,6 +413,11 @@ struct TileGallery: View {
                 SensorTile(entityId: "sensor.spiky", size: .wide)
                 SensorTile(entityId: "sensor.nohistory", size: .wide)
                 SensorTile(entityId: "sensor.text", size: .wide)
+                // The hidden-label case, fifth and deliberately last: it has history and a numeric
+                // reading, so the *only* difference from `sensor.value` in the first slot is the
+                // missing name row — which is what makes the reclaimed space legible as a change
+                // rather than as one more tile that looks different for several reasons at once.
+                SensorTile(entityId: "sensor.nolabel", size: .wide)
             }
         }
     }
@@ -456,6 +470,59 @@ struct TileGallery: View {
                 ForEach(["full", "paused", "idle", "unavailable", "nolabel"], id: \.self) { name in
                     MediaPlayerTile(entityId: "media_player.\(name)", size: .row)
                 }
+            }
+        }
+    }
+
+    /// **The two-row sizes with their names hidden, plus the funnel nobody had drawn.**
+    ///
+    /// A page for the sizes item 2's toggle reaches that no other page could show it reaching. The
+    /// no-label feature went in through two shared components — `StateFace` (5 sites) and `TileLabel`
+    /// (3: `SceneTile`, `SensorTile.small`, `GenericTile`) — plus seven bespoke sites, and until this
+    /// page every hidden-label fixture in the file landed on `StateFace` or on a bespoke *single-row*
+    /// tile. Half the funnel and both 4×2s had no picture at all.
+    ///
+    /// Its own page because the alternatives overflow: `.seventh` is already three 4×2 climate tiles
+    /// at a real cell height, and `.ninth` is a 2×1 grid plus five full-width rows. Two more 4×2s
+    /// would push either past a screen, which is where this file stops being a baseline.
+    ///
+    /// What each one is for:
+    ///
+    /// - **Climate 4×2** — the only climate rendering that draws a name, so the only one where
+    ///   hiding it changes this domain's tallest tile. Its fixture also declares *five* modes where
+    ///   every other climate fixture declares two, which makes it double as the picture of the mode
+    ///   row at the width it was designed for — the thing `ClimateTile.row` had to cut, visible here
+    ///   for comparison rather than only argued about in a doc comment.
+    /// - **Media 4×2, twice** — `large()` omits its title with `if let` rather than falling back to
+    ///   an empty string, on the stated grounds that a blank line would still claim a line box. That
+    ///   is invisible until something renders with *neither* a name nor a title, which
+    ///   `media_player.nolabel` is (hidden label, no `media_title`). `media_player.full` sits beside
+    ///   it with both, so the line box that is correctly not reserved can be seen not being
+    ///   reserved.
+    /// - **The `TileLabel` funnel** — a scene, the cheapest of its three members to draw, beside a
+    ///   labelled twin.
+    ///
+    /// The camera pair is deliberately *not* here: `camera.sub_b` carries the household choice
+    /// instead, so it draws unlabelled at 2×2 on `.wideCompact` and at 4×2 on `.wideRegular` beside a
+    /// labelled sibling on each — the same coverage inside the container, at no page cost.
+    @ViewBuilder
+    private var namesHidden: some View {
+        section("Climate — 4×2, name hidden (and a unit with five modes)") {
+            ClimateTile(entityId: "climate.nolabel", size: .large)
+                .frame(height: 173)
+        }
+        section("Media — 4×2: no name and no title, against both") {
+            VStack(spacing: 10) {
+                MediaPlayerTile(entityId: "media_player.nolabel", size: .large)
+                    .frame(height: 173)
+                MediaPlayerTile(entityId: "media_player.full", size: .large)
+                    .frame(height: 173)
+            }
+        }
+        section("Scene — the TileLabel funnel, hidden against shown") {
+            LazyVGrid(columns: Self.columns, spacing: 10) {
+                DeviceTileView(entityId: "scene.nolabel", surface: .overview)
+                DeviceTileView(entityId: "scene.idle", surface: .overview)
             }
         }
     }
@@ -734,6 +801,16 @@ struct TileGallery: View {
         set("climate.unavailable", "unavailable", ["friendly_name": .string("Loft"),
                                                    "temperature": .double(23),
                                                    "current_temperature": .double(18.7)])
+        // The 4×2's hidden-label case — climate's only rendering that draws a name. Five declared
+        // modes rather than the two every other climate fixture carries: this is the one page where
+        // a full mode row is drawn at the width it was designed for, so it doubles as the picture of
+        // what `row` could not fit on a single line (see `ClimateTile.row`'s cut).
+        set("climate.nolabel", "heat", ["friendly_name": .string("Annexe"), "temperature": .double(20),
+                                        "current_temperature": .double(19.1),
+                                        "fan_mode": .string("auto"), "hvac_action": .string("heating"),
+                                        "hvac_modes": .array([.string("off"), .string("heat"),
+                                                              .string("cool"), .string("heat_cool"),
+                                                              .string("fan_only")])])
 
         // For the configuration page: two temperature sources called almost the same thing, which
         // is what the entity id on every picker row is for, plus a room with nothing to pick.
@@ -752,6 +829,8 @@ struct TileGallery: View {
 
         set("scene.idle", "scening", ["friendly_name": .string("Movie")])
         set("scene.unavailable", "unavailable", ["friendly_name": .string("Away")])
+        // The `TileLabel` funnel's hidden-label case — see the `settingLabelHidden` block below.
+        set("scene.nolabel", "scening", ["friendly_name": .string("Bedtime")])
 
         set("sensor.spiky", "63", ["friendly_name": .string("Power"),
                                    "device_class": .string("power"),
@@ -762,6 +841,12 @@ struct TileGallery: View {
         // A sensor whose state is a word. It is offered the 2×1 like every other sensor — the option
         // set is a fact about the device type, not about today's reading — and it simply has no line.
         set("sensor.text", "Away", ["friendly_name": .string("Mode")])
+        // The 2×1's hidden-label case. Given history below, so what is being looked at is the name
+        // row's absence against a tile that is otherwise complete — an unseeded sensor would draw
+        // the no-line rendering too and confound the two questions.
+        set("sensor.nolabel", "19.8", ["friendly_name": .string("Cellar"),
+                                       "device_class": .string("temperature"),
+                                       "unit_of_measurement": .string("°C")])
         set("sensor.value", "21.4", ["friendly_name": .string("Temp"),
                                      "device_class": .string("temperature"),
                                      "unit_of_measurement": .string("°C")])
@@ -991,6 +1076,30 @@ struct TileGallery: View {
         // Item 3's own hidden-label case, on page `.ninth`: the same household choice on a media
         // player, where it lands on the title window's name-fallback rather than on a name row.
         document = document.settingLabelHidden(true, entityId: "media_player.nolabel")
+        // **The camera case, and the only one where hiding a name removes a piece of *chrome* rather
+        // than a line of text.** `CameraTile.wide`'s `nameScrim` draws nothing at all — gradient
+        // included — when there is neither a name nor a status to show, which is new conditional
+        // code that had no picture. Seeded on an existing subsection fixture rather than as a new
+        // id, deliberately: `camera.sub_b` is already rendered at 2×2 on `.wideCompact` (where the
+        // caption strip disappears) and at 4×2 on `.wideRegular` (where the scrim does), each time
+        // beside a labelled `sub_a` — so one line covers both renderings, on both pages, with the
+        // comparison built in. It also lands on `.configuring`, which is the picture for
+        // `TilePlaceholder`'s ruling: a camera that draws no caption anywhere still shows its name
+        // in configuration mode, because that mode is how you find the tile to turn it back on.
+        document = document.settingLabelHidden(true, entityId: "camera.sub_b")
+        // The 2×1 sensor's name row, which `SensorTile.wide` omits rather than blanks — the
+        // sparkline and reading get the reclaimed line. Beside three labelled siblings in
+        // `sensorWide`, so the reclaimed space is visible as a difference rather than described.
+        document = document.settingLabelHidden(true, entityId: "sensor.nolabel")
+        // The `TileLabel` funnel's own case. Item 2 extended two shared components — `StateFace`
+        // (5 sites) and `TileLabel` (3: `SceneTile`, `SensorTile.small`, `GenericTile`) — and every
+        // hidden-label fixture in this file until now went through `StateFace` or a bespoke site, so
+        // half the funnel had no picture at all. A scene is the cheapest member to draw.
+        document = document.settingLabelHidden(true, entityId: "scene.nolabel")
+        // Climate's 4×2, on page `.eleventh` — see `namesHidden`. Media needs no second fixture
+        // there: `media_player.nolabel` above is already hidden-label *and* reports no title, which
+        // is exactly the `large()` case worth a picture.
+        document = document.settingLabelHidden(true, entityId: "climate.nolabel")
         // The label-style twins: the same states again, with the household's choice stored, so both
         // styles can be compared rather than described.
         for (id, state, name, dc) in [
@@ -1060,6 +1169,9 @@ struct TileGallery: View {
         // Both subsection sensors have history: a Sensors subsection set to 2×1 is the open question
         // those pages exist to answer, and an unseeded sensor renders the no-line case instead —
         // which would be a different question answered by accident.
+        // The hidden-label 2×1 needs a line for the same reason: without one it would differ from
+        // `sensor.value` in two ways at once, and the name row is the only one being asked about.
+        seed("sensor.nolabel", [19.1, 19.3, 19.6, 19.9, 20.1, 19.8, 19.5, 19.4, 19.6, 19.9, 20.0, 19.8])
         seed("sensor.sub_power", [4, 6, 5, 210, 180, 12, 8, 7, 240, 190, 15, 63])
         seed("sensor.sub_energy", [0.2, 0.6, 1.1, 1.4, 1.9, 2.3, 2.8, 3.1, 3.4, 3.8, 4.0, 4.2])
         // `sensor.nohistory` and `sensor.text` are deliberately left unseeded.
@@ -1117,6 +1229,12 @@ struct TileGallery: View {
 /// states are chosen to show.
 #Preview("Tiles 10 — climate 4×1") {
     TileGallery(page: .tenth)
+}
+
+/// The no-label toggle at the sizes no other page reaches — see `namesHidden`. Its own page because
+/// two 4×2s will not fit under either of the pages that already draw one.
+#Preview("Tiles 11 — names hidden, at 4×2") {
+    TileGallery(page: .eleventh)
 }
 
 /// **The subsection container, which both surfaces now render** — this is where its looks are

@@ -87,6 +87,22 @@ private struct TilePlaceholder: View {
                         .foregroundStyle(accent)
                         .symbolRenderingMode(.hierarchical)
                     Spacer(minLength: 2)
+                    // **`displayName` unconditionally, and `labelHidden` is deliberately not
+                    // consulted here.** This is not a site the no-label feature (tile refinements,
+                    // item 2) missed — it is the one place ruled to stay named, under that feature's
+                    // own findability principle: the control modal, the pickers, the add-tile list
+                    // and the config sheet all keep the name, because a household that hid a label
+                    // has not renamed anything and an unlabelled device must stay findable.
+                    //
+                    // Configure mode is exactly that kind of surface. This placeholder is
+                    // identification chrome — it exists so you can tell which tile you are about to
+                    // open the sheet for — and a grid of nameless rectangles is unusable for the one
+                    // task the mode exists to perform, including the task of turning the label back
+                    // on. The accessibility label above says "…, configure" for the same reason.
+                    //
+                    // Visible in the gallery rather than only asserted: page `.configuring` renders
+                    // the Cameras subsection, whose `camera.sub_b` has its label hidden — so a tile
+                    // that draws no caption in scroll mode still shows its name here.
                     Text(store.displayName(of: entityId))
                         .font(.system(size: 10.5, weight: .semibold))
                         // One line, as every real tile's name is: at a quarter of the screen a

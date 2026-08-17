@@ -187,13 +187,24 @@ struct ClimateTile: View {
     ///
     /// **The mode row was cut, and the constraint that cut it is width, not height.** The design
     /// record (tile refinements, item 4) asks for the steppers *and* the mode row inline — the
-    /// sheet's top strip as a tile — and the arithmetic does not allow it. Four columns is about
-    /// 337pt of content; the icon, the readout, `setpointControl`'s ~110pt cluster, the power button
-    /// and their gaps account for some 280 of that, leaving under 60pt for a row whose buttons each
-    /// take `maxWidth: .infinity`. Two modes would get 30pt apiece against a "Heat Cool" that runs
-    /// nearer 52 at 11pt, and a heat pump declaring five or seven gets a fifth of that. Dropping the
-    /// power button (the mode row does carry `off`) or the steppers only moves the figure to ~33pt.
-    /// It is not a layout to tune: a mode row needs a row, which is what the 4×2 gives it.
+    /// sheet's top strip as a tile — and the arithmetic does not allow it. Counting once, from the
+    /// constants in this file: four columns is ~337pt of content (a 393pt phone, 16pt page padding
+    /// either side, less `GlassTile`'s 10/14 insets). The furniture takes ~206 of it — the icon ~22,
+    /// `setpointControl` 110 (26 + 8 + 42 + 8 + 26), the power button 26, four 10pt gaps and the
+    /// 8pt `Spacer` minimum — and the current temperature another ~68, so **~275 is spoken for and
+    /// ~60 is left**. A mode row's buttons each take `maxWidth: .infinity` of whatever remains: two
+    /// modes get ~30pt apiece against a "Heat Cool" that runs nearer 52 at 11pt, and a heat pump
+    /// declaring five or seven gets a fifth of that. Dropping the power button (the mode row does
+    /// carry `off`) or the steppers only moves the figure to ~33pt. It is not a layout to tune: a
+    /// mode row needs a row, which is what the 4×2 gives it.
+    ///
+    /// **That ~60pt and the ~60pt the mode-and-fan tail is short of are the same slack, described
+    /// twice — not two budgets.** Worth writing down, because the two figures appear a few lines
+    /// apart below and read like a contradiction otherwise. There is one pool of leftover width on
+    /// this line; the tail already wants ~95 of it and truncates. A mode row would therefore
+    /// *displace* the tail rather than sit beside it, so the choice was never "steppers and modes"
+    /// but "the word that says what the thermostat is doing, or a row of buttons too narrow to
+    /// read". That strengthens the cut rather than qualifying it.
     ///
     /// **No fixture would have caught that**, which is why it is settled here rather than at the
     /// canvas. Every climate fixture in `TileGallery` declares exactly two `hvac_modes`, so the
@@ -214,7 +225,7 @@ struct ClimateTile: View {
     /// with a line to put it on whatever the unit is doing.
     ///
     /// On is genuinely tight rather than rhetorically tight: the mode-and-fan tail wants ~95pt and
-    /// this line gives it ~65, so it is *already* the thing truncating (see its own comment below).
+    /// this line gives it ~60, so it is *already* the thing truncating (see its own comment below).
     /// A name would take that width from a slot that has none to give.
     ///
     /// **It takes its own height, and it must keep taking it.** A 4×1 is a *single-row* span, and
@@ -274,7 +285,7 @@ struct ClimateTile: View {
                     // here, and it is worth being exact about why: `compact` gives this text a line
                     // of its own beneath the target number, so it has some 105pt to spend at 10pt,
                     // while this size shares a single line with the setpoint cluster and the power
-                    // button and has nearer 65pt at 11pt. A full tail wants ~95 — "Fan Only · Fan
+                    // button and has nearer 60pt at 11pt. A full tail wants ~95 — "Fan Only · Fan
                     // High" is a real reading — so it truncates here and does not on the *narrower*
                     // tile.
                     //
