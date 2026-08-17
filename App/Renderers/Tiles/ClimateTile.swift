@@ -201,10 +201,17 @@ struct ClimateTile: View {
     /// The modes stay one tap away, in the sheet this tile opens.
     ///
     /// **No name, matching `compact`** — climate's other single-row size — so a household that hides
-    /// a label has nothing to hide here and Task 2's rule is satisfied without a branch. The width
-    /// the cut freed is not spare: the readout's mode-and-fan tail is a real ~95pt string at 11pt
-    /// ("Fan Only · Fan High"), and a name would have to take it from there. The name belongs to the
-    /// 4×2, which is the size with a line to put it on.
+    /// a label has nothing to hide here and Task 2's rule is satisfied without a branch.
+    ///
+    /// **The binding case for that is a thermostat that is `on`**, which is the one to design
+    /// against. On, this line carries a setpoint *and* a full mode-and-fan tail — "Fan Only · Fan
+    /// High" is a real ~95pt string at 11pt — and there is nowhere for a name to go. Off, the
+    /// picture is the opposite and the obvious objection is fair: `setpointControl` disappears, the
+    /// tail shrinks to a single word, and the row is a reading and a power button with a long gap
+    /// between them (see `TileGallery.climateRow4x1`, which pictures exactly that). It is still not
+    /// where a name goes — a name that appeared only while the heating was off, and vanished the
+    /// moment it came on, would be worse than none. The name belongs to the 4×2, which is the size
+    /// with a line to put it on whatever the unit is doing.
     ///
     /// **It takes its own height, and it must keep taking it.** A 4×1 is a *single-row* span, and
     /// single-row is the one case both hosts size by measurement rather than by proposal:
